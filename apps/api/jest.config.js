@@ -3,7 +3,10 @@ module.exports = {
   rootDir: "src",
   testRegex: ".*\\.spec\\.ts$",
   transform: {
-    "^.+\\.(t|j)s$": "ts-jest",
+    // .ts only: compiled .js from workspace deps (e.g. the monitoring adapters,
+    // resolved via symlink outside node_modules) must load as plain CJS, not be
+    // re-fed to ts-jest.
+    "^.+\\.ts$": "ts-jest",
   },
   collectCoverageFrom: ["**/*.(t|j)s"],
   coverageDirectory: "../coverage",
