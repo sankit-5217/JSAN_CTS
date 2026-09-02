@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
+import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { AuthzService } from "../auth/authz.service";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
@@ -55,8 +56,12 @@ export class SitesController {
   // requirement needs another role to create sites.
   @Post()
   @Roles(UserRole.SUPER_ADMIN)
-  create(@Body() dto: CreateSiteDto) {
-    return this.sitesService.create(dto);
+  create(
+    @Body() dto: CreateSiteDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.sitesService.create(dto, { actorId: user.id, correlationId });
   }
 
   @Get(":siteId/contacts")
@@ -66,8 +71,13 @@ export class SitesController {
 
   @Post(":siteId/contacts")
   @Roles(...SITE_MASTER_WRITE_ROLES)
-  createContact(@Param("siteId") siteId: string, @Body() dto: CreateSiteContactDto) {
-    return this.sitesService.createContact(siteId, dto);
+  createContact(
+    @Param("siteId") siteId: string,
+    @Body() dto: CreateSiteContactDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.sitesService.createContact(siteId, dto, { actorId: user.id, correlationId });
   }
 
   @Get(":siteId/support-calendars")
@@ -77,7 +87,15 @@ export class SitesController {
 
   @Post(":siteId/support-calendars")
   @Roles(...SITE_MASTER_WRITE_ROLES)
-  createSupportCalendar(@Param("siteId") siteId: string, @Body() dto: CreateSupportCalendarDto) {
-    return this.sitesService.createSupportCalendar(siteId, dto);
+  createSupportCalendar(
+    @Param("siteId") siteId: string,
+    @Body() dto: CreateSupportCalendarDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.sitesService.createSupportCalendar(siteId, dto, {
+      actorId: user.id,
+      correlationId,
+    });
   }
 }

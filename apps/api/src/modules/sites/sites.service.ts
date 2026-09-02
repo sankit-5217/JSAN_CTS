@@ -1,9 +1,16 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import { CreateSiteContactDto } from "./dto/create-site-contact.dto";
 import { CreateSiteDto } from "./dto/create-site.dto";
 import { CreateSupportCalendarDto } from "./dto/create-support-calendar.dto";
 import { CreateSupportGroupDto } from "./dto/create-support-group.dto";
+
+/** Who's making the change and how to trace it — passed to every mutation. */
+export interface ActorContext {
+  actorId: string;
+  correlationId?: string;
+}
 
 /**
  * Owns: sites, timezone, contacts, support calendars (spec §12).
@@ -11,7 +18,10 @@ import { CreateSupportGroupDto } from "./dto/create-support-group.dto";
  */
 @Injectable()
 export class SitesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   /**
    * `accessibleSiteIds`: `null` (or omitted) = unrestricted (caller has an
@@ -34,14 +44,28 @@ export class SitesService {
     return site;
   }
 
-  create(dto: CreateSiteDto) {
-    return this.prisma.site.create({
-      data: {
-        code: dto.code,
-        name: dto.name,
-        timezone: dto.timezone,
-        is247: dto.is247 ?? false,
-      },
+  create(dto: CreateSiteDto, actor: ActorContext) {
+    return this.prisma.$transaction(async (tx) => {
+      const site = await tx.site.create({
+        data: {
+          code: dto.code,
+          name: dto.name,
+          timezone: dto.timezone,
+          is247: dto.is247 ?? false,
+        },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Site",
+          entityId: site.id,
+          action: "CREATE",
+          after: site,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return site;
     });
   }
 
@@ -52,17 +76,31 @@ export class SitesService {
     return this.prisma.siteContact.findMany({ where: { siteId }, orderBy: { name: "asc" } });
   }
 
-  async createContact(siteId: string, dto: CreateSiteContactDto) {
+  async createContact(siteId: string, dto: CreateSiteContactDto, actor: ActorContext) {
     await this.findOne(siteId);
-    return this.prisma.siteContact.create({
-      data: {
-        siteId,
-        name: dto.name,
-        role: dto.role,
-        email: dto.email,
-        phone: dto.phone,
-        isOnCall: dto.isOnCall ?? false,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const contact = await tx.siteContact.create({
+        data: {
+          siteId,
+          name: dto.name,
+          role: dto.role,
+          email: dto.email,
+          phone: dto.phone,
+          isOnCall: dto.isOnCall ?? false,
+        },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SiteContact",
+          entityId: contact.id,
+          action: "CREATE",
+          after: contact,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return contact;
     });
   }
 
@@ -73,18 +111,32 @@ export class SitesService {
     return this.prisma.supportCalendar.findMany({ where: { siteId }, orderBy: { name: "asc" } });
   }
 
-  async createSupportCalendar(siteId: string, dto: CreateSupportCalendarDto) {
+  async createSupportCalendar(siteId: string, dto: CreateSupportCalendarDto, actor: ActorContext) {
     await this.findOne(siteId);
-    return this.prisma.supportCalendar.create({
-      data: {
-        siteId,
-        name: dto.name,
-        businessStart: dto.businessStart,
-        businessEnd: dto.businessEnd,
-        workdays: dto.workdays,
-        holidays: dto.holidays ?? [],
-        is247: dto.is247 ?? false,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const calendar = await tx.supportCalendar.create({
+        data: {
+          siteId,
+          name: dto.name,
+          businessStart: dto.businessStart,
+          businessEnd: dto.businessEnd,
+          workdays: dto.workdays,
+          holidays: dto.holidays ?? [],
+          is247: dto.is247 ?? false,
+        },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportCalendar",
+          entityId: calendar.id,
+          action: "CREATE",
+          after: calendar,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return calendar;
     });
   }
 
@@ -94,7 +146,21 @@ export class SitesService {
     return this.prisma.supportGroup.findMany({ orderBy: { name: "asc" } });
   }
 
-  createSupportGroup(dto: CreateSupportGroupDto) {
-    return this.prisma.supportGroup.create({ data: { name: dto.name } });
+  createSupportGroup(dto: CreateSupportGroupDto, actor: ActorContext) {
+    return this.prisma.$transaction(async (tx) => {
+      const group = await tx.supportGroup.create({ data: { name: dto.name } });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportGroup",
+          entityId: group.id,
+          action: "CREATE",
+          after: group,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return group;
+    });
   }
 }

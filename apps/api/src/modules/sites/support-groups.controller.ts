@@ -1,9 +1,12 @@
 import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
+import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
+import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
+import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { CreateSupportGroupDto } from "./dto/create-support-group.dto";
 import { SitesService } from "./sites.service";
 
@@ -23,7 +26,11 @@ export class SupportGroupsController {
 
   @Post()
   @Roles(UserRole.SUPER_ADMIN, UserRole.DELIVERY_OPS_MANAGER)
-  create(@Body() dto: CreateSupportGroupDto) {
-    return this.sitesService.createSupportGroup(dto);
+  create(
+    @Body() dto: CreateSupportGroupDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.sitesService.createSupportGroup(dto, { actorId: user.id, correlationId });
   }
 }
