@@ -144,8 +144,26 @@ model User {
   incidentsOwned  Incident[]      @relation("IncidentOwner")
   worklogs        Worklog[]
   auditEvents     AuditEvent[]
+  siteAccess      UserSiteAccess[]
 
   @@map("users")
+}
+
+/// Explicit site-scope grants (spec §4: most roles are "assigned sites"
+/// only; a few roles — see AuthzService.ALL_SITES_ROLES — see every site
+/// without needing rows here).
+model UserSiteAccess {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  siteId    String   @map("site_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@unique([userId, siteId])
+  @@index([siteId])
+  @@map("user_site_access")
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +184,7 @@ model Site {
   supportCalendars     SupportCalendar[]
   configurationItems   ConfigurationItem[]
   incidents            Incident[]
+  userAccess           UserSiteAccess[]
 
   @@map("sites")
 }

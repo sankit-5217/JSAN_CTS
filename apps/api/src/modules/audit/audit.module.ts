@@ -1,14 +1,21 @@
-import { Module } from "@nestjs/common";
+import { Global, Module } from "@nestjs/common";
+import { AuditService } from "./audit.service";
 
 /**
  * Owner: Dev A (Platform & Ticketing Core).
  * Owns: append-only audit records (spec §12).
  * Must not own: business entity edits.
  *
- * TODO (Sprint 2): audit_events table + AuditService consumed by every other
- * module for every state change, assignment, SLA pause, worklog, attachment,
- * vendor update and admin change. Every mutation records actor, timestamp,
- * request/correlation ID and a before/after summary (spec §13.1, §17).
+ * @Global (same pattern as PrismaModule) so every other module can
+ * inject AuditService without importing this module explicitly — every
+ * module needs it, per the "audit everything" rule.
+ *
+ * TODO (later sprint): GET /api/v1/audit read endpoint for authorized
+ * audit search (spec §14.1) — write-side only for now.
  */
-@Module({})
+@Global()
+@Module({
+  providers: [AuditService],
+  exports: [AuditService],
+})
 export class AuditModule {}
