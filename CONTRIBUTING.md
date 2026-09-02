@@ -1,13 +1,27 @@
 # Contributing — two-developer workflow
 
-This is the day-to-day process for **Dev A (@Ankit5217)** and **Dev B (@Anshul1505-he)**, working from two different machines on the same repo in VS Code. It exists to answer one question: _how do we both push code without stepping on each other?_
+This is the day-to-day process for **Dev A (@sankit-5217)** and **Dev B (@Anshul1505-h)**, working from two different machines on the same repo in VS Code. It exists to answer one question: _how do we both push code without stepping on each other?_
 
 Module ownership itself (who builds what) is in `docs/PROJECT_OVERVIEW.md` and `CLAUDE.md`. This doc is about the git/GitHub mechanics that keep that split from colliding.
+
+## 0. Repo ownership transfer (one-time, @sankit-5217 only)
+
+This repo was originally pushed under a different account. If you haven't transferred it to `sankit-5217` yet:
+
+1. On the **old** account, go to the repo → **Settings → General → Danger Zone → Transfer ownership**.
+2. Enter `sankit-5217` as the new owner and confirm (GitHub emails a confirmation link to the `sankit-5217` account — accept it from there).
+3. GitHub keeps a redirect from the old `owner/JSAN_CTS` URL to the new one for a while, so existing clones don't break immediately — but update them anyway:
+   ```bash
+   git remote set-url origin https://github.com/sankit-5217/JSAN_CTS.git
+   git remote -v   # confirm it points at the new owner
+   ```
+   Do this on **both** machines.
+4. Re-check `.github/CODEOWNERS` review requests still work after the transfer — they depend on `sankit-5217` and `Anshul1505-h` both having at least Write access to the repo (§6, step 3 below).
 
 ## 1. One-time setup (each machine)
 
 ```bash
-git clone https://github.com/Ankit5217/JSAN_CTS.git
+git clone https://github.com/sankit-5217/JSAN_CTS.git
 cd JSAN_CTS
 nvm use            # reads .nvmrc — Node 20
 corepack enable     # picks up the pinned pnpm version from package.json
@@ -48,8 +62,8 @@ Open a PR into `main` as soon as there's something reviewable — don't sit on a
 
 | You touch...                                                                                      | Reviewer requested |
 | ------------------------------------------------------------------------------------------------- | ------------------ |
-| `apps/api/src/modules/{auth,sites,cmdb,incidents,worklogs,sla,audit,reports}/`                    | @Ankit5217         |
-| `apps/api/src/modules/{alerts,vendors,changes,knowledge,risks}/`, `apps/worker/`, `integrations/` | @Anshul1505-he     |
+| `apps/api/src/modules/{auth,sites,cmdb,incidents,worklogs,sla,audit,reports}/`                    | @sankit-5217       |
+| `apps/api/src/modules/{alerts,vendors,changes,knowledge,risks}/`, `apps/worker/`, `integrations/` | @Anshul1505-h      |
 | Anything in **Shared files** below                                                                | both               |
 
 Branch protection requires that CODEOWNERS review before merge — see §6.
@@ -80,7 +94,7 @@ This is the single highest-risk shared file, so it gets explicit rules:
 
 ## 6. Branch protection (one-time GitHub setup)
 
-I don't have GitHub API/admin access from this environment to flip these on for you, so do this once as the repo owner (@Ankit5217), takes about 2 minutes:
+I don't have GitHub API/admin access from this environment to flip these on for you, so do this once as the repo owner (@sankit-5217), takes about 2 minutes:
 
 1. **Push `main`** (done — see below) and set it as the default branch: **Settings → General → Default branch → switch to `main`**.
 2. **Settings → Branches → Add branch protection rule**, pattern `main`:
@@ -90,7 +104,7 @@ I don't have GitHub API/admin access from this environment to flip these on for 
    - ✅ Require status checks to pass before merging → select **`build-and-test`** (the CI job in `.github/workflows/ci.yml`; it won't appear in the list until CI has run at least once on `main`, which happens automatically on the first push)
    - ✅ Do not allow bypassing the above settings (include administrators)
    - ❌ Leave "Allow force pushes" and "Allow deletions" unchecked
-3. **Settings → Collaborators → Add people** → add `Anshul1505-he` with **Write** access (CODEOWNERS review requests only work for people with repo access).
+3. **Settings → Collaborators → Add people** → add `Anshul1505-h` with **Write** access (CODEOWNERS review requests only work for people with repo access).
 
 After this, neither of you can push straight to `main`, and every PR needs the right owner's approval + a green CI run before it merges — that's the actual mechanism that stops silent stepping-on-each-other.
 

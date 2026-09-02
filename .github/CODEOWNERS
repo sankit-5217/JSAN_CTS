@@ -6,40 +6,40 @@
 # Last match wins, so keep this ordered general -> specific, exactly as below.
 
 # ---- Default: unowned paths get both reviewers ----
-*                                            @Ankit5217 @Anshul1505-he
+*                                            @sankit-5217 @Anshul1505-h
 
 # ---- Developer A — Platform & Ticketing Core ----
-/apps/api/src/modules/auth/                 @Ankit5217
-/apps/api/src/modules/sites/                @Ankit5217
-/apps/api/src/modules/cmdb/                 @Ankit5217
-/apps/api/src/modules/incidents/            @Ankit5217
-/apps/api/src/modules/worklogs/             @Ankit5217
-/apps/api/src/modules/sla/                  @Ankit5217
-/apps/api/src/modules/audit/                @Ankit5217
-/apps/api/src/modules/reports/              @Ankit5217
-/apps/web/src/pages/CommandCenterPage.tsx   @Ankit5217
-/apps/web/src/pages/SitesPage.tsx           @Ankit5217
+/apps/api/src/modules/auth/                 @sankit-5217
+/apps/api/src/modules/sites/                @sankit-5217
+/apps/api/src/modules/cmdb/                 @sankit-5217
+/apps/api/src/modules/incidents/            @sankit-5217
+/apps/api/src/modules/worklogs/             @sankit-5217
+/apps/api/src/modules/sla/                  @sankit-5217
+/apps/api/src/modules/audit/                @sankit-5217
+/apps/api/src/modules/reports/              @sankit-5217
+/apps/web/src/pages/CommandCenterPage.tsx   @sankit-5217
+/apps/web/src/pages/SitesPage.tsx           @sankit-5217
 
 # ---- Developer B — Integrations, Hardware & Governance ----
-/apps/api/src/modules/alerts/               @Anshul1505-he
-/apps/api/src/modules/vendors/              @Anshul1505-he
-/apps/api/src/modules/changes/              @Anshul1505-he
-/apps/api/src/modules/knowledge/            @Anshul1505-he
-/apps/api/src/modules/risks/                @Anshul1505-he
-/apps/worker/                               @Anshul1505-he
-/integrations/                              @Anshul1505-he
+/apps/api/src/modules/alerts/               @Anshul1505-h
+/apps/api/src/modules/vendors/              @Anshul1505-h
+/apps/api/src/modules/changes/              @Anshul1505-h
+/apps/api/src/modules/knowledge/            @Anshul1505-h
+/apps/api/src/modules/risks/                @Anshul1505-h
+/apps/worker/                               @Anshul1505-h
+/integrations/                              @Anshul1505-h
 
 # ---- Shared / high-conflict-risk — both must review ----
 # Anything here is a coordination point (see CONTRIBUTING.md "Shared files").
-/apps/api/prisma/schema.prisma              @Ankit5217 @Anshul1505-he
-/apps/api/prisma/migrations/                @Ankit5217 @Anshul1505-he
-/apps/api/src/app.module.ts                 @Ankit5217 @Anshul1505-he
-/apps/api/src/common/                       @Ankit5217 @Anshul1505-he
-/packages/shared-types/                     @Ankit5217 @Anshul1505-he
-/package.json                               @Ankit5217 @Anshul1505-he
-/pnpm-workspace.yaml                        @Ankit5217 @Anshul1505-he
-/pnpm-lock.yaml                             @Ankit5217 @Anshul1505-he
-/docker-compose.yml                         @Ankit5217 @Anshul1505-he
-/infra/                                     @Ankit5217 @Anshul1505-he
-/.github/                                   @Ankit5217 @Anshul1505-he
-/docs/adr/                                  @Ankit5217 @Anshul1505-he
+/apps/api/prisma/schema.prisma              @sankit-5217 @Anshul1505-h
+/apps/api/prisma/migrations/                @sankit-5217 @Anshul1505-h
+/apps/api/src/app.module.ts                 @sankit-5217 @Anshul1505-h
+/apps/api/src/common/                       @sankit-5217 @Anshul1505-h
+/packages/shared-types/                     @sankit-5217 @Anshul1505-h
+/package.json                               @sankit-5217 @Anshul1505-h
+/pnpm-workspace.yaml                        @sankit-5217 @Anshul1505-h
+/pnpm-lock.yaml                             @sankit-5217 @Anshul1505-h
+/docker-compose.yml                         @sankit-5217 @Anshul1505-h
+/infra/                                     @sankit-5217 @Anshul1505-h
+/.github/                                   @sankit-5217 @Anshul1505-h
+/docs/adr/                                  @sankit-5217 @Anshul1505-h
