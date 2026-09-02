@@ -1,0 +1,581 @@
+// JSAN CTS Data Center OpsDesk — Prisma schema
+// Baseline tables per build spec §13. UUID primary keys internally,
+// separate human-readable codes for UI. Timestamps stored in UTC.
+// This is the Sprint 1-2 baseline: core identity, sites, CMDB and audit.
+// Incident/SLA/alert/vendor tables are stubbed here for Sprint 4+ owners
+// (see module TODO comments in src/modules/*) to extend without redesigning
+// the schema shape.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  SUPER_ADMIN
+  SERVICE_DESK_NOC
+  SITE_ENGINEER
+  INFRASTRUCTURE_LEAD
+  VENDOR_COORDINATOR
+  DELIVERY_OPS_MANAGER
+  CTS_MANAGER_VIEWER
+  AUDITOR_READ_ONLY
+}
+
+enum ManagedBy {
+  JSAN
+  CTS
+  SHARED
+  VENDOR
+}
+
+enum Criticality {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum CiType {
+  SERVER
+  FIREWALL
+  SWITCH
+  UPS
+  PDU
+  STORAGE
+  SERVICE
+  CIRCUIT
+  VM
+}
+
+enum LifecycleStatus {
+  PLANNED
+  ACTIVE
+  MAINTENANCE
+  RETIRED
+}
+
+enum IncidentStatus {
+  NEW
+  ASSIGNED
+  ACKNOWLEDGED
+  IN_PROGRESS
+  PENDING_VENDOR
+  PENDING_CUSTOMER
+  RESOLVED
+  CLOSED
+  REOPENED
+  CANCELLED
+}
+
+enum Priority {
+  P1
+  P2
+  P3
+  P4
+}
+
+enum AlertSeverity {
+  CRITICAL
+  HIGH
+  WARNING
+  INFO
+}
+
+enum AlertState {
+  OPEN
+  ACKNOWLEDGED
+  RECOVERED
+}
+
+enum WorklogActivityType {
+  REMOTE_WORK
+  ONSITE
+  TRAVEL
+  VENDOR_CALL
+  TESTING
+  WAITING
+  OTHER
+}
+
+enum WarrantyStatus {
+  ACTIVE
+  EXPIRED
+  UNKNOWN
+}
+
+enum DispatchStatus {
+  REQUESTED
+  APPROVED
+  SHIPPED
+  DELIVERED
+  INSTALLED
+  RETURNED
+}
+
+enum ChangeType {
+  STANDARD
+  NORMAL
+  EMERGENCY
+}
+
+// ---------------------------------------------------------------------------
+// Identity & access (owner: Dev A / auth module)
+// ---------------------------------------------------------------------------
+
+model User {
+  id          String   @id @default(uuid())
+  idpSubject  String   @unique @map("idp_subject")
+  email       String   @unique
+  displayName String   @map("display_name")
+  role        UserRole
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  incidentsOwned  Incident[]      @relation("IncidentOwner")
+  worklogs        Worklog[]
+  auditEvents     AuditEvent[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Sites & organization (owner: Dev A / sites module)
+// ---------------------------------------------------------------------------
+
+model Site {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  timezone  String
+  is247     Boolean  @default(false) @map("is_24x7")
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  contacts             SiteContact[]
+  supportCalendars     SupportCalendar[]
+  configurationItems   ConfigurationItem[]
+  incidents            Incident[]
+
+  @@map("sites")
+}
+
+model SiteContact {
+  id        String   @id @default(uuid())
+  siteId    String   @map("site_id")
+  name      String
+  role      String
+  email     String?
+  phone     String?
+  isOnCall  Boolean  @default(false) @map("is_on_call")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@index([siteId])
+  @@map("site_contacts")
+}
+
+model SupportCalendar {
+  id            String   @id @default(uuid())
+  siteId        String   @map("site_id")
+  name          String
+  businessStart String   @map("business_start") // "09:00"
+  businessEnd   String   @map("business_end") // "18:00"
+  workdays      Int[]    @map("workdays") // 0=Sun .. 6=Sat
+  holidays      DateTime[]
+  is247         Boolean  @default(false) @map("is_24x7")
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@index([siteId])
+  @@map("support_calendars")
+}
+
+model SupportGroup {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("support_groups")
+}
+
+// ---------------------------------------------------------------------------
+// CMDB (owner: Dev A / cmdb module) — spec §9
+// ---------------------------------------------------------------------------
+
+model ConfigurationItem {
+  id                 String          @id @default(uuid())
+  ciCode             String          @unique @map("ci_code")
+  siteId             String          @map("site_id")
+  ciType             CiType          @map("ci_type")
+  name               String
+  manufacturer       String?
+  model              String?
+  serialOrServiceTag String?         @map("serial_or_service_tag")
+  managementAddress  String?         @map("management_address") // access-restricted; never exposed to customer viewer
+  ownerGroupId       String?         @map("owner_group_id")
+  managedBy          ManagedBy       @map("managed_by")
+  criticality        Criticality
+  lifecycleStatus    LifecycleStatus @map("lifecycle_status")
+  metadata           Json?           // vendor-specific fields only
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  site         Site           @relation(fields: [siteId], references: [id])
+  incidents    Incident[]
+  alerts       Alert[]
+  healthSnapshot HealthSnapshot?
+  warranties   Warranty[]
+  vendorCases  VendorCase[]
+
+  parentOf CiRelation[] @relation("ParentCi")
+  childOf  CiRelation[] @relation("ChildCi")
+
+  @@index([siteId])
+  @@map("configuration_items")
+}
+
+model CiRelation {
+  id           String @id @default(uuid())
+  parentCiId   String @map("parent_ci_id")
+  childCiId    String @map("child_ci_id")
+  relationType String @map("relation_type") // CONTAINS / DEPENDS_ON / RUNS_ON / USES
+
+  parent ConfigurationItem @relation("ParentCi", fields: [parentCiId], references: [id])
+  child  ConfigurationItem @relation("ChildCi", fields: [childCiId], references: [id])
+
+  @@unique([parentCiId, childCiId, relationType])
+  @@map("ci_relations")
+}
+
+model HealthSnapshot {
+  id           String   @id @default(uuid())
+  ciId         String   @unique @map("ci_id")
+  overallHealth String  @map("overall_health") // HEALTHY / WARNING / CRITICAL / UNKNOWN / MAINTENANCE
+  details      Json?
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  ci ConfigurationItem @relation(fields: [ciId], references: [id])
+
+  @@map("health_snapshots")
+}
+
+model Warranty {
+  id            String         @id @default(uuid())
+  ciId          String         @map("ci_id")
+  status        WarrantyStatus
+  provider      String?
+  expiresAt     DateTime?      @map("expires_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  ci ConfigurationItem @relation(fields: [ciId], references: [id])
+
+  @@index([ciId])
+  @@map("warranties")
+}
+
+// ---------------------------------------------------------------------------
+// Incidents (owner: Dev A / incidents, worklogs, sla modules) — spec §10.3,
+// §10.7, §10.8, §15
+// ---------------------------------------------------------------------------
+
+model Incident {
+  id           String         @id @default(uuid())
+  incidentNo   String         @unique @map("incident_no")
+  siteId       String         @map("site_id")
+  ciId         String?        @map("ci_id")
+  status       IncidentStatus @default(NEW)
+  priority     Priority
+  category     String
+  impact       String
+  urgency      String
+  shortDescription String     @map("short_description")
+  ownerGroupId String?        @map("owner_group_id")
+  ownerUserId  String?        @map("owner_user_id")
+  resolutionCategory String?  @map("resolution_category")
+  rootCauseSummary   String?  @map("root_cause_summary")
+  restoredAt   DateTime?      @map("restored_at")
+  closedAt     DateTime?      @map("closed_at")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  site  Site               @relation(fields: [siteId], references: [id])
+  ci    ConfigurationItem? @relation(fields: [ciId], references: [id])
+  owner User?              @relation("IncidentOwner", fields: [ownerUserId], references: [id])
+
+  events    IncidentEvent[]
+  comments  IncidentComment[]
+  worklogs  Worklog[]
+  slaInstances SlaInstance[]
+  vendorCases  VendorCase[]
+
+  @@index([siteId])
+  @@index([status])
+  @@map("incidents")
+}
+
+/// Append-only incident timeline — never mutate or delete a row.
+model IncidentEvent {
+  id         String   @id @default(uuid())
+  incidentId String   @map("incident_id")
+  eventType  String   @map("event_type") // STATUS_CHANGE / OWNER_CHANGE / SLA_EVENT / COMMENT / WORKLOG / VENDOR_UPDATE / ATTACHMENT
+  actorId    String?  @map("actor_id")
+  payload    Json
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  incident Incident @relation(fields: [incidentId], references: [id])
+
+  @@index([incidentId])
+  @@map("incident_events")
+}
+
+model IncidentComment {
+  id         String   @id @default(uuid())
+  incidentId String   @map("incident_id")
+  authorId   String   @map("author_id")
+  body       String
+  isInternal Boolean  @default(true) @map("is_internal") // internal engineer note vs customer-visible
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  incident Incident @relation(fields: [incidentId], references: [id])
+
+  @@index([incidentId])
+  @@map("incident_comments")
+}
+
+/// Engineer clocking — immutable identity, corrections tracked via edit_reason
+/// + audit_event, never a mutable stopwatch (spec §10.7).
+model Worklog {
+  id              String              @id @default(uuid())
+  incidentId      String              @map("incident_id")
+  engineerId      String              @map("engineer_id")
+  activityType    WorklogActivityType @map("activity_type")
+  startedAt       DateTime            @map("started_at")
+  endedAt         DateTime?           @map("ended_at")
+  durationMinutes Int?                @map("duration_minutes") // derived server-side; never negative
+  billable        Boolean?            @map("billable_or_contract_flag")
+  notes           String?
+  editReason      String?             @map("edit_reason") // mandatory when correcting a submitted worklog
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  incident Incident @relation(fields: [incidentId], references: [id])
+  engineer User     @relation(fields: [engineerId], references: [id])
+
+  @@index([incidentId])
+  @@map("worklogs")
+}
+
+// ---------------------------------------------------------------------------
+// SLA (owner: Dev A / sla module) — spec §10.8
+// ---------------------------------------------------------------------------
+
+model SlaPolicy {
+  id                String   @id @default(uuid())
+  name              String
+  priority          Priority
+  ackTargetMinutes  Int      @map("ack_target_minutes")
+  resolveTargetMinutes Int   @map("resolve_target_minutes")
+  effectiveFrom     DateTime @map("effective_from")
+  effectiveTo       DateTime? @map("effective_to")
+  isActive          Boolean  @default(true) @map("is_active")
+
+  slaInstances SlaInstance[]
+
+  @@map("sla_policies")
+}
+
+model SlaInstance {
+  id            String    @id @default(uuid())
+  incidentId    String    @map("incident_id")
+  slaPolicyId   String    @map("sla_policy_id")
+  ackDueAt      DateTime? @map("ack_due_at")
+  ackedAt       DateTime? @map("acked_at")
+  resolveDueAt  DateTime? @map("resolve_due_at")
+  resolvedAt    DateTime? @map("resolved_at")
+  pausedMinutes Int       @default(0) @map("paused_minutes")
+  breached      Boolean   @default(false)
+
+  incident  Incident  @relation(fields: [incidentId], references: [id])
+  slaPolicy SlaPolicy @relation(fields: [slaPolicyId], references: [id])
+
+  @@index([incidentId])
+  @@map("sla_instances")
+}
+
+// ---------------------------------------------------------------------------
+// Alerts (owner: Dev B / alerts module) — spec §10.9-10.10
+// ---------------------------------------------------------------------------
+
+model Alert {
+  id              String        @id @default(uuid())
+  externalEventId String        @map("external_event_id")
+  source          String        // ZABBIX / PROMETHEUS / REDFISH / SNMP / SYSLOG
+  siteId          String?       @map("site_id")
+  ciId            String?       @map("ci_id")
+  alertType       String        @map("alert_type")
+  severity        AlertSeverity
+  fingerprint     String
+  firstSeenAt     DateTime      @map("first_seen_at")
+  lastSeenAt      DateTime      @map("last_seen_at")
+  state           AlertState    @default(OPEN)
+  rawReference    String?       @map("raw_reference") // pointer, not unlimited raw payload storage
+
+  ci ConfigurationItem? @relation(fields: [ciId], references: [id])
+
+  @@unique([source, externalEventId])
+  @@index([fingerprint])
+  @@map("alerts")
+}
+
+// ---------------------------------------------------------------------------
+// Vendors / RMA (owner: Dev B / vendors module) — spec §10.13
+// ---------------------------------------------------------------------------
+
+model Vendor {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  type      String   // DELL / HPE / ISP / LOCAL
+  createdAt DateTime @default(now()) @map("created_at")
+
+  vendorCases VendorCase[]
+
+  @@map("vendors")
+}
+
+model VendorCase {
+  id                String          @id @default(uuid())
+  vendorCaseNo      String          @map("vendor_case_no")
+  vendorId          String          @map("vendor_id")
+  linkedIncidentId  String?         @map("linked_incident_id")
+  ciId              String?         @map("ci_id")
+  warrantyStatus    WarrantyStatus  @default(UNKNOWN) @map("warranty_status")
+  openedAt          DateTime        @default(now()) @map("opened_at")
+  acknowledgedAt    DateTime?       @map("acknowledged_at")
+  rmaRequired       Boolean         @default(false) @map("rma_required")
+  replacementPart   String?         @map("replacement_part")
+  dispatchStatus    DispatchStatus? @map("dispatch_status")
+  vendorEta         DateTime?       @map("vendor_eta")
+  closedAt          DateTime?       @map("closed_at")
+  outcome           String?
+
+  vendor   Vendor             @relation(fields: [vendorId], references: [id])
+  incident Incident?          @relation(fields: [linkedIncidentId], references: [id])
+  ci       ConfigurationItem? @relation(fields: [ciId], references: [id])
+  updates  VendorCaseUpdate[]
+
+  @@index([linkedIncidentId])
+  @@map("vendor_cases")
+}
+
+/// Append-only vendor update history.
+model VendorCaseUpdate {
+  id           String   @id @default(uuid())
+  vendorCaseId String   @map("vendor_case_id")
+  note         String
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  vendorCase VendorCase @relation(fields: [vendorCaseId], references: [id])
+
+  @@map("vendor_case_updates")
+}
+
+// ---------------------------------------------------------------------------
+// Changes / knowledge / risk (owner: Dev B) — spec §10.5, §10.6, §10.14,
+// §10.15
+// ---------------------------------------------------------------------------
+
+model Change {
+  id               String     @id @default(uuid())
+  changeType       ChangeType @map("change_type")
+  reason           String
+  implementationPlan String   @map("implementation_plan")
+  rollbackPlan     String     @map("rollback_plan")
+  risk             String
+  windowStart      DateTime   @map("window_start")
+  windowEnd        DateTime   @map("window_end")
+  approverId       String?    @map("approver_id")
+  outcome          String?
+  createdAt        DateTime   @default(now()) @map("created_at")
+
+  @@map("changes")
+}
+
+model KnowledgeArticle {
+  id           String   @id @default(uuid())
+  title        String
+  body         String
+  version      Int      @default(1)
+  ownerId      String?  @map("owner_id")
+  approvalState String  @default("DRAFT") @map("approval_state") // DRAFT / APPROVED
+  reviewDueAt  DateTime? @map("review_due_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("knowledge_articles")
+}
+
+model Risk {
+  id          String   @id @default(uuid())
+  siteId      String?  @map("site_id")
+  description String
+  likelihood  Int
+  impact      Int
+  score       Int
+  mitigation  String?
+  ownerId     String?  @map("owner_id")
+  dueDate     DateTime? @map("due_date")
+  status      String   @default("OPEN")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("risks")
+}
+
+// ---------------------------------------------------------------------------
+// Cross-cutting (owner: Dev A / audit module) — spec §17
+// ---------------------------------------------------------------------------
+
+/// Append-only compliance trail for every mutation across all modules.
+model AuditEvent {
+  id            String   @id @default(uuid())
+  actorId       String?  @map("actor_id")
+  entityType    String   @map("entity_type")
+  entityId      String   @map("entity_id")
+  action        String
+  before        Json?
+  after         Json?
+  correlationId String?  @map("correlation_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("audit_events")
+}
+
+model Attachment {
+  id          String   @id @default(uuid())
+  entityType  String   @map("entity_type") // INCIDENT / VENDOR_CASE / CHANGE / ...
+  entityId    String   @map("entity_id")
+  objectKey   String   @map("object_key") // S3/MinIO key
+  contentType String   @map("content_type")
+  sizeBytes   Int      @map("size_bytes")
+  sha256      String
+  uploadedById String? @map("uploaded_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([entityType, entityId])
+  @@map("attachments")
+}

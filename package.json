@@ -1,0 +1,28 @@
+{
+  "name": "cts-dc-opsdesk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JSAN CTS Data Center OpsDesk - ITSM + CMDB + monitoring integration platform",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "pnpm --filter @cts-dc-opsdesk/api start:dev",
+    "dev:web": "pnpm --filter @cts-dc-opsdesk/web dev",
+    "dev:worker": "pnpm --filter @cts-dc-opsdesk/worker start:dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "prisma:generate": "pnpm --filter @cts-dc-opsdesk/api prisma:generate",
+    "prisma:migrate": "pnpm --filter @cts-dc-opsdesk/api prisma:migrate"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

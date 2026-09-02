@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: opsdesk
+          POSTGRES_PASSWORD: opsdesk
+          POSTGRES_DB: opsdesk
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U opsdesk"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://opsdesk:opsdesk@localhost:5432/opsdesk?schema=public
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # 1. Install dependencies with lockfile (spec §20.1)
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 2. Lint and formatting check
+      - name: Lint
+        run: pnpm lint
+
+      # 3. TypeScript type check
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # 5. Database migration validation
+      - name: Generate Prisma client
+        run: pnpm --filter @cts-dc-opsdesk/api prisma:generate
+
+      - name: Validate migrations against a fresh database
+        run: pnpm --filter @cts-dc-opsdesk/api prisma:deploy
+
+      # 4 + 6. Unit / integration tests for critical modules
+      - name: Test
+        run: pnpm test
+
+      # 7-8. Dependency/secret/container scanning and image build are added
+      # once the team reaches Sprint 12 (Hardening) per spec §20.1 / §22.
+
+      # 9. Build artifacts
+      - name: Build
+        run: pnpm build
