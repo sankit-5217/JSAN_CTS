@@ -4,25 +4,23 @@ This is the day-to-day process for **Dev A (@sankit-5217)** and **Dev B (@Anshul
 
 Module ownership itself (who builds what) is in `docs/PROJECT_OVERVIEW.md` and `CLAUDE.md`. This doc is about the git/GitHub mechanics that keep that split from colliding.
 
-## 0. Repo ownership transfer (one-time, @sankit-5217 only)
+## 0. Repo ownership
 
-This repo was originally pushed under a different account. If you haven't transferred it to `sankit-5217` yet:
+Live at `https://github.com/sankit-5217/JSAN_CTS` — the transfer from the original account is complete. If a clone or remote still points at the old URL, GitHub redirects pushes/fetches for a while, but fix it properly rather than relying on that:
 
-1. On the **old** account, go to the repo → **Settings → General → Danger Zone → Transfer ownership**.
-2. Enter `sankit-5217` as the new owner and confirm (GitHub emails a confirmation link to the `sankit-5217` account — accept it from there).
-3. GitHub keeps a redirect from the old `owner/JSAN_CTS` URL to the new one for a while, so existing clones don't break immediately — but update them anyway:
-   ```bash
-   git remote set-url origin https://github.com/sankit-5217/JSAN_CTS.git
-   git remote -v   # confirm it points at the new owner
-   ```
-   Do this on **both** machines.
-4. Re-check `.github/CODEOWNERS` review requests still work after the transfer — they depend on `sankit-5217` and `Anshul1505-h` both having at least Write access to the repo (§6, step 3 below).
+```bash
+git remote set-url origin https://github.com/sankit-5217/JSAN_CTS.git
+git remote -v   # confirm it points at sankit-5217
+```
+
+Do this on **both** machines if either was set up before the transfer.
 
 ## 1. One-time setup (each machine)
 
 ```bash
 git clone https://github.com/sankit-5217/JSAN_CTS.git
 cd JSAN_CTS
+git checkout ankit_workspace   # or anshul-workspace — your branch, see §2
 nvm use            # reads .nvmrc — Node 20
 corepack enable     # picks up the pinned pnpm version from package.json
 pnpm install
@@ -33,28 +31,38 @@ Open the folder in VS Code and accept the "install recommended extensions" promp
 
 ## 2. Branch model
 
-`main` is protected — nobody pushes to it directly, including admins. All work happens on short-lived branches, merged via PR.
+`main` is protected — nobody pushes to it directly, including admins. Instead, each of you has **one persistent personal branch** that you push to freely, and periodically open a PR from into `main`:
 
-**Naming convention** — prefix by who's driving, not by machine:
+| Branch             | Owner                 | Pushes to it |
+| ------------------ | --------------------- | ------------ |
+| `ankit_workspace`  | Dev A (@sankit-5217)  | only Dev A   |
+| `anshul-workspace` | Dev B (@Anshul1505-h) | only Dev B   |
 
-```
-dev-a/<module>-<short-description>     # e.g. dev-a/cmdb-ci-crud
-dev-b/<module>-<short-description>     # e.g. dev-b/alerts-ingest-endpoint
-```
-
-This makes `git branch -a` and the PR list self-explanatory, and means you never both grab the same branch name by accident.
+Because it's your own branch and nobody else commits to it, you can push directly, commit as often as you like (small WIP commits are fine), and never worry about clobbering the other dev's work — that only becomes a shared concern the moment you open a PR into `main`.
 
 **Every work session:**
 
 ```bash
-git checkout main
-git pull origin main
-git checkout -b dev-a/incidents-transition-service   # new branch per story
-# ...work...
-git push -u origin dev-a/incidents-transition-service
+git checkout ankit_workspace         # or anshul-workspace on the other machine
+git push                              # push whatever you finished last session
+# ...work, commit as you go...
+git push
 ```
 
-Open a PR into `main` as soon as there's something reviewable — don't sit on a branch for days, it only makes conflicts bigger later.
+**When there's something reviewable** (a finished module, a working feature — not necessarily "everything I plan to build"), open a PR from your workspace branch into `main`. `.github/CODEOWNERS` still auto-requests the right reviewer based on which files the PR touches. **On GitHub, merge with "Squash and merge"** — this keeps `main`'s history as one clean commit per reviewable chunk, regardless of how messy your workspace branch's commit history is.
+
+**Sync with `main` regularly — don't wait until PR time.** A personal branch that never syncs is exactly how small differences turn into one large painful conflict. After anything merges into `main` (yours or the other dev's), pull it into your workspace branch:
+
+```bash
+git checkout ankit_workspace
+git fetch origin
+git merge origin/main
+git push
+```
+
+Do this **especially** right after a PR touching a "shared file" (§4) merges — you want to be building on the current `schema.prisma`/`app.module.ts`, not a stale copy. Use `merge`, not `rebase`, for this — your workspace branch is pushed and (mentally) "yours," but merge avoids ever needing a force-push, which matters more here since you may be doing this from more than one place over the project's life.
+
+**Trade-off to be aware of:** this is simpler day-to-day than a branch-per-story model, but PRs will tend to be bigger and less atomic. Counter that by opening PRs _often_ — every few days, not once a sprint — rather than waiting for a "complete" module.
 
 ## 3. Who reviews what
 
@@ -108,20 +116,7 @@ I don't have GitHub API/admin access from this environment to flip these on for 
 
 After this, neither of you can push straight to `main`, and every PR needs the right owner's approval + a green CI run before it merges — that's the actual mechanism that stops silent stepping-on-each-other.
 
-## 7. Keeping your branch current
-
-Prefer rebase over merge-from-main, it keeps history linear and makes the eventual PR diff readable:
-
-```bash
-git fetch origin
-git rebase origin/main
-# resolve any conflicts, then:
-git push --force-with-lease
-```
-
-Use `--force-with-lease`, never plain `--force` — it refuses to overwrite work if the remote branch has commits you haven't seen (e.g. a review comment fix pushed from your other machine).
-
-## 8. Commit messages
+## 7. Commit messages
 
 Prefix with the module or area, imperative mood, no period:
 
@@ -133,7 +128,7 @@ schema: add VendorCase.replacementPart field
 
 Keep commits reviewable-sized — a PR that's "one story" is easier for the other dev to review in the 10 minutes they have between their own work than a 40-file drop at the end of the week.
 
-## 9. Daily sync
+## 8. Daily sync
 
 You're on separate machines with no hallway conversation, so replace it deliberately:
 
