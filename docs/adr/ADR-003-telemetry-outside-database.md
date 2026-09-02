@@ -3,16 +3,19 @@
 **Status:** Accepted
 
 ## Context
+
 Rebuilding a metrics/log store duplicates mature tools (Zabbix, Prometheus,
 Grafana, Loki, OpenSearch) and would dominate engineering effort for no
 product benefit (spec §3.2).
 
 ## Decision
+
 OpsDesk stores only normalized alerts (`Alert` model), current health
 state (`HealthSnapshot`), and references/links into the monitoring or log
 platform — never raw metric time series or full log bodies.
 
 ## Consequences
+
 - Postgres stays small and fast for operational queries even at scale.
 - The `alerts` module (Dev B) must design a stable normalized schema that
   works across Zabbix/Prometheus/Redfish/SNMP sources.

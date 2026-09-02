@@ -24,21 +24,21 @@ JSAN CTS Data Center OpsDesk — an ITSM + CMDB + monitoring-integration platfor
 
 Each backend module owns its data and must not own another module's concern:
 
-| Module | Owns | Must not own |
-|---|---|---|
-| auth | identity mapping, sessions/tokens, roles | incident business rules |
-| sites | sites, timezone, contacts, support calendars | hardware telemetry |
-| cmdb | CIs, components, relationships, lifecycle | ticket SLA state |
-| incidents | incident state machine, assignments, comments | vendor polling |
-| sla | policy versions, timers, escalations | UI-only countdowns |
-| alerts | normalized alerts, fingerprints, correlation | raw time-series storage |
-| worklogs | engineer activity and time corrections | authentication |
-| vendors | vendors, warranties, cases, RMA | monitoring metrics |
-| knowledge | SOPs/runbooks, approvals, versions | incident creation |
-| changes | change workflow and maintenance windows | monitoring storage |
-| risks | risk register, BCP records | ticket state |
-| reports | read models/aggregations | source-of-truth mutations |
-| audit | append-only audit records | business entity edits |
+| Module    | Owns                                          | Must not own              |
+| --------- | --------------------------------------------- | ------------------------- |
+| auth      | identity mapping, sessions/tokens, roles      | incident business rules   |
+| sites     | sites, timezone, contacts, support calendars  | hardware telemetry        |
+| cmdb      | CIs, components, relationships, lifecycle     | ticket SLA state          |
+| incidents | incident state machine, assignments, comments | vendor polling            |
+| sla       | policy versions, timers, escalations          | UI-only countdowns        |
+| alerts    | normalized alerts, fingerprints, correlation  | raw time-series storage   |
+| worklogs  | engineer activity and time corrections        | authentication            |
+| vendors   | vendors, warranties, cases, RMA               | monitoring metrics        |
+| knowledge | SOPs/runbooks, approvals, versions            | incident creation         |
+| changes   | change workflow and maintenance windows       | monitoring storage        |
+| risks     | risk register, BCP records                    | ticket state              |
+| reports   | read models/aggregations                      | source-of-truth mutations |
+| audit     | append-only audit records                     | business entity edits     |
 
 ## Definition of done (spec §24)
 
@@ -60,5 +60,6 @@ pnpm prisma:migrate
 ## Task division
 
 Two backend/full-stack tracks (see `docs/PROJECT_OVERVIEW.md` for full rationale):
+
 - **Dev A — Platform & Ticketing Core**: auth, sites, cmdb, incidents, worklogs, sla, audit, Command Center.
 - **Dev B — Integrations, Hardware & Governance**: alerts, monitoring adapters, hardware (Redfish/Dell/HPE), site collector, vendors, changes, problems, knowledge, risks, worker process.

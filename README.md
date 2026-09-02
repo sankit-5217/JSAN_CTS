@@ -6,6 +6,8 @@ This is **not** a ServiceNow clone. We build only the capabilities required for 
 
 Full requirements live in `docs/JSAN_CTS_DC_OpsDesk_Developer_Build_Architecture_v1.0.pdf` (the build specification). Read it before writing code — this scaffold implements Sprint 1 (Foundation) from that document's §23 backlog.
 
+Two developers, working from separate machines? Read **[CONTRIBUTING.md](CONTRIBUTING.md)** for the branch model, code-ownership routing and shared-file protocol that keep you from stepping on each other.
+
 ## Architecture at a glance
 
 - **Backend**: NestJS modular monolith (`apps/api`) — one deployable service, strict module boundaries (see `docs/adr/ADR-001-modular-monolith.md` and §12 of the spec).

@@ -39,9 +39,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Version comes from package.json's "packageManager" field — passing
+      # `version:` here too causes pnpm/action-setup to fail with
+      # ERR_PNPM_BAD_PM_VERSION ("multiple versions of pnpm specified").
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - uses: actions/setup-node@v4
         with:
@@ -52,18 +53,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Must run before lint/typecheck/build: `@prisma/client`'s types
+      # (PrismaClient, model delegates like `prisma.site`) don't exist
+      # until this generates them from schema.prisma.
+      - name: Generate Prisma client
+        run: pnpm --filter @cts-dc-opsdesk/api prisma:generate
+
       # 2. Lint and formatting check
       - name: Lint
         run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
 
       # 3. TypeScript type check
       - name: Typecheck
         run: pnpm typecheck
 
       # 5. Database migration validation
-      - name: Generate Prisma client
-        run: pnpm --filter @cts-dc-opsdesk/api prisma:generate
-
       - name: Validate migrations against a fresh database
         run: pnpm --filter @cts-dc-opsdesk/api prisma:deploy
 
