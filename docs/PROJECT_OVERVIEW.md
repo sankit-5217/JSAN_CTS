@@ -49,16 +49,16 @@ Rather than split by frontend/backend (every feature needs RBAC + audit + tests 
 
 The system-of-record backbone. Everything else depends on this being solid first.
 
-| Module | Responsibility |
-|---|---|
-| `auth` | Identity (OIDC/Keycloak), RBAC, site-scoped permissions |
-| `sites` | Site master, contacts, support calendars *(scaffolded as the reference pattern)* |
-| `cmdb` | Configuration Items, racks, relationships, lifecycle, bulk import |
-| `incidents` | State machine, assignment, comments, transitions |
-| `worklogs` | Engineer clocking, immutable corrections |
-| `sla` | Policy versions, timers, escalation jobs |
-| `audit` | Append-only audit event framework |
-| `reports` | Command Center dashboard, SLA/incident reports |
+| Module      | Responsibility                                                                   |
+| ----------- | -------------------------------------------------------------------------------- |
+| `auth`      | Identity (OIDC/Keycloak), RBAC, site-scoped permissions                          |
+| `sites`     | Site master, contacts, support calendars _(scaffolded as the reference pattern)_ |
+| `cmdb`      | Configuration Items, racks, relationships, lifecycle, bulk import                |
+| `incidents` | State machine, assignment, comments, transitions                                 |
+| `worklogs`  | Engineer clocking, immutable corrections                                         |
+| `sla`       | Policy versions, timers, escalation jobs                                         |
+| `audit`     | Append-only audit event framework                                                |
+| `reports`   | Command Center dashboard, SLA/incident reports                                   |
 
 **Sprint mapping** (spec §23): 1 (shared), 2, 4, 5, 6, 7.
 
@@ -66,17 +66,17 @@ The system-of-record backbone. Everything else depends on this being solid first
 
 Everything that talks to the outside world, plus operational governance.
 
-| Module | Responsibility |
-|---|---|
-| `alerts` | Ingestion endpoint, fingerprinting, dedup, correlation |
-| Monitoring adapters | `integrations/zabbix`, `integrations/prometheus`, maintenance suppression |
-| Hardware integration | `integrations/redfish` baseline + `integrations/dell-ome`, HPE iLO |
-| Site Collector | Outbound-TLS agent design (spec §11) |
-| `vendors` | Vendor cases, warranty, RMA lifecycle |
-| `changes` | Change workflow, problem/RCA records |
-| `knowledge` | SOPs, runbooks, approvals |
-| `risks` | Risk register, BCP |
-| `apps/worker` | Background jobs: SLA timers, alert correlation, notifications, polling |
+| Module               | Responsibility                                                            |
+| -------------------- | ------------------------------------------------------------------------- |
+| `alerts`             | Ingestion endpoint, fingerprinting, dedup, correlation                    |
+| Monitoring adapters  | `integrations/zabbix`, `integrations/prometheus`, maintenance suppression |
+| Hardware integration | `integrations/redfish` baseline + `integrations/dell-ome`, HPE iLO        |
+| Site Collector       | Outbound-TLS agent design (spec §11)                                      |
+| `vendors`            | Vendor cases, warranty, RMA lifecycle                                     |
+| `changes`            | Change workflow, problem/RCA records                                      |
+| `knowledge`          | SOPs, runbooks, approvals                                                 |
+| `risks`              | Risk register, BCP                                                        |
+| `apps/worker`        | Background jobs: SLA timers, alert correlation, notifications, polling    |
 
 **Sprint mapping**: 1 (shared), 3 (CMDB assist), 8, 9, 10, 11.
 

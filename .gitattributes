@@ -1,0 +1,13 @@
+# Normalize line endings in the repo to LF regardless of the machine/OS
+# checking them out. Prevents "whole file changed" diffs when Dev A (Windows)
+# and Dev B commit the same file from different git autocrlf settings.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary

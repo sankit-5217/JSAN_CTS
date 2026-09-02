@@ -30,8 +30,8 @@ export function CommandCenterPage() {
         Command Center
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Site health, SLA-at-risk queues and operational counters will render
-        here (spec §10.1). This is the Sprint 1 foundation placeholder.
+        Site health, SLA-at-risk queues and operational counters will render here (spec §10.1). This
+        is the Sprint 1 foundation placeholder.
       </Typography>
 
       {error && (

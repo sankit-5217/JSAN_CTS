@@ -1,0 +1,45 @@
+# CODEOWNERS — mirrors the module-ownership table in CLAUDE.md / docs/PROJECT_OVERVIEW.md.
+# GitHub auto-requests the matching owner(s) as reviewer on any PR touching these paths.
+# Owners need at least Write access to the repo for this to take effect
+# (Settings → Collaborators).
+#
+# Last match wins, so keep this ordered general -> specific, exactly as below.
+
+# ---- Default: unowned paths get both reviewers ----
+*                                            @Ankit5217 @Anshul1505-he
+
+# ---- Developer A — Platform & Ticketing Core ----
+/apps/api/src/modules/auth/                 @Ankit5217
+/apps/api/src/modules/sites/                @Ankit5217
+/apps/api/src/modules/cmdb/                 @Ankit5217
+/apps/api/src/modules/incidents/            @Ankit5217
+/apps/api/src/modules/worklogs/             @Ankit5217
+/apps/api/src/modules/sla/                  @Ankit5217
+/apps/api/src/modules/audit/                @Ankit5217
+/apps/api/src/modules/reports/              @Ankit5217
+/apps/web/src/pages/CommandCenterPage.tsx   @Ankit5217
+/apps/web/src/pages/SitesPage.tsx           @Ankit5217
+
+# ---- Developer B — Integrations, Hardware & Governance ----
+/apps/api/src/modules/alerts/               @Anshul1505-he
+/apps/api/src/modules/vendors/              @Anshul1505-he
+/apps/api/src/modules/changes/              @Anshul1505-he
+/apps/api/src/modules/knowledge/            @Anshul1505-he
+/apps/api/src/modules/risks/                @Anshul1505-he
+/apps/worker/                               @Anshul1505-he
+/integrations/                              @Anshul1505-he
+
+# ---- Shared / high-conflict-risk — both must review ----
+# Anything here is a coordination point (see CONTRIBUTING.md "Shared files").
+/apps/api/prisma/schema.prisma              @Ankit5217 @Anshul1505-he
+/apps/api/prisma/migrations/                @Ankit5217 @Anshul1505-he
+/apps/api/src/app.module.ts                 @Ankit5217 @Anshul1505-he
+/apps/api/src/common/                       @Ankit5217 @Anshul1505-he
+/packages/shared-types/                     @Ankit5217 @Anshul1505-he
+/package.json                               @Ankit5217 @Anshul1505-he
+/pnpm-workspace.yaml                        @Ankit5217 @Anshul1505-he
+/pnpm-lock.yaml                             @Ankit5217 @Anshul1505-he
+/docker-compose.yml                         @Ankit5217 @Anshul1505-he
+/infra/                                     @Ankit5217 @Anshul1505-he
+/.github/                                   @Ankit5217 @Anshul1505-he
+/docs/adr/                                  @Ankit5217 @Anshul1505-he
