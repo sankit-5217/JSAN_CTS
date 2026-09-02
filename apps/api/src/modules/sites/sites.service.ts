@@ -10,8 +10,17 @@ import { CreateSiteDto } from "./dto/create-site.dto";
 export class SitesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
-    return this.prisma.site.findMany({ orderBy: { code: "asc" } });
+  /**
+   * `accessibleSiteIds`: `null` (or omitted) = unrestricted (caller has an
+   * "all sites" role, see AuthzService); an array = filter to exactly
+   * those sites. List endpoints filter rather than 403 — a scoped user
+   * asking for "all sites" should just see their sites, not get rejected.
+   */
+  findAll(accessibleSiteIds?: string[] | null) {
+    return this.prisma.site.findMany({
+      where: accessibleSiteIds ? { id: { in: accessibleSiteIds } } : undefined,
+      orderBy: { code: "asc" },
+    });
   }
 
   async findOne(id: string) {

@@ -4,8 +4,10 @@ import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
+import { AuthzService } from "./authz.service";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 import { RolesGuard } from "./guards/roles.guard";
+import { SiteScopeGuard } from "./guards/site-scope.guard";
 import { JwtStrategy } from "./strategies/jwt.strategy";
 
 /**
@@ -18,8 +20,10 @@ import { JwtStrategy } from "./strategies/jwt.strategy";
  * are the long-lived piece; only AuthController.devLogin gets replaced
  * when real OIDC/IdP integration lands.
  *
- * Site-scope authorization (AuthzService, SiteScopeGuard) is added in
- * Sprint 2 Step 2, once the UserSiteAccess model exists.
+ * Site-scope authorization: AuthzService resolves which sites a user can
+ * see (spec §4's per-role "Typical Access" column); SiteScopeGuard
+ * enforces it on single-site routes, service-layer filtering handles list
+ * routes.
  */
 @Module({
   imports: [
@@ -33,7 +37,7 @@ import { JwtStrategy } from "./strategies/jwt.strategy";
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard],
-  exports: [AuthService, JwtAuthGuard, RolesGuard],
+  providers: [AuthService, AuthzService, JwtStrategy, JwtAuthGuard, RolesGuard, SiteScopeGuard],
+  exports: [AuthService, AuthzService, JwtAuthGuard, RolesGuard, SiteScopeGuard],
 })
 export class AuthModule {}
