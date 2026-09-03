@@ -1,12 +1,19 @@
-import { PrismaClient, UserRole } from "@prisma/client";
+import {
+  CiType,
+  Criticality,
+  LifecycleStatus,
+  ManagedBy,
+  PrismaClient,
+  UserRole,
+} from "@prisma/client";
 
 const prisma = new PrismaClient();
 
 /**
- * Sprint 2 seed: a couple of sites and a user per role that matters for
- * RBAC/site-scope testing via POST /auth/dev-login. Extend per §31
- * "Recommended First Development Demo" as CMDB/incident modules land —
- * do not seed production data here.
+ * Sites/users seeded in Sprint 2; a rack and a couple of CIs per site
+ * added in Sprint 3 so there's real CMDB data to exercise. Extend per
+ * §31 "Recommended First Development Demo" as incidents/SLA land — do
+ * not seed production data here.
  */
 async function main() {
   const site1 = await prisma.site.upsert({
@@ -80,11 +87,79 @@ async function main() {
     create: { userId: siteEngineer.id, siteId: site2.id },
   });
 
+  const rack1 = await prisma.rack.upsert({
+    where: { siteId_rackCode: { siteId: site1.id, rackCode: "R01" } },
+    update: {},
+    create: { siteId: site1.id, rackCode: "R01", name: "Rack 01", location: "Row 1, Aisle A" },
+  });
+
+  const server1 = await prisma.configurationItem.upsert({
+    where: { ciCode: "SITE01-R01-SRV-001" },
+    update: {},
+    create: {
+      ciCode: "SITE01-R01-SRV-001",
+      siteId: site1.id,
+      rackId: rack1.id,
+      ciType: CiType.SERVER,
+      name: "SITE01 Rack01 Server001",
+      manufacturer: "Dell",
+      model: "PowerEdge R750",
+      managedBy: ManagedBy.JSAN,
+      criticality: Criticality.HIGH,
+      lifecycleStatus: LifecycleStatus.ACTIVE,
+    },
+  });
+
+  const switch1 = await prisma.configurationItem.upsert({
+    where: { ciCode: "SITE01-R01-SW-001" },
+    update: {},
+    create: {
+      ciCode: "SITE01-R01-SW-001",
+      siteId: site1.id,
+      rackId: rack1.id,
+      ciType: CiType.SWITCH,
+      name: "SITE01 Rack01 Switch001",
+      manufacturer: "Cisco",
+      managedBy: ManagedBy.JSAN,
+      criticality: Criticality.CRITICAL,
+      lifecycleStatus: LifecycleStatus.ACTIVE,
+    },
+  });
+
+  await prisma.ciRelation.upsert({
+    where: {
+      parentCiId_childCiId_relationType: {
+        parentCiId: server1.id,
+        childCiId: switch1.id,
+        relationType: "DEPENDS_ON",
+      },
+    },
+    update: {},
+    create: { parentCiId: server1.id, childCiId: switch1.id, relationType: "DEPENDS_ON" },
+  });
+
+  await prisma.configurationItem.upsert({
+    where: { ciCode: "SITE02-SRV-001" },
+    update: {},
+    create: {
+      ciCode: "SITE02-SRV-001",
+      siteId: site2.id,
+      ciType: CiType.SERVER,
+      name: "SITE02 Server001",
+      manufacturer: "HPE",
+      model: "ProLiant DL380",
+      managedBy: ManagedBy.CTS,
+      criticality: Criticality.MEDIUM,
+      lifecycleStatus: LifecycleStatus.ACTIVE,
+    },
+  });
+
   // eslint-disable-next-line no-console
   console.log(
-    `Seeded sites ${site1.code}/${site2.code} and users ${admin.email} (SUPER_ADMIN, all sites), ` +
+    `Seeded sites ${site1.code}/${site2.code}, users ${admin.email} (SUPER_ADMIN, all sites), ` +
       `${serviceDesk.email} (SERVICE_DESK_NOC, ${site1.code} only), ` +
-      `${siteEngineer.email} (SITE_ENGINEER, ${site2.code} only).`,
+      `${siteEngineer.email} (SITE_ENGINEER, ${site2.code} only), ` +
+      `1 rack and 3 CIs (1 CI-to-CI relation).`,
   );
 }
 
