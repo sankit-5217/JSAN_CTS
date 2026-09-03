@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
+import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { CreateVendorCaseDto } from "./dto/create-vendor-case.dto";
@@ -14,6 +15,7 @@ type PrismaMock = {
   };
   vendorCaseUpdate: { create: jest.Mock };
   incident: { findUnique: jest.Mock };
+  user: { findUnique: jest.Mock };
   configurationItem: { findUnique: jest.Mock };
   $transaction: jest.Mock;
 };
@@ -29,6 +31,7 @@ function createPrismaMock(): PrismaMock {
     },
     vendorCaseUpdate: { create: jest.fn() },
     incident: { findUnique: jest.fn() },
+    user: { findUnique: jest.fn() },
     configurationItem: { findUnique: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -48,14 +51,17 @@ const ACTOR = { actorId: "user-1", correlationId: "corr-1" };
 describe("VendorsService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
+  let notifications: { enqueue: jest.Mock };
   let service: VendorsService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
     audit = { record: jest.fn() };
+    notifications = { enqueue: jest.fn() };
     service = new VendorsService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
+      notifications as unknown as NotificationsPublisher,
     );
     prisma.vendor.findUnique.mockResolvedValue({ id: VENDOR_ID, name: "Dell", type: "DELL" });
   });
@@ -197,6 +203,39 @@ describe("VendorsService", () => {
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: "VENDOR_CASE_NOTE_ADDED" }),
         prisma,
+      );
+      // no linked incident -> no notification lookup
+      expect(prisma.incident.findUnique).not.toHaveBeenCalled();
+      expect(notifications.enqueue).not.toHaveBeenCalled();
+    });
+
+    it("notifies the linked incident's owner", async () => {
+      prisma.vendorCase.findUnique.mockResolvedValue({
+        id: "case-1",
+        vendorCaseNo: "SR100",
+        linkedIncidentId: "inc-9",
+        updates: [],
+      });
+      prisma.vendorCaseUpdate.create.mockResolvedValue({ id: "u1", note: "Part shipped" });
+      prisma.incident.findUnique.mockResolvedValue({
+        id: "inc-9",
+        incidentNo: "INC-42",
+        shortDescription: "DB latency",
+        ownerUserId: "owner-3",
+      });
+      prisma.user.findUnique.mockResolvedValue({
+        id: "owner-3",
+        email: "owner@corp.example",
+        displayName: "Riya Owner",
+      });
+
+      await service.addUpdate("case-1", { note: "Part shipped" }, ACTOR);
+
+      expect(notifications.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: expect.objectContaining({ kind: "VENDOR_CASE_UPDATE", note: "Part shipped" }),
+          recipients: { to: [{ name: "Riya Owner", email: "owner@corp.example" }] },
+        }),
       );
     });
 

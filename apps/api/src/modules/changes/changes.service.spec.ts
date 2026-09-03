@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
+import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { ChangesService } from "./changes.service";
@@ -10,6 +11,7 @@ type PrismaMock = {
     findUnique: jest.Mock;
     update: jest.Mock;
   };
+  user: { findUnique: jest.Mock };
   $transaction: jest.Mock;
 };
 
@@ -21,6 +23,7 @@ function createPrismaMock(): PrismaMock {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    user: { findUnique: jest.fn() },
     $transaction: jest.fn(),
   };
   // The callback gets the mock itself standing in as the transaction client.
@@ -66,14 +69,17 @@ const ACTOR = { actorId: "user-1", correlationId: "corr-1" };
 describe("ChangesService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
+  let notifications: { enqueue: jest.Mock };
   let service: ChangesService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
     audit = { record: jest.fn() };
+    notifications = { enqueue: jest.fn() };
     service = new ChangesService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
+      notifications as unknown as NotificationsPublisher,
     );
   });
 
@@ -131,6 +137,11 @@ describe("ChangesService", () => {
     it("sets the approver and returns SCHEDULED for a future window", async () => {
       prisma.change.findUnique.mockResolvedValue(storedChange());
       prisma.change.update.mockResolvedValue(storedChange({ approverId: "user-7" }));
+      prisma.user.findUnique.mockResolvedValue({
+        id: "user-7",
+        email: "lead@corp.example",
+        displayName: "Sam Lead",
+      });
       const result = await service.approve(
         "chg-1",
         {
@@ -145,6 +156,13 @@ describe("ChangesService", () => {
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: "CHANGE_APPROVED" }),
         prisma,
+      );
+      expect(notifications.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: expect.objectContaining({ kind: "CHANGE_APPROVED" }),
+          recipients: { to: [{ name: "Sam Lead", email: "lead@corp.example" }] },
+        }),
+        "CHANGE_APPROVED:chg-1",
       );
       expect(result.status).toBe("SCHEDULED");
     });

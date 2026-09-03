@@ -2,9 +2,11 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
+import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
@@ -46,9 +48,12 @@ function whereForStatus(status: ChangeStatus, now: Date): Prisma.ChangeWhereInpu
  */
 @Injectable()
 export class ChangesService {
+  private readonly logger = new Logger(ChangesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsPublisher,
   ) {}
 
   async create(dto: CreateChangeDto, actor: ActorContext) {
@@ -138,7 +143,52 @@ export class ChangesService {
       );
       return u;
     });
+
+    await this.notifyApprover(
+      id,
+      change.reason,
+      updated.approverId,
+      change.windowStart,
+      change.windowEnd,
+    );
     return this.decorate(updated);
+  }
+
+  /** Best-effort confirmation to the approver that their approval is recorded. */
+  private async notifyApprover(
+    id: string,
+    reason: string,
+    approverId: string | null,
+    windowStart: Date,
+    windowEnd: Date,
+  ): Promise<void> {
+    try {
+      if (!approverId) {
+        return;
+      }
+      const approver = await this.prisma.user.findUnique({ where: { id: approverId } });
+      if (!approver?.email) {
+        return;
+      }
+      const party = { name: approver.displayName, email: approver.email };
+      await this.notifications.enqueue(
+        {
+          event: {
+            kind: "CHANGE_APPROVED",
+            entity: { key: `CHG-${id.slice(0, 8)}`, title: reason.slice(0, 120) },
+            approver: party,
+            windowStart: windowStart.toISOString(),
+            windowEnd: windowEnd.toISOString(),
+          },
+          recipients: { to: [party] },
+        },
+        `CHANGE_APPROVED:${id}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `change ${id} approval notification skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   async update(id: string, dto: UpdateChangeDto, actor: ActorContext) {
