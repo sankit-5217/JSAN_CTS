@@ -1,16 +1,11 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { ActorContext } from "../../common/types/actor-context.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { CreateSiteContactDto } from "./dto/create-site-contact.dto";
 import { CreateSiteDto } from "./dto/create-site.dto";
 import { CreateSupportCalendarDto } from "./dto/create-support-calendar.dto";
 import { CreateSupportGroupDto } from "./dto/create-support-group.dto";
-
-/** Who's making the change and how to trace it — passed to every mutation. */
-export interface ActorContext {
-  actorId: string;
-  correlationId?: string;
-}
 
 /**
  * Owns: sites, timezone, contacts, support calendars (spec §12).
@@ -28,6 +23,11 @@ export class SitesService {
    * "all sites" role, see AuthzService); an array = filter to exactly
    * those sites. List endpoints filter rather than 403 — a scoped user
    * asking for "all sites" should just see their sites, not get rejected.
+   *
+   * TODO: no pagination yet, unlike CmdbService's list endpoint (spec
+   * §14.1 requires it on every list endpoint). Low risk today — the
+   * number of sites in a deployment is small — but retrofit this before
+   * it isn't.
    */
   findAll(accessibleSiteIds?: string[] | null) {
     return this.prisma.site.findMany({
