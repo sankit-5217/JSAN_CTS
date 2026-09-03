@@ -28,6 +28,7 @@
     "@cts-dc-opsdesk/prometheus-adapter": "workspace:*",
     "@cts-dc-opsdesk/shared-types": "workspace:*",
     "@cts-dc-opsdesk/snmp-adapter": "workspace:*",
+    "@cts-dc-opsdesk/warranty-adapter": "workspace:*",
     "@cts-dc-opsdesk/zabbix-adapter": "workspace:*",
     "@nestjs/common": "^10.4.6",
     "@nestjs/config": "^3.3.0",
