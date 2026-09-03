@@ -49,6 +49,30 @@ describe("loadConfig", () => {
     expect(() => loadConfig(raw({ endpoints: [] }))).toThrow(CollectorConfigError);
   });
 
+  it("requires deviceRef on a DELL_OME endpoint", () => {
+    const bad = raw({
+      endpoints: [
+        { ciCode: "OME-CI", kind: "DELL_OME", address: "https://ome.local", credentialRef: "ome" },
+      ],
+    });
+    expect(() => loadConfig(bad)).toThrow(CollectorConfigError);
+
+    const ok = loadConfig(
+      raw({
+        endpoints: [
+          {
+            ciCode: "OME-CI",
+            kind: "DELL_OME",
+            address: "https://ome.local",
+            credentialRef: "ome",
+            deviceRef: "SVCTAG1",
+          },
+        ],
+      }),
+    );
+    expect(ok.endpoints[0].deviceRef).toBe("SVCTAG1");
+  });
+
   it("rejects an unknown endpoint kind", () => {
     const bad = raw({
       endpoints: [{ ciCode: "C", kind: "IPMI", address: "https://x", credentialRef: "r" }],

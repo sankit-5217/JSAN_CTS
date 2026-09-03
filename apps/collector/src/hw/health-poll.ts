@@ -1,3 +1,4 @@
+import { normalizeDellOmeDevice } from "@cts-dc-opsdesk/dell-ome-adapter";
 import { normalizeHpeIloSystem } from "@cts-dc-opsdesk/hpe-ilo-adapter";
 import { normalizeRedfishSystem } from "@cts-dc-opsdesk/redfish-adapter";
 import type { HealthSnapshotPayload } from "@cts-dc-opsdesk/shared-types";
@@ -5,6 +6,7 @@ import type { EndpointTarget } from "../config";
 import type { BufferedItem } from "../delivery-buffer";
 import type { Credential, CredentialResolver } from "./credentials";
 import type { MgmtHttp } from "./mgmt-http";
+import { fetchOmeDeviceBundle } from "./ome-fetcher";
 import { fetchRedfishBundle } from "./redfish-fetcher";
 
 export interface HealthPollDeps {
@@ -13,7 +15,6 @@ export interface HealthPollDeps {
   makeHttp: (baseUrl: string, credential: Credential) => MgmtHttp;
   enqueue: (item: Omit<BufferedItem, "queuedAt">) => void;
   now?: () => string;
-  logger?: Pick<Console, "warn">;
 }
 
 export interface HealthPollResult {
@@ -31,27 +32,32 @@ export interface HealthPollResult {
 export async function runHealthPoll(deps: HealthPollDeps): Promise<HealthPollResult> {
   const { endpoints, resolver, makeHttp, enqueue } = deps;
   const now = deps.now ?? (() => new Date().toISOString());
-  const log = deps.logger ?? console;
   const failed: HealthPollResult["failed"] = [];
   let enqueued = 0;
 
   for (const ep of endpoints) {
     try {
-      if (ep.kind === "DELL_OME") {
-        // OME's REST shape (/api/DeviceService/Devices...) differs — its fetcher
-        // lands with the dell-ome-adapter wiring.
-        log.warn(`[collector] OME fetcher not implemented — skipping ${ep.ciCode}`);
-        continue;
-      }
       const credential = resolver.resolve(ep.credentialRef);
       if (!credential) {
         failed.push({ ciCode: ep.ciCode, reason: `no credential for "${ep.credentialRef}"` });
         continue;
       }
       const http = makeHttp(ep.address, credential);
-      const bundle = await fetchRedfishBundle(http, ep.ciCode, now);
-      const snapshot: HealthSnapshotPayload =
-        ep.kind === "HPE_ILO" ? normalizeHpeIloSystem(bundle) : normalizeRedfishSystem(bundle);
+
+      let snapshot: HealthSnapshotPayload;
+      if (ep.kind === "DELL_OME") {
+        if (!ep.deviceRef) {
+          failed.push({ ciCode: ep.ciCode, reason: "DELL_OME endpoint has no deviceRef" });
+          continue;
+        }
+        snapshot = normalizeDellOmeDevice(
+          await fetchOmeDeviceBundle(http, ep.ciCode, ep.deviceRef, now),
+        );
+      } else {
+        const bundle = await fetchRedfishBundle(http, ep.ciCode, now);
+        snapshot =
+          ep.kind === "HPE_ILO" ? normalizeHpeIloSystem(bundle) : normalizeRedfishSystem(bundle);
+      }
 
       enqueue({
         key: `health:${ep.ciCode}:${snapshot.observedAt}`,

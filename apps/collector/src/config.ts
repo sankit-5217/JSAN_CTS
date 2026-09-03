@@ -11,10 +11,19 @@ export interface EndpointTarget {
   /** OpsDesk CI code this endpoint maps to. */
   ciCode: string;
   kind: EndpointKind;
-  /** Base URL of the management endpoint, e.g. "https://10.20.1.40". LAN only. */
+  /**
+   * REDFISH / HPE_ILO: base URL of the BMC, e.g. "https://10.20.1.40".
+   * DELL_OME: base URL of the OME appliance (one appliance serves many devices).
+   * LAN only.
+   */
   address: string;
   /** Name of the credential in the local secret store (not the secret itself). */
   credentialRef: string;
+  /**
+   * DELL_OME only, required: the managed device's Service Tag — OME manages a
+   * fleet, so one CI is one device on the appliance. Ignored for REDFISH/HPE_ILO.
+   */
+  deviceRef?: string;
 }
 
 /** An SNMP trap source — maps a device's source IP to its OpsDesk CI code. */
@@ -113,12 +122,18 @@ export function loadConfig(raw: unknown): CollectorConfig {
         `endpoints[${i}].kind`,
       );
     }
-    return {
+    const target: EndpointTarget = {
       ciCode: str(er, "ciCode"),
       kind,
       address: str(er, "address"),
       credentialRef: str(er, "credentialRef"),
     };
+    if (kind === "DELL_OME") {
+      target.deviceRef = str(er, "deviceRef");
+    } else if (typeof er.deviceRef === "string") {
+      target.deviceRef = er.deviceRef.trim();
+    }
+    return target;
   });
 
   const snmpSourcesRaw = r.snmpSources ?? [];

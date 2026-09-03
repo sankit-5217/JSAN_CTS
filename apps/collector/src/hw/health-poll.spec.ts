@@ -21,6 +21,23 @@ function httpFor(system: unknown): MgmtHttp {
   } as unknown as MgmtHttp;
 }
 
+function httpForOme(): MgmtHttp {
+  return {
+    get: async (path: string) => {
+      if (path.startsWith("/api/DeviceService/Devices?$filter")) {
+        return {
+          value: [{ Id: 10001, DeviceServiceTag: "SVCTAG1", Status: 1000, PowerState: 17 }],
+        };
+      }
+      throw new Error(`unexpected OME GET ${path}`);
+    },
+    tryGet: async (path: string) =>
+      path.endsWith("/SubSystemHealth")
+        ? { value: [{ SubSystems: [{ Name: "Storage", Status: 1000 }] }] }
+        : { value: [] },
+  } as unknown as MgmtHttp;
+}
+
 const resolver: CredentialResolver = {
   resolve: (ref) => (ref === "missing" ? undefined : { username: "u", password: "p" }),
 };
@@ -74,13 +91,30 @@ describe("runHealthPoll", () => {
     expect(enqueued[0].payload).toMatchObject({ source: "HPE_ILO" });
   });
 
-  it("skips DELL_OME (fetcher pending) and isolates per-endpoint failures", async () => {
+  it("fetches a DELL_OME device by Service Tag and normalizes via the OME adapter", async () => {
     const { enqueued, enqueue } = collector();
-    const warn = jest.fn();
+    const result = await runHealthPoll({
+      endpoints: [endpoint({ ciCode: "OME-CI", kind: "DELL_OME", deviceRef: "SVCTAG1" })],
+      resolver,
+      makeHttp: () => httpForOme(),
+      enqueue,
+      now: () => "T",
+    });
+
+    expect(result).toEqual({ polled: 1, enqueued: 1, failed: [] });
+    expect(enqueued[0].payload).toMatchObject({
+      ciCode: "OME-CI",
+      source: "DELL_OME",
+      powerState: "ON",
+    });
+  });
+
+  it("isolates per-endpoint failures — bad credential, unreachable host, OME with no deviceRef", async () => {
+    const { enqueued, enqueue } = collector();
     const result = await runHealthPoll({
       endpoints: [
-        endpoint({ ciCode: "OME-CI", kind: "DELL_OME" }),
         endpoint({ ciCode: "NO-CRED", credentialRef: "missing" }),
+        endpoint({ ciCode: "NO-REF", kind: "DELL_OME" }),
         endpoint({ ciCode: "BOOM", address: "https://boom" }),
       ],
       resolver,
@@ -96,13 +130,12 @@ describe("runHealthPoll", () => {
         return httpFor(HEALTHY_SYSTEM);
       },
       enqueue,
-      logger: { warn },
     });
 
     expect(result.enqueued).toBe(0);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("OME fetcher not implemented"));
     expect(result.failed).toEqual([
       { ciCode: "NO-CRED", reason: 'no credential for "missing"' },
+      { ciCode: "NO-REF", reason: "DELL_OME endpoint has no deviceRef" },
       { ciCode: "BOOM", reason: "ECONNREFUSED" },
     ]);
     expect(enqueued).toHaveLength(0);
