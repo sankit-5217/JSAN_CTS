@@ -183,6 +183,38 @@ describe("AlertsService", () => {
     expect(result.recentOccurrences).toBe(5);
   });
 
+  it("flags suppressedByMaintenance when the linked CI is in MAINTENANCE lifecycle", async () => {
+    prisma.configurationItem.findUnique.mockResolvedValue({
+      id: "ci-1",
+      ciCode: "SITE01-R01-SRV-038",
+      siteId: "site-1",
+      lifecycleStatus: "MAINTENANCE",
+    });
+    prisma.alert.findUnique.mockResolvedValue(null);
+    prisma.alert.create.mockResolvedValue({ id: "alert-4", state: "OPEN" });
+
+    const result = await service.ingest(baseDto());
+
+    expect(result.suppressedByMaintenance).toBe(true);
+    // the alert is still recorded, just annotated
+    expect(prisma.alert.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not flag suppression for an ACTIVE CI", async () => {
+    prisma.configurationItem.findUnique.mockResolvedValue({
+      id: "ci-1",
+      ciCode: "SITE01-R01-SRV-038",
+      siteId: "site-1",
+      lifecycleStatus: "ACTIVE",
+    });
+    prisma.alert.findUnique.mockResolvedValue(null);
+    prisma.alert.create.mockResolvedValue({ id: "alert-5", state: "OPEN" });
+
+    const result = await service.ingest(baseDto());
+
+    expect(result.suppressedByMaintenance).toBe(false);
+  });
+
   it("throws NotFoundException for an unknown alert id", async () => {
     prisma.alert.findUnique.mockResolvedValue(null);
     await expect(service.findOne("missing")).rejects.toBeInstanceOf(NotFoundException);

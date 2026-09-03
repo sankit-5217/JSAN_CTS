@@ -25,6 +25,12 @@ export interface AlertIngestResult {
   /** same fingerprint seen at least `flappingThreshold` times in the recent window. */
   flapping: boolean;
   recentOccurrences: number;
+  /**
+   * The linked CI is in MAINTENANCE lifecycle — the alert is still recorded, but
+   * downstream correlation should annotate rather than raise an incident. Broader
+   * change-window suppression is layered on by the worker via the changes module.
+   */
+  suppressedByMaintenance: boolean;
 }
 
 /** One alert rejected during source-specific normalization. */
@@ -154,6 +160,7 @@ export class AlertsService {
       ciResolved: Boolean(ci),
       flapping: recentOccurrences >= this.flappingThreshold,
       recentOccurrences,
+      suppressedByMaintenance: ci?.lifecycleStatus === "MAINTENANCE",
     };
   }
 

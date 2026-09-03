@@ -14,9 +14,11 @@ import { AlertsService } from "./alerts.service";
  * Sprint 9 (done): POST /alerts/sources/zabbix and /alerts/sources/alertmanager —
  * normalize native webhook payloads via @cts-dc-opsdesk/{zabbix,prometheus}-adapter
  * then funnel into ingest(); per-event failures reported, never fatal.
- * TODO (Sprint 8-9 cont.): correlate to OPEN incidents + maintenance-window
- * suppression once the incidents (Dev A) and changes modules land; emit audit
- * events via the audit module; move flapping thresholds into an alert_rules
+ * Sprint 11 (partial): ingest() flags suppressedByMaintenance when the linked CI
+ * is in MAINTENANCE lifecycle. Broader change-window suppression (changes module,
+ * GET /changes/maintenance/active) is layered on by the worker at correlation time.
+ * TODO: correlate to OPEN incidents once the incidents module (Dev A) lands; emit
+ * audit events via the audit module; move flapping thresholds into an alert_rules
  * config table (config-over-hardcode).
  */
 @Module({
