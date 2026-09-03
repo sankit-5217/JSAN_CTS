@@ -59,7 +59,15 @@ export type NotificationEvent =
       windowEnd: string;
     }
   | { kind: "ALERT_RAISED"; entity: EntityRef; alertType: string; state: string }
-  | { kind: "VENDOR_CASE_UPDATE"; entity: EntityRef; note: string; author?: Party };
+  | { kind: "VENDOR_CASE_UPDATE"; entity: EntityRef; note: string; author?: Party }
+  | {
+      kind: "RISK_STATUS_CHANGED";
+      entity: EntityRef;
+      from: string;
+      to: string;
+      actor?: Party;
+      note?: string;
+    };
 
 export type NotificationKind = NotificationEvent["kind"];
 

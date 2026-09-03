@@ -2,9 +2,11 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
+import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
@@ -28,9 +30,12 @@ import { UpdateRiskDto } from "./dto/update-risk.dto";
  */
 @Injectable()
 export class RisksService {
+  private readonly logger = new Logger(RisksService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsPublisher,
   ) {}
 
   async create(dto: CreateRiskDto, actor: ActorContext) {
@@ -189,7 +194,46 @@ export class RisksService {
       return u;
     });
 
+    await this.notifyOwnerOfStatusChange(updated, from, to);
     return this.decorate(updated);
+  }
+
+  /** Best-effort: tell the risk owner their risk moved. Swallows every failure —
+   *  the mutation already committed, notification must not block or fail it. */
+  private async notifyOwnerOfStatusChange(
+    risk: { id: string; ownerId: string | null; description: string; mitigation: string | null },
+    from: RiskStatus,
+    to: RiskStatus,
+  ): Promise<void> {
+    try {
+      if (!risk.ownerId) {
+        return;
+      }
+      const owner = await this.prisma.user.findUnique({ where: { id: risk.ownerId } });
+      if (!owner?.email) {
+        return;
+      }
+      await this.notifications.enqueue(
+        {
+          event: {
+            kind: "RISK_STATUS_CHANGED",
+            entity: {
+              key: `RISK-${risk.id.slice(0, 8)}`,
+              title: risk.description.slice(0, 120),
+            },
+            from,
+            to,
+            ...(risk.mitigation ? { note: risk.mitigation } : {}),
+          },
+          recipients: { to: [{ name: owner.displayName, email: owner.email }] },
+        },
+        `RISK_STATUS_CHANGED:${risk.id}:${to}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `risk ${risk.id} owner notification skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private async requireRisk(id: string) {

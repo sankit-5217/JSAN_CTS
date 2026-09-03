@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { NotificationsModule } from "./common/notifications/notifications.module";
 import { PrismaModule } from "./common/prisma/prisma.module";
 import { HealthModule } from "./modules/health/health.module";
 import { AuthModule } from "./modules/auth/auth.module";
@@ -21,6 +22,7 @@ import { AuditModule } from "./modules/audit/audit.module";
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    NotificationsModule,
     HealthModule,
     // --- Dev A: Platform & Ticketing Core ---
     AuthModule,

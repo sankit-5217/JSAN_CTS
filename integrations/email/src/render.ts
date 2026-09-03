@@ -116,6 +116,15 @@ function renderBody(event: NotificationEvent): Rendered {
           event.note,
         ],
       };
+    case "RISK_STATUS_CHANGED":
+      return {
+        phrase: `${event.from} → ${event.to}`,
+        lines: [
+          `${event.entity.key} moved from ${event.from} to ${event.to}.`,
+          event.actor ? `Changed by ${addr(event.actor)}.` : "",
+          event.note ? `Mitigation / rationale: ${event.note}` : "",
+        ],
+      };
     default: {
       const exhaustive: never = event;
       throw new EmailRenderError(

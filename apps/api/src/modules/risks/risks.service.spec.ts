@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
+import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { RisksService } from "./risks.service";
@@ -10,6 +11,7 @@ type PrismaMock = {
     findUnique: jest.Mock;
     update: jest.Mock;
   };
+  user: { findUnique: jest.Mock };
   $transaction: jest.Mock;
 };
 
@@ -21,6 +23,7 @@ function createPrismaMock(): PrismaMock {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    user: { findUnique: jest.fn() },
     $transaction: jest.fn(),
   };
   // The callback gets the mock itself standing in as the transaction client.
@@ -50,14 +53,17 @@ const ACTOR = { actorId: "user-1", correlationId: "corr-1" };
 describe("RisksService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
+  let notifications: { enqueue: jest.Mock };
   let service: RisksService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
     audit = { record: jest.fn() };
+    notifications = { enqueue: jest.fn() };
     service = new RisksService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
+      notifications as unknown as NotificationsPublisher,
     );
   });
 
@@ -185,6 +191,42 @@ describe("RisksService", () => {
       prisma.risk.update.mockResolvedValue(storedRisk({ status: "CLOSED" }));
       const result = await service.changeStatus("risk-1", { status: "CLOSED" }, ACTOR);
       expect(result.status).toBe("CLOSED");
+    });
+
+    it("enqueues an owner notification with the risk owner's email", async () => {
+      prisma.risk.findUnique.mockResolvedValue(
+        storedRisk({ status: "OPEN", mitigation: "residual owned", ownerId: "owner-9" }),
+      );
+      prisma.risk.update.mockResolvedValue(
+        storedRisk({ status: "ACCEPTED", mitigation: "residual owned", ownerId: "owner-9" }),
+      );
+      prisma.user.findUnique.mockResolvedValue({
+        id: "owner-9",
+        email: "owner@corp.example",
+        displayName: "Riya Owner",
+      });
+
+      await service.changeStatus("risk-1", { status: "ACCEPTED" }, ACTOR);
+
+      expect(notifications.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: expect.objectContaining({
+            kind: "RISK_STATUS_CHANGED",
+            from: "OPEN",
+            to: "ACCEPTED",
+          }),
+          recipients: { to: [{ name: "Riya Owner", email: "owner@corp.example" }] },
+        }),
+        "RISK_STATUS_CHANGED:risk-1:ACCEPTED",
+      );
+    });
+
+    it("does not notify when the risk has no owner", async () => {
+      prisma.risk.findUnique.mockResolvedValue(storedRisk({ status: "OPEN", mitigation: null }));
+      prisma.risk.update.mockResolvedValue(storedRisk({ status: "CLOSED" }));
+      await service.changeStatus("risk-1", { status: "CLOSED" }, ACTOR);
+      expect(notifications.enqueue).not.toHaveBeenCalled();
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
     });
 
     it("reuses mitigation already on the record when moving to MITIGATING", async () => {

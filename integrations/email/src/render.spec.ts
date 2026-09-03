@@ -98,6 +98,25 @@ describe("renderNotification", () => {
     expect(mail.text).toContain("Vendor shipped the replacement, tracking 1Z999.");
   });
 
+  it("renders a risk status change with the mitigation note", () => {
+    const mail = renderNotification(
+      {
+        kind: "RISK_STATUS_CHANGED",
+        entity: { key: "RISK-7", title: "Single power feed to Row 4", siteCode: "SITE01" },
+        from: "OPEN",
+        to: "ACCEPTED",
+        actor: LEAD,
+        note: "Residual accepted by the infra lead until the B-feed works land.",
+      },
+      { to: [JANE] },
+    );
+
+    expect(mail.subject).toBe("[SITE01] RISK-7 — OPEN → ACCEPTED");
+    expect(mail.headers["X-OpsDesk-Event"]).toBe("RISK_STATUS_CHANGED");
+    expect(mail.text).toContain("moved from OPEN to ACCEPTED");
+    expect(mail.text).toContain("Mitigation / rationale: Residual accepted by the infra lead");
+  });
+
   it("throws EmailRenderError when there are no recipients or no entity key", () => {
     const event: NotificationEvent = {
       kind: "INCIDENT_ASSIGNED",
