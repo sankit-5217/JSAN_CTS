@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { Incident, Prisma } from "@prisma/client";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -7,7 +12,9 @@ import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
+import { TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
+import { findTransitionRule, isOwnerOrElevated } from "./incident-transitions";
 
 export interface Paginated<T> {
   items: T[];
@@ -197,6 +204,104 @@ export class IncidentsService {
         },
         tx,
       );
+      return after;
+    });
+  }
+
+  // --- Status transitions (spec §15) ----------------------------------
+  //
+  // The only place Incident.status ever changes. Guard/controller layer
+  // handles coarse RBAC (INCIDENT_WRITE_ROLES); this method does the
+  // per-transition role/ownership/field checks the rule table describes —
+  // same layering CmdbService uses for site-scope (guard vs. resource check).
+
+  async createTransition(
+    id: string,
+    dto: TransitionIncidentDto,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ) {
+    const incident = await this.findOneScoped(id, user);
+
+    const rule = findTransitionRule(incident.status, dto.toStatus);
+    if (!rule) {
+      throw new BadRequestException(
+        `Cannot transition incident from ${incident.status} to ${dto.toStatus}`,
+      );
+    }
+
+    if (!rule.allowedRoles.includes(user.role)) {
+      throw new ForbiddenException(
+        `Role ${user.role} cannot perform ${incident.status} -> ${dto.toStatus}`,
+      );
+    }
+
+    if (rule.requiresOwnerOrElevated && !isOwnerOrElevated(user.id, user.role, incident)) {
+      throw new ForbiddenException(
+        "Only the assigned owner or an elevated role can perform this transition",
+      );
+    }
+
+    const missing = (rule.requiredFields ?? []).filter((field) => !dto[field]);
+    if (missing.length > 0) {
+      throw new BadRequestException(`Missing required field(s): ${missing.join(", ")}`);
+    }
+
+    const validationError = rule.validate?.(incident, dto);
+    if (validationError) {
+      throw new BadRequestException(validationError);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const data: Prisma.IncidentUncheckedUpdateInput = { status: dto.toStatus };
+      if (dto.ownerGroupId !== undefined) {
+        data.ownerGroupId = dto.ownerGroupId;
+      }
+      if (dto.ownerUserId !== undefined) {
+        data.ownerUserId = dto.ownerUserId;
+      }
+      if (dto.toStatus === "ACKNOWLEDGED") {
+        data.acknowledgedAt = new Date();
+      }
+      if (dto.toStatus === "RESOLVED") {
+        data.resolutionCategory = dto.resolutionCategory;
+        data.rootCauseSummary = dto.rootCauseSummary;
+        data.restoredAt = new Date();
+      }
+      if (dto.toStatus === "CLOSED") {
+        data.closedAt = new Date();
+      }
+
+      const after = await tx.incident.update({ where: { id }, data });
+
+      await tx.incidentEvent.create({
+        data: {
+          incidentId: id,
+          eventType: "STATUS_CHANGE",
+          actorId: actor.actorId,
+          payload: {
+            from: incident.status,
+            to: dto.toStatus,
+            reason: dto.reason,
+            resolutionCategory: dto.resolutionCategory,
+            rootCauseSummary: dto.rootCauseSummary,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Incident",
+          entityId: id,
+          action: "TRANSITION",
+          before: incident,
+          after,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+
       return after;
     });
   }

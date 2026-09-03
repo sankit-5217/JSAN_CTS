@@ -10,6 +10,7 @@ import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
+import { TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
 import { IncidentsService } from "./incidents.service";
 
@@ -64,5 +65,21 @@ export class IncidentsController {
     @CorrelationId() correlationId?: string,
   ) {
     return this.incidentsService.update(id, dto, user, { actorId: user.id, correlationId });
+  }
+
+  @Post(":id/transition")
+  @Roles(...INCIDENT_WRITE_ROLES)
+  transition(
+    @Param("id") id: string,
+    @Body() dto: TransitionIncidentDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.incidentsService.createTransition(
+      id,
+      dto,
+      { actorId: user.id, correlationId },
+      user,
+    );
   }
 }
