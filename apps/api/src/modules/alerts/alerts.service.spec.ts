@@ -1,5 +1,6 @@
 import { NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import { AlertsService } from "./alerts.service";
 import { AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
 import { IngestAlertDto } from "./dto/ingest-alert.dto";
@@ -15,10 +16,11 @@ type PrismaMock = {
     update: jest.Mock;
     count: jest.Mock;
   };
+  $transaction: jest.Mock;
 };
 
 function createPrismaMock(): PrismaMock {
-  return {
+  const mock: PrismaMock = {
     site: { findUnique: jest.fn() },
     configurationItem: { findUnique: jest.fn() },
     alert: {
@@ -28,7 +30,11 @@ function createPrismaMock(): PrismaMock {
       update: jest.fn(),
       count: jest.fn(),
     },
+    $transaction: jest.fn(),
   };
+  // The callback gets the mock itself standing in as the transaction client.
+  mock.$transaction.mockImplementation((fn: (tx: PrismaMock) => unknown) => fn(mock));
+  return mock;
 }
 
 function baseDto(overrides: Partial<IngestAlertDto> = {}): IngestAlertDto {
@@ -49,11 +55,16 @@ function baseDto(overrides: Partial<IngestAlertDto> = {}): IngestAlertDto {
 
 describe("AlertsService", () => {
   let prisma: PrismaMock;
+  let audit: { record: jest.Mock };
   let service: AlertsService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
-    service = new AlertsService(prisma as unknown as PrismaService);
+    audit = { record: jest.fn() };
+    service = new AlertsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
     prisma.site.findUnique.mockResolvedValue({ id: "site-1", code: "SITE01" });
     prisma.configurationItem.findUnique.mockResolvedValue({
       id: "ci-1",
@@ -85,6 +96,10 @@ describe("AlertsService", () => {
     expect(data.firstSeenAt).toEqual(new Date("2026-09-02T10:15:00.000Z"));
     expect(data.lastSeenAt).toEqual(new Date("2026-09-02T10:15:00.000Z"));
     expect(data.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "alert", action: "ALERT_RAISED" }),
+      prisma,
+    );
   });
 
   it("dedupes on a repeat (source, eventId) and advances lastSeenAt", async () => {
@@ -102,6 +117,8 @@ describe("AlertsService", () => {
     expect(result.deduped).toBe(true);
     expect(result.stateChanged).toBe(false);
     expect(prisma.alert.create).not.toHaveBeenCalled();
+    // a plain dedup / lastSeenAt bump is not a state change — no audit row
+    expect(audit.record).not.toHaveBeenCalled();
 
     const data = prisma.alert.update.mock.calls[0][0].data;
     expect(data.lastSeenAt).toEqual(new Date("2026-09-02T10:15:00.000Z"));
@@ -138,6 +155,15 @@ describe("AlertsService", () => {
 
     expect(result.stateChanged).toBe(true);
     expect(prisma.alert.update.mock.calls[0][0].data.state).toBe("RECOVERED");
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityType: "alert",
+        action: "ALERT_STATE_CHANGED",
+        before: expect.objectContaining({ state: "OPEN" }),
+        after: expect.objectContaining({ state: "RECOVERED" }),
+      }),
+      prisma,
+    );
   });
 
   it("does not regress a RECOVERED alert back to OPEN", async () => {

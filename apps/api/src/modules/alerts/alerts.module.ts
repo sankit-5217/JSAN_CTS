@@ -17,9 +17,11 @@ import { AlertsService } from "./alerts.service";
  * Sprint 11 (partial): ingest() flags suppressedByMaintenance when the linked CI
  * is in MAINTENANCE lifecycle. Broader change-window suppression (changes module,
  * GET /changes/maintenance/active) is layered on by the worker at correlation time.
- * TODO: correlate to OPEN incidents once the incidents module (Dev A) lands; emit
- * audit events via the audit module; move flapping thresholds into an alert_rules
- * config table (config-over-hardcode).
+ * ingest() writes an AuditEvent in the same transaction as the write — ALERT_RAISED
+ * on first sighting, ALERT_STATE_CHANGED on a lifecycle move; a plain dedup /
+ * lastSeenAt bump is deliberately not audited (ingestion is high-volume).
+ * TODO: correlate to OPEN incidents once the incidents module (Dev A) lands; move
+ * flapping thresholds into an alert_rules config table (config-over-hardcode).
  */
 @Module({
   controllers: [AlertsController],

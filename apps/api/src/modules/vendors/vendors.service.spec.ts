@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import { CreateVendorCaseDto } from "./dto/create-vendor-case.dto";
 import { VendorsService } from "./vendors.service";
 
@@ -14,10 +15,11 @@ type PrismaMock = {
   vendorCaseUpdate: { create: jest.Mock };
   incident: { findUnique: jest.Mock };
   configurationItem: { findUnique: jest.Mock };
+  $transaction: jest.Mock;
 };
 
 function createPrismaMock(): PrismaMock {
-  return {
+  const mock: PrismaMock = {
     vendor: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn() },
     vendorCase: {
       create: jest.fn(),
@@ -28,7 +30,11 @@ function createPrismaMock(): PrismaMock {
     vendorCaseUpdate: { create: jest.fn() },
     incident: { findUnique: jest.fn() },
     configurationItem: { findUnique: jest.fn() },
+    $transaction: jest.fn(),
   };
+  // The callback gets the mock itself standing in as the transaction client.
+  mock.$transaction.mockImplementation((fn: (tx: PrismaMock) => unknown) => fn(mock));
+  return mock;
 }
 
 const VENDOR_ID = "11111111-1111-1111-1111-111111111111";
@@ -39,11 +45,16 @@ function caseDto(overrides: Partial<CreateVendorCaseDto> = {}): CreateVendorCase
 
 describe("VendorsService", () => {
   let prisma: PrismaMock;
+  let audit: { record: jest.Mock };
   let service: VendorsService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
-    service = new VendorsService(prisma as unknown as PrismaService);
+    audit = { record: jest.fn() };
+    service = new VendorsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
     prisma.vendor.findUnique.mockResolvedValue({ id: VENDOR_ID, name: "Dell", type: "DELL" });
   });
 
@@ -53,6 +64,10 @@ describe("VendorsService", () => {
     expect(prisma.vendor.create).toHaveBeenCalledWith({
       data: { name: "Dell ProSupport", type: "DELL" },
     });
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "vendor", action: "VENDOR_REGISTERED" }),
+      prisma,
+    );
   });
 
   it("throws NotFoundException for an unknown vendor", async () => {
@@ -75,6 +90,10 @@ describe("VendorsService", () => {
           replacementPart: null,
         },
       });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ entityType: "vendor_case", action: "VENDOR_CASE_OPENED" }),
+        prisma,
+      );
     });
 
     it("rejects an unknown vendor", async () => {
@@ -114,6 +133,10 @@ describe("VendorsService", () => {
         where: { id: "case-1" },
         data: { dispatchStatus: "REQUESTED", rmaRequired: true },
       });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "VENDOR_CASE_UPDATED" }),
+        prisma,
+      );
     });
 
     it("rejects an invalid dispatch transition", async () => {
@@ -140,6 +163,10 @@ describe("VendorsService", () => {
       const data = prisma.vendorCase.update.mock.calls[0][0].data;
       expect(data.outcome).toBe("Replaced PSU, system healthy");
       expect(data.closedAt).toBeInstanceOf(Date);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "VENDOR_CASE_CLOSED" }),
+        prisma,
+      );
     });
 
     it("does not re-stamp acknowledgedAt when already acknowledged", async () => {
@@ -162,6 +189,10 @@ describe("VendorsService", () => {
       expect(prisma.vendorCaseUpdate.create).toHaveBeenCalledWith({
         data: { vendorCaseId: "case-1", note: "Vendor acknowledged" },
       });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "VENDOR_CASE_NOTE_ADDED" }),
+        prisma,
+      );
     });
 
     it("rejects a note on an unknown case", async () => {

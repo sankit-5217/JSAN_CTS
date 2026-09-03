@@ -12,7 +12,9 @@ import { ChangesService } from "./changes.service";
  * derived from approver/window/outcome (no status column); plan+window
  * editable only before work starts; outcome / emergency PIR capture with a
  * pirOverdue flag; GET /changes/maintenance/active as the alert-suppression feed.
- * TODO: emit audit events for create/approve/update once the audit module lands;
+ * Every mutation writes an AuditEvent in the same transaction as the write
+ * (CHANGE_CREATED / CHANGE_APPROVED / CHANGE_UPDATED via AuditService).
+ * TODO: actorId/correlationId populate once the auth guard is on the controller;
  * per-CI window scoping needs a Change.affectedCiIds schema field (coordinate
  * with Dev A) — until then alert suppression keys off ci.lifecycleStatus.
  */

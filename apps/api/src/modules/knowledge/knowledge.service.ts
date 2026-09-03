@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import { deriveKnowledgeView } from "./knowledge.status";
 import { ApproveArticleDto } from "./dto/approve-article.dto";
 import { CreateArticleDto } from "./dto/create-article.dto";
@@ -20,17 +21,32 @@ import { UpdateArticleDto } from "./dto/update-article.dto";
  */
 @Injectable()
 export class KnowledgeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async create(dto: CreateArticleDto) {
     // approvalState defaults to DRAFT and version to 1 in the schema.
-    // TODO(audit): emit KNOWLEDGE_ARTICLE_CREATED once the audit module lands.
-    const article = await this.prisma.knowledgeArticle.create({
-      data: {
-        title: dto.title,
-        body: dto.body,
-        ...(dto.ownerId !== undefined ? { ownerId: dto.ownerId } : {}),
-      },
+    const article = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.knowledgeArticle.create({
+        data: {
+          title: dto.title,
+          body: dto.body,
+          ...(dto.ownerId !== undefined ? { ownerId: dto.ownerId } : {}),
+        },
+      });
+      await this.audit.record(
+        {
+          actorId: this.actorId(),
+          entityType: "knowledge_article",
+          entityId: created.id,
+          action: "KNOWLEDGE_ARTICLE_CREATED",
+          after: created,
+        },
+        tx,
+      );
+      return created;
     });
     return this.decorate(article);
   }
@@ -99,9 +115,22 @@ export class KnowledgeService {
       data.reviewDueAt = new Date(dto.reviewDueAt);
     }
 
-    // TODO(audit): emit KNOWLEDGE_ARTICLE_UPDATED with a before/after diff and
-    // whether the edit revoked approval.
-    const updated = await this.prisma.knowledgeArticle.update({ where: { id }, data });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.knowledgeArticle.update({ where: { id }, data });
+      await this.audit.record(
+        {
+          actorId: this.actorId(),
+          entityType: "knowledge_article",
+          entityId: id,
+          // the before/after captures whether this edit revoked approval
+          action: "KNOWLEDGE_ARTICLE_UPDATED",
+          before: article,
+          after: u,
+        },
+        tx,
+      );
+      return u;
+    });
     return this.decorate(updated);
   }
 
@@ -118,10 +147,28 @@ export class KnowledgeService {
       throw new BadRequestException("reviewDueAt must be in the future");
     }
 
-    // TODO(audit): emit KNOWLEDGE_ARTICLE_APPROVED (approverId, version, reviewDueAt).
-    const updated = await this.prisma.knowledgeArticle.update({
-      where: { id },
-      data: { approvalState: "APPROVED", reviewDueAt },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.knowledgeArticle.update({
+        where: { id },
+        data: { approvalState: "APPROVED", reviewDueAt },
+      });
+      await this.audit.record(
+        {
+          actorId: this.actorId(),
+          entityType: "knowledge_article",
+          entityId: id,
+          action: "KNOWLEDGE_ARTICLE_APPROVED",
+          before: { approvalState: article.approvalState },
+          after: {
+            approvalState: u.approvalState,
+            version: u.version,
+            reviewDueAt,
+            approverId: dto.approverId,
+          },
+        },
+        tx,
+      );
+      return u;
     });
     return this.decorate(updated);
   }
@@ -132,11 +179,23 @@ export class KnowledgeService {
       throw new ConflictException(`Knowledge article ${id} is not published`);
     }
 
-    // TODO(audit): emit KNOWLEDGE_ARTICLE_UNPUBLISHED (reason).
-    void dto.reason;
-    const updated = await this.prisma.knowledgeArticle.update({
-      where: { id },
-      data: { approvalState: "DRAFT", reviewDueAt: null },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.knowledgeArticle.update({
+        where: { id },
+        data: { approvalState: "DRAFT", reviewDueAt: null },
+      });
+      await this.audit.record(
+        {
+          actorId: this.actorId(),
+          entityType: "knowledge_article",
+          entityId: id,
+          action: "KNOWLEDGE_ARTICLE_UNPUBLISHED",
+          before: { approvalState: article.approvalState },
+          after: { approvalState: "DRAFT", reason: dto.reason },
+        },
+        tx,
+      );
+      return u;
     });
     return this.decorate(updated);
   }
@@ -169,5 +228,13 @@ export class KnowledgeService {
 
   private decorate<T extends Parameters<typeof deriveKnowledgeView>[0]>(article: T, now?: Date) {
     return { ...article, ...deriveKnowledgeView(article, now) };
+  }
+
+  /**
+   * Acting user id for the audit trail. Null until an auth guard is on the
+   * knowledge controller (spec §4) — then this returns `@CurrentUser().sub`.
+   */
+  private actorId(): string | null {
+    return null;
   }
 }

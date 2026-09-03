@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import { KnowledgeService } from "./knowledge.service";
 
 type PrismaMock = {
@@ -9,17 +10,22 @@ type PrismaMock = {
     findUnique: jest.Mock;
     update: jest.Mock;
   };
+  $transaction: jest.Mock;
 };
 
 function createPrismaMock(): PrismaMock {
-  return {
+  const mock: PrismaMock = {
     knowledgeArticle: {
       create: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    $transaction: jest.fn(),
   };
+  // The callback gets the mock itself standing in as the transaction client.
+  mock.$transaction.mockImplementation((fn: (tx: PrismaMock) => unknown) => fn(mock));
+  return mock;
 }
 
 const FUTURE = "2099-01-01T00:00:00.000Z";
@@ -44,11 +50,16 @@ function storedArticle(overrides: Record<string, unknown> = {}) {
 
 describe("KnowledgeService", () => {
   let prisma: PrismaMock;
+  let audit: { record: jest.Mock };
   let service: KnowledgeService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
-    service = new KnowledgeService(prisma as unknown as PrismaService);
+    audit = { record: jest.fn() };
+    service = new KnowledgeService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
   });
 
   describe("create", () => {
@@ -56,6 +67,13 @@ describe("KnowledgeService", () => {
       prisma.knowledgeArticle.create.mockResolvedValue(storedArticle());
       const result = await service.create({ title: "T", body: "B" });
       expect(prisma.knowledgeArticle.create).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entityType: "knowledge_article",
+          action: "KNOWLEDGE_ARTICLE_CREATED",
+        }),
+        prisma,
+      );
       expect(result.approvalState).toBe("DRAFT");
       expect(result.authoritative).toBe(false);
     });
@@ -178,6 +196,10 @@ describe("KnowledgeService", () => {
         where: { id: "art-1" },
         data: { approvalState: "APPROVED", reviewDueAt: new Date(FUTURE) },
       });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "KNOWLEDGE_ARTICLE_APPROVED" }),
+        prisma,
+      );
       expect(result.authoritative).toBe(true);
     });
   });
@@ -200,6 +222,13 @@ describe("KnowledgeService", () => {
         approvalState: "DRAFT",
         reviewDueAt: null,
       });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "KNOWLEDGE_ARTICLE_UNPUBLISHED",
+          after: expect.objectContaining({ reason: "step 4 is unsafe" }),
+        }),
+        prisma,
+      );
     });
   });
 

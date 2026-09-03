@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import type { ChangeStatus } from "./changes.constants";
 import { deriveChangeStatus, isEditable, isPirOverdue } from "./changes.status";
 import { ApproveChangeDto } from "./dto/approve-change.dto";
@@ -44,7 +45,10 @@ function whereForStatus(status: ChangeStatus, now: Date): Prisma.ChangeWhereInpu
  */
 @Injectable()
 export class ChangesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async create(dto: CreateChangeDto) {
     const windowStart = new Date(dto.windowStart);
@@ -53,17 +57,29 @@ export class ChangesService {
       throw new BadRequestException("windowEnd must be after windowStart");
     }
 
-    // TODO(audit): emit CHANGE_CREATED once the audit module lands.
-    const change = await this.prisma.change.create({
-      data: {
-        changeType: dto.changeType,
-        reason: dto.reason,
-        implementationPlan: dto.implementationPlan,
-        rollbackPlan: dto.rollbackPlan,
-        risk: dto.risk,
-        windowStart,
-        windowEnd,
-      },
+    const change = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.change.create({
+        data: {
+          changeType: dto.changeType,
+          reason: dto.reason,
+          implementationPlan: dto.implementationPlan,
+          rollbackPlan: dto.rollbackPlan,
+          risk: dto.risk,
+          windowStart,
+          windowEnd,
+        },
+      });
+      await this.audit.record(
+        {
+          actorId: this.actorId(),
+          entityType: "change",
+          entityId: created.id,
+          action: "CHANGE_CREATED",
+          after: created,
+        },
+        tx,
+      );
+      return created;
     });
     return this.decorate(change);
   }
@@ -101,10 +117,23 @@ export class ChangesService {
       throw new BadRequestException(`Change ${id} window has already ended`);
     }
 
-    // TODO(audit): emit CHANGE_APPROVED once the audit module lands.
-    const updated = await this.prisma.change.update({
-      where: { id },
-      data: { approverId: dto.approverId },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.change.update({
+        where: { id },
+        data: { approverId: dto.approverId },
+      });
+      await this.audit.record(
+        {
+          actorId: this.actorId(),
+          entityType: "change",
+          entityId: id,
+          action: "CHANGE_APPROVED",
+          before: { approverId: change.approverId },
+          after: { approverId: u.approverId },
+        },
+        tx,
+      );
+      return u;
     });
     return this.decorate(updated);
   }
@@ -142,20 +171,33 @@ export class ChangesService {
       throw new BadRequestException("outcome cannot be recorded before the change window begins");
     }
 
-    // TODO(audit): emit CHANGE_UPDATED with a before/after diff.
-    const updated = await this.prisma.change.update({
-      where: { id },
-      data: {
-        ...(dto.reason !== undefined ? { reason: dto.reason } : {}),
-        ...(dto.implementationPlan !== undefined
-          ? { implementationPlan: dto.implementationPlan }
-          : {}),
-        ...(dto.rollbackPlan !== undefined ? { rollbackPlan: dto.rollbackPlan } : {}),
-        ...(dto.risk !== undefined ? { risk: dto.risk } : {}),
-        ...(dto.windowStart ? { windowStart } : {}),
-        ...(dto.windowEnd ? { windowEnd } : {}),
-        ...(dto.outcome !== undefined ? { outcome: dto.outcome } : {}),
-      },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.change.update({
+        where: { id },
+        data: {
+          ...(dto.reason !== undefined ? { reason: dto.reason } : {}),
+          ...(dto.implementationPlan !== undefined
+            ? { implementationPlan: dto.implementationPlan }
+            : {}),
+          ...(dto.rollbackPlan !== undefined ? { rollbackPlan: dto.rollbackPlan } : {}),
+          ...(dto.risk !== undefined ? { risk: dto.risk } : {}),
+          ...(dto.windowStart ? { windowStart } : {}),
+          ...(dto.windowEnd ? { windowEnd } : {}),
+          ...(dto.outcome !== undefined ? { outcome: dto.outcome } : {}),
+        },
+      });
+      await this.audit.record(
+        {
+          actorId: this.actorId(),
+          entityType: "change",
+          entityId: id,
+          action: "CHANGE_UPDATED",
+          before: change,
+          after: u,
+        },
+        tx,
+      );
+      return u;
     });
     return this.decorate(updated);
   }
@@ -192,5 +234,13 @@ export class ChangesService {
       status: deriveChangeStatus(change, now),
       pirOverdue: isPirOverdue(change, now),
     };
+  }
+
+  /**
+   * Acting user id for the audit trail. Null until an auth guard is on the
+   * changes controller (spec §4) — then this returns `@CurrentUser().sub`.
+   */
+  private actorId(): string | null {
+    return null;
   }
 }

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import { ChangesService } from "./changes.service";
 
 type PrismaMock = {
@@ -9,17 +10,22 @@ type PrismaMock = {
     findUnique: jest.Mock;
     update: jest.Mock;
   };
+  $transaction: jest.Mock;
 };
 
 function createPrismaMock(): PrismaMock {
-  return {
+  const mock: PrismaMock = {
     change: {
       create: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    $transaction: jest.fn(),
   };
+  // The callback gets the mock itself standing in as the transaction client.
+  mock.$transaction.mockImplementation((fn: (tx: PrismaMock) => unknown) => fn(mock));
+  return mock;
 }
 
 const FAR_FUTURE_START = "2099-01-01T22:00:00.000Z";
@@ -57,11 +63,16 @@ function storedChange(overrides: Record<string, unknown> = {}) {
 
 describe("ChangesService", () => {
   let prisma: PrismaMock;
+  let audit: { record: jest.Mock };
   let service: ChangesService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
-    service = new ChangesService(prisma as unknown as PrismaService);
+    audit = { record: jest.fn() };
+    service = new ChangesService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
   });
 
   describe("create", () => {
@@ -76,6 +87,10 @@ describe("ChangesService", () => {
       prisma.change.create.mockResolvedValue(storedChange());
       const result = await service.create(createDto());
       expect(prisma.change.create).toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ entityType: "change", action: "CHANGE_CREATED" }),
+        prisma,
+      );
       expect(result.status).toBe("PENDING_APPROVAL");
       expect(result.pirOverdue).toBe(false);
     });
@@ -118,6 +133,10 @@ describe("ChangesService", () => {
         where: { id: "chg-1" },
         data: { approverId: "11111111-1111-1111-1111-111111111111" },
       });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "CHANGE_APPROVED" }),
+        prisma,
+      );
       expect(result.status).toBe("SCHEDULED");
     });
   });
@@ -163,6 +182,10 @@ describe("ChangesService", () => {
       );
       const result = await service.update("chg-1", { outcome: "PSU replaced" });
       expect(prisma.change.update.mock.calls[0][0].data).toEqual({ outcome: "PSU replaced" });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "CHANGE_UPDATED" }),
+        prisma,
+      );
       expect(result.status).toBe("COMPLETED");
     });
   });

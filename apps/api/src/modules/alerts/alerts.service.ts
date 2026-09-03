@@ -5,6 +5,7 @@ import {
   normalizeZabbixEvent,
 } from "@cts-dc-opsdesk/zabbix-adapter";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import type { AlertState } from "./alerts.constants";
 import { computeAlertFingerprint } from "./alerts.fingerprint";
 import { AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
@@ -61,7 +62,10 @@ export class AlertsService {
   private readonly flappingThreshold: number;
   private readonly flappingWindowMinutes: number;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {
     // config-over-hardcode stopgap: env-driven until the alert_rules table
     // (Dev B, spec §10.10) provides per-site / per-type thresholds.
     this.flappingThreshold = toPositiveInt(
@@ -112,36 +116,80 @@ export class AlertsService {
       const nextState = reduceAlertState(existing.state as AlertState, dto.state);
       deduped = true;
       stateChanged = nextState !== existing.state;
-      const updated = await this.prisma.alert.update({
-        where: { id: existing.id },
-        data: {
-          severity: dto.severity,
-          state: nextState,
-          lastSeenAt:
-            occurredAt.getTime() > existing.lastSeenAt.getTime() ? occurredAt : existing.lastSeenAt,
-          // backfill references if the site / CI became known since first sighting
-          siteId: existing.siteId ?? site?.id ?? null,
-          ciId: existing.ciId ?? ci?.id ?? null,
-        },
-      });
-      alertId = updated.id;
+      const updateData = {
+        severity: dto.severity,
+        state: nextState,
+        lastSeenAt:
+          occurredAt.getTime() > existing.lastSeenAt.getTime() ? occurredAt : existing.lastSeenAt,
+        // backfill references if the site / CI became known since first sighting
+        siteId: existing.siteId ?? site?.id ?? null,
+        ciId: existing.ciId ?? ci?.id ?? null,
+      };
+
+      if (stateChanged) {
+        // A lifecycle move is auditable; a plain dedup / lastSeenAt bump is not
+        // (ingestion is high-volume — only state changes earn an audit row).
+        const updated = await this.prisma.$transaction(async (tx) => {
+          const u = await tx.alert.update({ where: { id: existing.id }, data: updateData });
+          await this.audit.record(
+            {
+              actorId: this.actorId(),
+              entityType: "alert",
+              entityId: existing.id,
+              action: "ALERT_STATE_CHANGED",
+              before: { state: existing.state, severity: existing.severity },
+              after: { state: u.state, severity: u.severity },
+            },
+            tx,
+          );
+          return u;
+        });
+        alertId = updated.id;
+      } else {
+        const updated = await this.prisma.alert.update({
+          where: { id: existing.id },
+          data: updateData,
+        });
+        alertId = updated.id;
+      }
     } else {
       deduped = false;
       stateChanged = true;
-      const created = await this.prisma.alert.create({
-        data: {
-          externalEventId: dto.eventId,
-          source: dto.source,
-          siteId: site?.id ?? null,
-          ciId: ci?.id ?? null,
-          alertType: dto.alertType,
-          severity: dto.severity,
-          fingerprint,
-          firstSeenAt: occurredAt,
-          lastSeenAt: occurredAt,
-          state: dto.state,
-          rawReference: extractRawReference(dto.attributes),
-        },
+      const created = await this.prisma.$transaction(async (tx) => {
+        const c = await tx.alert.create({
+          data: {
+            externalEventId: dto.eventId,
+            source: dto.source,
+            siteId: site?.id ?? null,
+            ciId: ci?.id ?? null,
+            alertType: dto.alertType,
+            severity: dto.severity,
+            fingerprint,
+            firstSeenAt: occurredAt,
+            lastSeenAt: occurredAt,
+            state: dto.state,
+            rawReference: extractRawReference(dto.attributes),
+          },
+        });
+        await this.audit.record(
+          {
+            actorId: this.actorId(),
+            entityType: "alert",
+            entityId: c.id,
+            action: "ALERT_RAISED",
+            after: {
+              source: c.source,
+              externalEventId: c.externalEventId,
+              fingerprint,
+              state: c.state,
+              severity: c.severity,
+              siteId: c.siteId,
+              ciId: c.ciId,
+            },
+          },
+          tx,
+        );
+        return c;
       });
       alertId = created.id;
     }
@@ -248,6 +296,15 @@ export class AlertsService {
       throw new NotFoundException(`Alert ${id} not found`);
     }
     return alert;
+  }
+
+  /**
+   * Acting user id for the audit trail. Null — alert ingestion is
+   * machine-to-machine; the origin is captured in `alert.source`. A future
+   * collector-identity claim can populate this.
+   */
+  private actorId(): string | null {
+    return null;
   }
 }
 

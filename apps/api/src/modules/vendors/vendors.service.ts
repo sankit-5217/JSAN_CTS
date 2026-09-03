@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import type { DispatchStatus } from "./vendors.constants";
 import { canTransitionDispatch } from "./vendors.dispatch";
 import { AddVendorCaseUpdateDto } from "./dto/add-vendor-case-update.dto";
@@ -20,12 +21,28 @@ import { UpdateVendorCaseDto } from "./dto/update-vendor-case.dto";
  */
 @Injectable()
 export class VendorsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   // --- vendors -------------------------------------------------------------
 
-  createVendor(dto: CreateVendorDto) {
-    return this.prisma.vendor.create({ data: { name: dto.name, type: dto.type } });
+  async createVendor(dto: CreateVendorDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const vendor = await tx.vendor.create({ data: { name: dto.name, type: dto.type } });
+      await this.audit.record(
+        {
+          actorId: this.actorId(),
+          entityType: "vendor",
+          entityId: vendor.id,
+          action: "VENDOR_REGISTERED",
+          after: vendor,
+        },
+        tx,
+      );
+      return vendor;
+    });
   }
 
   listVendors() {
@@ -51,17 +68,29 @@ export class VendorsService {
       await this.assertCiExists(dto.ciId);
     }
 
-    // TODO(audit): emit VENDOR_CASE_OPENED once the audit module lands.
-    return this.prisma.vendorCase.create({
-      data: {
-        vendorCaseNo: dto.vendorCaseNo,
-        vendorId: dto.vendorId,
-        linkedIncidentId: dto.linkedIncidentId ?? null,
-        ciId: dto.ciId ?? null,
-        warrantyStatus: dto.warrantyStatus ?? "UNKNOWN",
-        rmaRequired: dto.rmaRequired ?? false,
-        replacementPart: dto.replacementPart ?? null,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.vendorCase.create({
+        data: {
+          vendorCaseNo: dto.vendorCaseNo,
+          vendorId: dto.vendorId,
+          linkedIncidentId: dto.linkedIncidentId ?? null,
+          ciId: dto.ciId ?? null,
+          warrantyStatus: dto.warrantyStatus ?? "UNKNOWN",
+          rmaRequired: dto.rmaRequired ?? false,
+          replacementPart: dto.replacementPart ?? null,
+        },
+      });
+      await this.audit.record(
+        {
+          actorId: this.actorId(),
+          entityType: "vendor_case",
+          entityId: created.id,
+          action: "VENDOR_CASE_OPENED",
+          after: created,
+        },
+        tx,
+      );
+      return created;
     });
   }
 
@@ -105,25 +134,53 @@ export class VendorsService {
       );
     }
 
-    // TODO(audit): emit VENDOR_CASE_UPDATED with a before/after diff.
-    return this.prisma.vendorCase.update({
-      where: { id },
-      data: {
-        ...(dto.dispatchStatus ? { dispatchStatus: dto.dispatchStatus } : {}),
-        ...(dto.dispatchStatus && !current.rmaRequired ? { rmaRequired: true } : {}),
-        ...(dto.replacementPart !== undefined ? { replacementPart: dto.replacementPart } : {}),
-        ...(dto.warrantyStatus ? { warrantyStatus: dto.warrantyStatus } : {}),
-        ...(dto.vendorEta ? { vendorEta: new Date(dto.vendorEta) } : {}),
-        ...(dto.acknowledged && !current.acknowledgedAt ? { acknowledgedAt: new Date() } : {}),
-        ...(dto.closeOutcome ? { closedAt: new Date(), outcome: dto.closeOutcome } : {}),
-      },
+    // omit the notes thread from the audit snapshot — it is its own append-only log
+    const caseBefore = { ...current, updates: undefined };
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.vendorCase.update({
+        where: { id },
+        data: {
+          ...(dto.dispatchStatus ? { dispatchStatus: dto.dispatchStatus } : {}),
+          ...(dto.dispatchStatus && !current.rmaRequired ? { rmaRequired: true } : {}),
+          ...(dto.replacementPart !== undefined ? { replacementPart: dto.replacementPart } : {}),
+          ...(dto.warrantyStatus ? { warrantyStatus: dto.warrantyStatus } : {}),
+          ...(dto.vendorEta ? { vendorEta: new Date(dto.vendorEta) } : {}),
+          ...(dto.acknowledged && !current.acknowledgedAt ? { acknowledgedAt: new Date() } : {}),
+          ...(dto.closeOutcome ? { closedAt: new Date(), outcome: dto.closeOutcome } : {}),
+        },
+      });
+      await this.audit.record(
+        {
+          actorId: this.actorId(),
+          entityType: "vendor_case",
+          entityId: id,
+          action: dto.closeOutcome ? "VENDOR_CASE_CLOSED" : "VENDOR_CASE_UPDATED",
+          before: caseBefore,
+          after: updated,
+        },
+        tx,
+      );
+      return updated;
     });
   }
 
   async addUpdate(id: string, dto: AddVendorCaseUpdateDto) {
     await this.getCase(id);
-    return this.prisma.vendorCaseUpdate.create({
-      data: { vendorCaseId: id, note: dto.note },
+    return this.prisma.$transaction(async (tx) => {
+      const note = await tx.vendorCaseUpdate.create({
+        data: { vendorCaseId: id, note: dto.note },
+      });
+      await this.audit.record(
+        {
+          actorId: this.actorId(),
+          entityType: "vendor_case",
+          entityId: id,
+          action: "VENDOR_CASE_NOTE_ADDED",
+          after: { updateId: note.id, note: note.note },
+        },
+        tx,
+      );
+      return note;
     });
   }
 
@@ -139,5 +196,13 @@ export class VendorsService {
     if (!ci) {
       throw new NotFoundException(`Configuration item ${id} not found`);
     }
+  }
+
+  /**
+   * Acting user id for the audit trail. Null until an auth guard is on the
+   * vendors controllers (spec §4) — then this returns `@CurrentUser().sub`.
+   */
+  private actorId(): string | null {
+    return null;
   }
 }
