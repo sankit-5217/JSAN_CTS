@@ -20,6 +20,9 @@ importers:
       '@cts-dc-opsdesk/prometheus-adapter':
         specifier: workspace:*
         version: link:../../integrations/prometheus
+      '@cts-dc-opsdesk/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
       '@cts-dc-opsdesk/snmp-adapter':
         specifier: workspace:*
         version: link:../../integrations/snmp

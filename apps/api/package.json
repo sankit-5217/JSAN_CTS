@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@cts-dc-opsdesk/prometheus-adapter": "workspace:*",
+    "@cts-dc-opsdesk/shared-types": "workspace:*",
     "@cts-dc-opsdesk/snmp-adapter": "workspace:*",
     "@cts-dc-opsdesk/zabbix-adapter": "workspace:*",
     "@nestjs/common": "^10.4.6",

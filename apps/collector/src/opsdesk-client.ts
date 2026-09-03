@@ -1,4 +1,4 @@
-import type { NormalizedAlertPayload } from "@cts-dc-opsdesk/shared-types";
+import type { HealthSnapshotPayload, NormalizedAlertPayload } from "@cts-dc-opsdesk/shared-types";
 import type { SnmpTrap } from "@cts-dc-opsdesk/snmp-adapter";
 
 /** Just the bits of `fetch` this client uses — lets tests inject a fake. */
@@ -56,6 +56,11 @@ export class OpsDeskClient {
   /** One already-normalized alert -> POST /alerts/ingest. */
   ingestAlert(alert: NormalizedAlertPayload): Promise<unknown> {
     return this.post("/alerts/ingest", alert);
+  }
+
+  /** Batch of normalized hardware health snapshots -> POST /monitoring/health-snapshots. */
+  ingestHealthSnapshots(snapshots: HealthSnapshotPayload[]): Promise<unknown> {
+    return this.post("/monitoring/health-snapshots", { snapshots });
   }
 
   // TODO: heartbeat(siteCode) once the API exposes a collector-liveness endpoint

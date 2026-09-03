@@ -78,6 +78,35 @@ describe("OpsDeskClient", () => {
     expect(calls[0].body).toMatchObject({ eventId: "e1", source: "REDFISH" });
   });
 
+  it("POSTs health snapshots to /monitoring/health-snapshots as a batch", async () => {
+    const { fetchImpl, calls } = fakeFetch(() => ({
+      ok: true,
+      status: 200,
+      text: '{"accepted":[]}',
+    }));
+    const client = new OpsDeskClient({ baseUrl: "https://x/api/v1", token: "t", fetchImpl });
+
+    await client.ingestHealthSnapshots([
+      {
+        ciCode: "SITE01-R01-SRV-040",
+        source: "REDFISH",
+        overallHealth: "WARNING",
+        powerState: "ON",
+        observedAt: "2026-09-03T10:00:00.000Z",
+        degraded: [],
+        predictiveFailures: [],
+        summary: {
+          drives: { total: 2, healthy: 2, predictedFailure: 0 },
+          fans: { total: 4, healthy: 4 },
+          powerSupplies: { total: 2, healthy: 2 },
+        },
+      },
+    ]);
+
+    expect(calls[0].url).toBe("https://x/api/v1/monitoring/health-snapshots");
+    expect(calls[0].body).toMatchObject({ snapshots: [{ ciCode: "SITE01-R01-SRV-040" }] });
+  });
+
   it("throws OpsDeskApiError on a non-2xx response", async () => {
     const { fetchImpl } = fakeFetch(() => ({ ok: false, status: 403, text: "Forbidden" }));
     const client = new OpsDeskClient({ baseUrl: "https://x/api/v1", token: "t", fetchImpl });

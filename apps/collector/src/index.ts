@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { HealthSnapshotPayload } from "@cts-dc-opsdesk/shared-types";
 import type { SnmpTrap } from "@cts-dc-opsdesk/snmp-adapter";
 import { loadConfig } from "./config";
 import type { CollectorConfig } from "./config";
@@ -41,6 +42,9 @@ function main(): void {
         break;
       case "alert":
         await client.ingestAlert(item.payload as never);
+        break;
+      case "health":
+        await client.ingestHealthSnapshots([item.payload as HealthSnapshotPayload]);
         break;
       default:
         throw new Error(`unknown delivery channel "${item.channel}"`);
