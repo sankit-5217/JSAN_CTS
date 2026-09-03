@@ -46,6 +46,9 @@ export interface CollectorConfig {
   heartbeatIntervalSeconds: number;
   /** How many undelivered events to buffer locally before dropping the oldest. */
   bufferMaxItems: number;
+  /** Path to persist the delivery buffer so it survives a restart. When unset,
+   *  the buffer is in-memory only. */
+  bufferFile?: string;
   endpoints: EndpointTarget[];
   /** UDP port the trap listener binds (default 162). */
   snmpTrapPort: number;
@@ -157,6 +160,9 @@ export function loadConfig(raw: unknown): CollectorConfig {
     pollIntervalSeconds: posInt(r, "pollIntervalSeconds", 300),
     heartbeatIntervalSeconds: posInt(r, "heartbeatIntervalSeconds", 60),
     bufferMaxItems: posInt(r, "bufferMaxItems", 10_000),
+    ...(typeof r.bufferFile === "string" && r.bufferFile.trim()
+      ? { bufferFile: r.bufferFile.trim() }
+      : {}),
     endpoints,
     snmpTrapPort: posInt(r, "snmpTrapPort", 162),
     snmpCommunity: typeof r.snmpCommunity === "string" ? r.snmpCommunity : "public",

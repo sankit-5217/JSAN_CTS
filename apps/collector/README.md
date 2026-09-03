@@ -17,10 +17,14 @@ resolved from a local secret store by name.
 - **`opsdesk-client.ts`** — `OpsDeskClient`, the only door to the platform:
   `ingestSnmpTraps()`, `ingestAlert()`; bearer token; idempotent posts (payloads
   carry stable ids); `OpsDeskApiError` on non-2xx. `fetchImpl` is injectable for tests.
-- **`delivery-buffer.ts`** — `DeliveryBuffer`, an in-memory queue for events the
-  API couldn't accept (disconnect). Dedupes by key, drops oldest when full,
-  flushes oldest-first and **stops at the first failure** so ordering holds and
-  the API isn't hammered while down. A disk-backed impl drops in behind the same shape.
+- **`delivery-buffer.ts`** — `DeliveryBuffer`, a queue for events the API
+  couldn't accept (disconnect). Dedupes by key, drops oldest when full, flushes
+  oldest-first and **stops at the first failure** so ordering holds and the API
+  isn't hammered while down.
+- **`file-delivery-buffer.ts`** — `FileDeliveryBuffer` (same shape) persists the
+  queue to `config.bufferFile` with an atomic write after every change, so
+  buffered events survive a collector restart; a corrupt file is discarded, not
+  fatal. Used when `bufferFile` is set, else the in-memory buffer.
 - **`index.ts`** — wires config + client + buffer + the poll / flush loops.
 
 ## Next slices

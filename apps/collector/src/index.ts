@@ -5,6 +5,7 @@ import { loadConfig } from "./config";
 import type { CollectorConfig } from "./config";
 import { DeliveryBuffer } from "./delivery-buffer";
 import type { BufferedItem } from "./delivery-buffer";
+import { FileDeliveryBuffer } from "./file-delivery-buffer";
 import { EnvCredentialResolver } from "./hw/credentials";
 import type { Credential } from "./hw/credentials";
 import { runHealthPoll } from "./hw/health-poll";
@@ -40,7 +41,9 @@ function readConfig(): CollectorConfig {
 function main(): void {
   const config = readConfig();
   const client = new OpsDeskClient({ baseUrl: config.apiBaseUrl, token: config.apiToken });
-  const buffer = new DeliveryBuffer(config.bufferMaxItems);
+  const buffer = config.bufferFile
+    ? new FileDeliveryBuffer(config.bufferFile, config.bufferMaxItems)
+    : new DeliveryBuffer(config.bufferMaxItems);
 
   const send = async (item: BufferedItem): Promise<void> => {
     switch (item.channel) {
