@@ -17,7 +17,8 @@
     "@cts-dc-opsdesk/hpe-ilo-adapter": "workspace:*",
     "@cts-dc-opsdesk/redfish-adapter": "workspace:*",
     "@cts-dc-opsdesk/shared-types": "workspace:*",
-    "@cts-dc-opsdesk/snmp-adapter": "workspace:*"
+    "@cts-dc-opsdesk/snmp-adapter": "workspace:*",
+    "net-snmp": "^3.26.3"
   },
   "devDependencies": {
     "@types/jest": "^29.5.13",

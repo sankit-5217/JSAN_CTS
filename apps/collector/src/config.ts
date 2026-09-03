@@ -49,6 +49,8 @@ export interface CollectorConfig {
   endpoints: EndpointTarget[];
   /** UDP port the trap listener binds (default 162). */
   snmpTrapPort: number;
+  /** v2c community accepted by the trap listener (default "public"). */
+  snmpCommunity: string;
   /** Known trap sources; a trap from an address not listed here is delivered with
    *  no ciCode and the API rejects it (visible in the collector log). */
   snmpSources: SnmpSource[];
@@ -157,6 +159,7 @@ export function loadConfig(raw: unknown): CollectorConfig {
     bufferMaxItems: posInt(r, "bufferMaxItems", 10_000),
     endpoints,
     snmpTrapPort: posInt(r, "snmpTrapPort", 162),
+    snmpCommunity: typeof r.snmpCommunity === "string" ? r.snmpCommunity : "public",
     snmpSources,
   };
 }

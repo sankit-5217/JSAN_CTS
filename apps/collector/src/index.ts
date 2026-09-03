@@ -9,8 +9,10 @@ import { EnvCredentialResolver } from "./hw/credentials";
 import type { Credential } from "./hw/credentials";
 import { runHealthPoll } from "./hw/health-poll";
 import { MgmtHttp } from "./hw/mgmt-http";
-import { OpsDeskClient } from "./opsdesk-client";
+import { NetSnmpTrapListener } from "./snmp/net-snmp-listener";
 import { makePduSink, NoopTrapListener } from "./snmp/trap-listener";
+import type { TrapListener } from "./snmp/trap-listener";
+import { OpsDeskClient } from "./opsdesk-client";
 
 /**
  * Site-collector entrypoint (ADR-004, spec §11). One process per site: polls
@@ -66,8 +68,14 @@ function main(): void {
     });
   };
   const pduSink = makePduSink(config.snmpSources, onTrap);
-  void pduSink; // handed to the real listener once it lands
-  const trapListener = new NoopTrapListener();
+  const trapListener: TrapListener =
+    config.snmpSources.length > 0
+      ? new NetSnmpTrapListener({
+          port: config.snmpTrapPort,
+          community: config.snmpCommunity,
+          sink: pduSink,
+        })
+      : new NoopTrapListener();
   void trapListener.start();
 
   const resolver = new EnvCredentialResolver();

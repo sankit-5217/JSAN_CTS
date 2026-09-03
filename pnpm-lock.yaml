@@ -138,6 +138,9 @@ importers:
       '@cts-dc-opsdesk/snmp-adapter':
         specifier: workspace:*
         version: link:../../integrations/snmp
+      net-snmp:
+        specifier: ^3.26.3
+        version: 3.26.3
     devDependencies:
       '@types/jest':
         specifier: ^29.5.13
@@ -1870,6 +1873,9 @@ packages:
   array-timsort@1.0.3:
     resolution: {integrity: sha512-/+3GRL7dDAGEfM6TseQk/U+mi18TU2Ms9I3UlLdUMhz2hbvGNTKdj9xniwXfUqgYhHxRx0+8UnKkvlNwVU+cWQ==}
 
+  asn1-ber@1.2.2:
+    resolution: {integrity: sha512-CbNem/7hxrjSiOAOOTX4iZxu+0m3jiLqlsERQwwPM1IDR/22M8IPpA1VVndCLw5KtjRYyRODbvAEIfuTogNDng==}
+
   babel-jest@29.7.0:
     resolution: {integrity: sha512-BrvGY3xZSwEcCzKvKsCi2GgHqDqsYkOP4/by5xCgIwGXQxIEh+8ew3gmrE1y7XRR6LHZIj6yLYnUi/mm2KXKBg==}
     engines: {node: ^14.15.0 || ^16.10.0 || >=18.0.0}
@@ -3174,6 +3180,9 @@ packages:
   neo-async@2.6.2:
     resolution: {integrity: sha512-Yd3UES5mWCSqR+qNT93S3UoYUkqAZ9lLg8a7g9rimsWmYGK8cVToA4/sF3RrshdyV3sAGMXVUmpMYOw+dLpOuw==}
 
+  net-snmp@3.26.3:
+    resolution: {integrity: sha512-DTnzoz8Bk5Vz+7WWflo2VgSXMguadFMvsPmSOrknv+YTdA65lLUL1WZhYj6ZA/7pJvKscLJPOeU4LoEd6A1EZg==}
+
   node-abort-controller@3.1.1:
     resolution: {integrity: sha512-AGK2yQKIjRuqnc6VkX2Xj5d+QW8xZ87pa1UK6yA6ouUyuxfHuMP6umE5QK7UmTeOAymo+Zx1Fxiuw9rVx8taHQ==}
 
@@ -3610,6 +3619,10 @@ packages:
   slash@3.0.0:
     resolution: {integrity: sha512-g9Q1haeby36OSStwb4ntCGGGaKsaVSjQ68fBxoQcutl5fS1vuY18H3wSt3jFyFtrkx+Kz0V1G85A4MyAdDMi2Q==}
     engines: {node: '>=8'}
+
+  smart-buffer@4.2.0:
+    resolution: {integrity: sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg==}
+    engines: {node: '>= 6.0.0', npm: '>= 3.0.0'}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -5601,6 +5614,8 @@ snapshots:
 
   array-timsort@1.0.3: {}
 
+  asn1-ber@1.2.2: {}
+
   babel-jest@29.7.0(@babel/core@7.29.7):
     dependencies:
       '@babel/core': 7.29.7
@@ -7196,6 +7211,11 @@ snapshots:
 
   neo-async@2.6.2: {}
 
+  net-snmp@3.26.3:
+    dependencies:
+      asn1-ber: 1.2.2
+      smart-buffer: 4.2.0
+
   node-abort-controller@3.1.1: {}
 
   node-emoji@1.11.0:
@@ -7647,6 +7667,8 @@ snapshots:
   sisteransi@1.0.5: {}
 
   slash@3.0.0: {}
+
+  smart-buffer@4.2.0: {}
 
   source-map-js@1.2.1: {}
 
