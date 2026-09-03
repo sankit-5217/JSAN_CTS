@@ -1,0 +1,325 @@
+import { BadRequestException, ForbiddenException } from "@nestjs/common";
+import { IncidentStatus, Priority, UserRole } from "@prisma/client";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
+import { AuthzService } from "../auth/authz.service";
+import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { IncidentsService } from "./incidents.service";
+
+const engineer: AuthenticatedUser = {
+  id: "engineer-1",
+  email: "engineer@example.com",
+  role: UserRole.SITE_ENGINEER,
+  isActive: true,
+};
+
+const otherEngineer: AuthenticatedUser = {
+  id: "engineer-2",
+  email: "engineer2@example.com",
+  role: UserRole.SITE_ENGINEER,
+  isActive: true,
+};
+
+const serviceDesk: AuthenticatedUser = {
+  id: "servicedesk-1",
+  email: "servicedesk@example.com",
+  role: UserRole.SERVICE_DESK_NOC,
+  isActive: true,
+};
+
+const ctsViewer: AuthenticatedUser = {
+  id: "viewer-1",
+  email: "viewer@example.com",
+  role: UserRole.CTS_MANAGER_VIEWER,
+  isActive: true,
+};
+
+function baseIncident(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "incident-1",
+    incidentNo: "INC-000001",
+    siteId: "site-a",
+    ciId: null,
+    status: IncidentStatus.NEW,
+    priority: Priority.P1,
+    category: "HARDWARE_FAILURE",
+    impact: "HIGH",
+    urgency: "HIGH",
+    shortDescription: "Server unresponsive",
+    ownerGroupId: null,
+    ownerUserId: null,
+    acknowledgedAt: null,
+    resolutionCategory: null,
+    rootCauseSummary: null,
+    restoredAt: null,
+    closedAt: null,
+    createdAt: new Date("2026-09-01T00:00:00Z"),
+    updatedAt: new Date("2026-09-01T00:00:00Z"),
+    ...overrides,
+  };
+}
+
+const baseCreateDto = {
+  siteId: "site-a",
+  category: "HARDWARE_FAILURE",
+  impact: "HIGH",
+  urgency: "HIGH",
+  priority: Priority.P1,
+  shortDescription: "Server unresponsive",
+};
+
+function makeService(
+  overrides: {
+    incidentFindUnique?: jest.Mock;
+    txIncident?: Partial<Record<string, jest.Mock>>;
+    canAccessSite?: jest.Mock;
+    getAccessibleSiteIds?: jest.Mock;
+  } = {},
+) {
+  const txIncident = {
+    create: jest
+      .fn()
+      .mockImplementation(({ data }) => Promise.resolve({ ...baseIncident(), ...data })),
+    update: jest
+      .fn()
+      .mockImplementation(({ data }) => Promise.resolve({ ...baseIncident(), ...data })),
+    ...overrides.txIncident,
+  };
+  const tx = {
+    incident: txIncident,
+    incidentEvent: {
+      create: jest
+        .fn()
+        .mockImplementation(({ data }) => Promise.resolve({ id: "event-1", ...data })),
+    },
+    incidentComment: {
+      create: jest
+        .fn()
+        .mockImplementation(({ data }) => Promise.resolve({ id: "comment-1", ...data })),
+    },
+    $queryRaw: jest.fn().mockResolvedValue([{ nextval: BigInt(1) }]),
+  };
+
+  const prisma = {
+    $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
+    incident: {
+      findUnique: overrides.incidentFindUnique ?? jest.fn().mockResolvedValue(baseIncident()),
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    },
+    incidentComment: { findMany: jest.fn().mockResolvedValue([]) },
+    incidentEvent: { findMany: jest.fn().mockResolvedValue([]) },
+  } as unknown as PrismaService;
+
+  const auditService = {
+    record: jest.fn().mockResolvedValue(undefined),
+  } as unknown as AuditService;
+
+  const authzService = {
+    canAccessSite: overrides.canAccessSite ?? jest.fn().mockResolvedValue(true),
+    getAccessibleSiteIds: overrides.getAccessibleSiteIds ?? jest.fn().mockResolvedValue(null),
+  } as unknown as AuthzService;
+
+  return {
+    service: new IncidentsService(prisma, auditService, authzService),
+    prisma,
+    auditService,
+    authzService,
+    tx,
+  };
+}
+
+describe("IncidentsService.create", () => {
+  it("generates the incident number from the sequence and audits inside the same transaction", async () => {
+    const { service, tx, auditService } = makeService();
+    const result = await service.create(baseCreateDto, {
+      actorId: "user-1",
+      correlationId: "corr-1",
+    });
+
+    expect(result).toMatchObject({ incidentNo: "INC-000001", status: IncidentStatus.NEW });
+    expect(tx.incident.create).toHaveBeenCalledTimes(1);
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ eventType: "CREATED" }) }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "Incident", action: "CREATE" }),
+      tx,
+    );
+  });
+});
+
+describe("IncidentsService site-scope enforcement", () => {
+  it("findOneScoped throws when the caller can't access the incident's site", async () => {
+    const { service } = makeService({ canAccessSite: jest.fn().mockResolvedValue(false) });
+    await expect(service.findOneScoped("incident-1", engineer)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+});
+
+describe("IncidentsService.findAll", () => {
+  it("scopes to the caller's accessible sites when an explicit ?siteId isn't in scope", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll({ siteId: "site-not-mine", limit: 50, offset: 0 }, ["site-a", "site-b"]);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ siteId: { in: ["site-a", "site-b"] } }),
+      }),
+    );
+  });
+
+  it("narrows to just the requested site when it IS in the caller's scope", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll({ siteId: "site-a", limit: 50, offset: 0 }, ["site-a", "site-b"]);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ siteId: { in: ["site-a"] } }) }),
+    );
+  });
+
+  it("applies no site filter for an unrestricted (null) caller", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll({ limit: 50, offset: 0 }, null);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ siteId: undefined }) }),
+    );
+  });
+});
+
+describe("IncidentsService.createTransition", () => {
+  it("rejects an invalid (from, to) pair", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+    });
+    await expect(
+      service.createTransition(
+        "incident-1",
+        { toStatus: IncidentStatus.RESOLVED },
+        { actorId: "user-1" },
+        serviceDesk,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects NEW -> ASSIGNED when no owner is resolved", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+    });
+    await expect(
+      service.createTransition(
+        "incident-1",
+        { toStatus: IncidentStatus.ASSIGNED },
+        { actorId: "user-1" },
+        serviceDesk,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects a role that isn't allowed to perform the transition", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.ASSIGNED, ownerUserId: engineer.id }),
+        ),
+    });
+    // CTS_MANAGER_VIEWER isn't in ASSIGNED -> ACKNOWLEDGED's allowedRoles.
+    await expect(
+      service.createTransition(
+        "incident-1",
+        { toStatus: IncidentStatus.ACKNOWLEDGED },
+        { actorId: "user-1" },
+        ctsViewer,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("rejects a non-owner, non-elevated engineer on an owner-restricted transition", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.ASSIGNED, ownerUserId: engineer.id }),
+        ),
+    });
+    await expect(
+      service.createTransition(
+        "incident-1",
+        { toStatus: IncidentStatus.ACKNOWLEDGED },
+        { actorId: "user-1" },
+        otherEngineer,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("rejects RESOLVED without resolutionCategory/rootCauseSummary", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
+        ),
+    });
+    await expect(
+      service.createTransition(
+        "incident-1",
+        { toStatus: IncidentStatus.RESOLVED },
+        { actorId: "user-1" },
+        engineer,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("performs a valid transition, sets acknowledgedAt, and writes both the timeline event and the audit record", async () => {
+    const { service, tx, auditService } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.ASSIGNED, ownerUserId: engineer.id }),
+        ),
+    });
+
+    const result = await service.createTransition(
+      "incident-1",
+      { toStatus: IncidentStatus.ACKNOWLEDGED },
+      { actorId: engineer.id },
+      engineer,
+    );
+
+    expect(result).toMatchObject({ status: IncidentStatus.ACKNOWLEDGED });
+    expect(result.acknowledgedAt).toBeInstanceOf(Date);
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ eventType: "STATUS_CHANGE" }) }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "Incident", action: "TRANSITION" }),
+      tx,
+    );
+  });
+});
+
+describe("IncidentsService comment visibility", () => {
+  it("excludes internal comments for CTS_MANAGER_VIEWER", async () => {
+    const comments = [
+      { id: "c1", incidentId: "incident-1", isInternal: true, body: "internal note" },
+      { id: "c2", incidentId: "incident-1", isInternal: false, body: "customer-visible" },
+    ];
+    const { service, prisma } = makeService();
+    (prisma.incidentComment.findMany as jest.Mock).mockResolvedValue(comments);
+
+    const result = await service.listComments("incident-1", ctsViewer);
+    expect(result).toEqual([comments[1]]);
+  });
+
+  it("returns every comment for a non-viewer role", async () => {
+    const comments = [
+      { id: "c1", incidentId: "incident-1", isInternal: true, body: "internal note" },
+      { id: "c2", incidentId: "incident-1", isInternal: false, body: "customer-visible" },
+    ];
+    const { service, prisma } = makeService();
+    (prisma.incidentComment.findMany as jest.Mock).mockResolvedValue(comments);
+
+    const result = await service.listComments("incident-1", engineer);
+    expect(result).toEqual(comments);
+  });
+});
