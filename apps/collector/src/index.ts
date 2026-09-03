@@ -5,6 +5,10 @@ import { loadConfig } from "./config";
 import type { CollectorConfig } from "./config";
 import { DeliveryBuffer } from "./delivery-buffer";
 import type { BufferedItem } from "./delivery-buffer";
+import { EnvCredentialResolver } from "./hw/credentials";
+import type { Credential } from "./hw/credentials";
+import { runHealthPoll } from "./hw/health-poll";
+import { MgmtHttp } from "./hw/mgmt-http";
 import { OpsDeskClient } from "./opsdesk-client";
 import { makePduSink, NoopTrapListener } from "./snmp/trap-listener";
 
@@ -14,10 +18,11 @@ import { makePduSink, NoopTrapListener } from "./snmp/trap-listener";
  * events outbound to the OpsDesk API — buffering locally while the API is
  * unreachable. No inbound ports.
  *
- * Wires config + the outbound client + the delivery buffer + the loop
- * scaffolding, plus the SNMP trap path (decoded PDU -> SnmpTrap -> buffer ->
- * POST /alerts/sources/snmp). The Redfish/OME/iLO HTTP fetchers and a real
- * (net-snmp-backed) trap listener land next.
+ * Wires config + the outbound client + the delivery buffer + the loops:
+ *  - health poll: for each endpoint, fetch via MgmtHttp -> redfish/hpe-ilo
+ *    adapter -> buffer -> POST /monitoring/health-snapshots (OME fetcher pending);
+ *  - SNMP trap path: decoded PDU -> SnmpTrap -> buffer -> POST /alerts/sources/snmp
+ *    (a real net-snmp-backed listener replaces NoopTrapListener next).
  */
 
 function readConfig(): CollectorConfig {
@@ -65,11 +70,27 @@ function main(): void {
   const trapListener = new NoopTrapListener();
   void trapListener.start();
 
-  const poll = setInterval(() => {
-    // TODO: for each config.endpoints — fetch via the matching adapter's HTTP
-    // client, normalize, buffer.enqueue({ channel: "alert", ... }).
-    void config.endpoints;
-  }, config.pollIntervalSeconds * 1000);
+  const resolver = new EnvCredentialResolver();
+  const makeHttp = (baseUrl: string, credential: Credential): MgmtHttp =>
+    new MgmtHttp(baseUrl, credential);
+
+  const healthPoll = (): void => {
+    void runHealthPoll({
+      endpoints: config.endpoints,
+      resolver,
+      makeHttp,
+      enqueue: (item) => buffer.enqueue(item),
+    }).then((r) => {
+      if (r.failed.length > 0) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[collector] health poll: ${r.enqueued}/${r.polled} enqueued, ${r.failed.length} failed`,
+        );
+      }
+    });
+  };
+  healthPoll();
+  const poll = setInterval(healthPoll, config.pollIntervalSeconds * 1000);
 
   const flush = setInterval(() => {
     void buffer.flush(send).then((r) => {
