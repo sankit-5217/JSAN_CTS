@@ -10,6 +10,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { BulkCreateCisDto } from "./dto/bulk-create-cis.dto";
 import { CreateCiDto } from "./dto/create-ci.dto";
 import { CreateCiRelationDto } from "./dto/create-ci-relation.dto";
 import { CreateRackDto } from "./dto/create-rack.dto";
@@ -116,38 +117,60 @@ export class CmdbService {
     return ci;
   }
 
-  async create(dto: CreateCiDto, actor: ActorContext) {
+  private async insertCi(tx: Prisma.TransactionClient, dto: CreateCiDto, actor: ActorContext) {
+    const ci = await tx.configurationItem.create({
+      data: {
+        ciCode: dto.ciCode,
+        siteId: dto.siteId,
+        rackId: dto.rackId,
+        ciType: dto.ciType,
+        name: dto.name,
+        manufacturer: dto.manufacturer,
+        model: dto.model,
+        serialOrServiceTag: dto.serialOrServiceTag,
+        managementAddress: dto.managementAddress,
+        ownerGroupId: dto.ownerGroupId,
+        managedBy: dto.managedBy,
+        criticality: dto.criticality,
+        lifecycleStatus: dto.lifecycleStatus ?? "ACTIVE",
+        metadata: dto.metadata as Prisma.InputJsonValue | undefined,
+      },
+    });
+    await this.auditService.record(
+      {
+        actorId: actor.actorId,
+        entityType: "ConfigurationItem",
+        entityId: ci.id,
+        action: "CREATE",
+        after: ci,
+        correlationId: actor.correlationId,
+      },
+      tx,
+    );
+    return ci;
+  }
+
+  create(dto: CreateCiDto, actor: ActorContext) {
+    return this.prisma.$transaction((tx) => this.insertCi(tx, dto, actor));
+  }
+
+  /**
+   * All-or-nothing: one bad row (a duplicate ciCode, an unknown siteId)
+   * rolls back the whole batch rather than partially importing. Simpler
+   * and safer for v1 than per-row success/failure reporting — worth
+   * revisiting if real usage shows one bad row routinely blocking 499
+   * good ones.
+   */
+  bulkCreate(dto: BulkCreateCisDto, actor: ActorContext) {
     return this.prisma.$transaction(async (tx) => {
-      const ci = await tx.configurationItem.create({
-        data: {
-          ciCode: dto.ciCode,
-          siteId: dto.siteId,
-          rackId: dto.rackId,
-          ciType: dto.ciType,
-          name: dto.name,
-          manufacturer: dto.manufacturer,
-          model: dto.model,
-          serialOrServiceTag: dto.serialOrServiceTag,
-          managementAddress: dto.managementAddress,
-          ownerGroupId: dto.ownerGroupId,
-          managedBy: dto.managedBy,
-          criticality: dto.criticality,
-          lifecycleStatus: dto.lifecycleStatus ?? "ACTIVE",
-          metadata: dto.metadata as Prisma.InputJsonValue | undefined,
-        },
-      });
-      await this.auditService.record(
-        {
-          actorId: actor.actorId,
-          entityType: "ConfigurationItem",
-          entityId: ci.id,
-          action: "CREATE",
-          after: ci,
-          correlationId: actor.correlationId,
-        },
-        tx,
-      );
-      return ci;
+      // Sequential, not Promise.all — an interactive transaction runs on
+      // one DB connection, so concurrent commands on it don't buy
+      // anything and just add ordering ambiguity for no benefit.
+      const created = [];
+      for (const item of dto.items) {
+        created.push(await this.insertCi(tx, item, actor));
+      }
+      return created;
     });
   }
 
