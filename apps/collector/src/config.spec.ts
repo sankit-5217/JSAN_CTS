@@ -96,6 +96,33 @@ describe("loadConfig", () => {
     expect(() => loadConfig(noSite)).toThrow(CollectorConfigError);
   });
 
+  it("defaults endpointTlsInsecure to false and leaves tls unset", () => {
+    const cfg = loadConfig(raw());
+    expect(cfg.endpointTlsInsecure).toBe(false);
+    expect(cfg.tls).toBeUndefined();
+  });
+
+  it("parses a tls block and endpointTlsInsecure", () => {
+    const cfg = loadConfig(
+      raw({
+        endpointTlsInsecure: true,
+        tls: { certFile: "/c/client.crt", keyFile: "/c/client.key", caFile: "/c/ca.pem" },
+      }),
+    );
+    expect(cfg.endpointTlsInsecure).toBe(true);
+    expect(cfg.tls).toEqual({
+      certFile: "/c/client.crt",
+      keyFile: "/c/client.key",
+      caFile: "/c/ca.pem",
+    });
+  });
+
+  it("rejects a tls block missing certFile / keyFile", () => {
+    expect(() => loadConfig(raw({ tls: { certFile: "/c/client.crt" } }))).toThrow(
+      CollectorConfigError,
+    );
+  });
+
   it("parses snmpSources and a custom trap port", () => {
     const cfg = loadConfig(
       raw({

@@ -14,6 +14,7 @@ import { NetSnmpTrapListener } from "./snmp/net-snmp-listener";
 import { makePduSink, NoopTrapListener } from "./snmp/trap-listener";
 import type { TrapListener } from "./snmp/trap-listener";
 import { OpsDeskClient } from "./opsdesk-client";
+import { buildApiDispatcher, buildEndpointDispatcher } from "./tls";
 
 /**
  * Site-collector entrypoint (ADR-004, spec §11). One process per site: polls
@@ -40,7 +41,11 @@ function readConfig(): CollectorConfig {
 
 function main(): void {
   const config = readConfig();
-  const client = new OpsDeskClient({ baseUrl: config.apiBaseUrl, token: config.apiToken });
+  const client = new OpsDeskClient({
+    baseUrl: config.apiBaseUrl,
+    token: config.apiToken,
+    dispatcher: buildApiDispatcher(config.tls),
+  });
   const buffer = config.bufferFile
     ? new FileDeliveryBuffer(config.bufferFile, config.bufferMaxItems)
     : new DeliveryBuffer(config.bufferMaxItems);
@@ -82,8 +87,9 @@ function main(): void {
   void trapListener.start();
 
   const resolver = new EnvCredentialResolver();
+  const endpointDispatcher = buildEndpointDispatcher(config.endpointTlsInsecure);
   const makeHttp = (baseUrl: string, credential: Credential): MgmtHttp =>
-    new MgmtHttp(baseUrl, credential);
+    new MgmtHttp(baseUrl, credential, { dispatcher: endpointDispatcher });
 
   const healthPoll = (): void => {
     void runHealthPoll({

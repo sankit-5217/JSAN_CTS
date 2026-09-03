@@ -26,6 +26,13 @@ export interface EndpointTarget {
   deviceRef?: string;
 }
 
+/** mTLS material for the outbound OpsDesk API connection (ADR-004). */
+export interface TlsConfig {
+  certFile: string;
+  keyFile: string;
+  caFile?: string;
+}
+
 /** An SNMP trap source — maps a device's source IP to its OpsDesk CI code. */
 export interface SnmpSource {
   /** Source address traps arrive from (SNMPv1 agent-addr / v2c transport source). */
@@ -49,6 +56,11 @@ export interface CollectorConfig {
   /** Path to persist the delivery buffer so it survives a restart. When unset,
    *  the buffer is in-memory only. */
   bufferFile?: string;
+  /** mTLS client cert for the API connection. Plain TLS when unset. */
+  tls?: TlsConfig;
+  /** Accept self-signed certs from the LAN management endpoints (Redfish/OME/iLO).
+   *  Never affects the API connection. */
+  endpointTlsInsecure: boolean;
   endpoints: EndpointTarget[];
   /** UDP port the trap listener binds (default 162). */
   snmpTrapPort: number;
@@ -153,10 +165,25 @@ export function loadConfig(raw: unknown): CollectorConfig {
     return { address: str(sr, "address"), ciCode: str(sr, "ciCode") };
   });
 
+  let tls: TlsConfig | undefined;
+  if (r.tls !== undefined) {
+    if (typeof r.tls !== "object" || r.tls === null) {
+      throw new CollectorConfigError('"tls" must be an object', "tls");
+    }
+    const tr = r.tls as Record<string, unknown>;
+    tls = {
+      certFile: str(tr, "certFile"),
+      keyFile: str(tr, "keyFile"),
+      ...(typeof tr.caFile === "string" && tr.caFile.trim() ? { caFile: tr.caFile.trim() } : {}),
+    };
+  }
+
   return {
     siteCode: str(r, "siteCode"),
     apiBaseUrl: requireHttps(str(r, "apiBaseUrl"), "apiBaseUrl"),
     apiToken: str(r, "apiToken"),
+    ...(tls ? { tls } : {}),
+    endpointTlsInsecure: r.endpointTlsInsecure === true,
     pollIntervalSeconds: posInt(r, "pollIntervalSeconds", 300),
     heartbeatIntervalSeconds: posInt(r, "heartbeatIntervalSeconds", 60),
     bufferMaxItems: posInt(r, "bufferMaxItems", 10_000),

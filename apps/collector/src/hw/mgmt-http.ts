@@ -3,7 +3,7 @@ import type { Credential } from "./credentials";
 /** Minimal `fetch` surface for management-endpoint GETs — lets tests inject a fake. */
 export type MgmtFetch = (
   url: string,
-  init: { method: string; headers: Record<string, string> },
+  init: { method: string; headers: Record<string, string>; dispatcher?: unknown },
 ) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
 export class MgmtHttpError extends Error {
@@ -22,15 +22,23 @@ export class MgmtHttpError extends Error {
  * (CLAUDE.md "no destructive hardware actions in v1"). Basic auth; a session /
  * token flow (OME `X-Auth-Token`) layers on later behind the same `get()`.
  */
+export interface MgmtHttpOptions {
+  fetchImpl?: MgmtFetch;
+  /** undici Agent — set for self-signed BMC certs (`rejectUnauthorized: false`). */
+  dispatcher?: unknown;
+}
+
 export class MgmtHttp {
   private readonly baseUrl: string;
   private readonly authHeader: string;
   private readonly fetchImpl: MgmtFetch;
+  private readonly dispatcher: unknown;
 
-  constructor(baseUrl: string, credential: Credential, fetchImpl?: MgmtFetch) {
+  constructor(baseUrl: string, credential: Credential, opts: MgmtHttpOptions = {}) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.authHeader = `Basic ${Buffer.from(`${credential.username}:${credential.password}`).toString("base64")}`;
-    this.fetchImpl = fetchImpl ?? (globalThis.fetch as unknown as MgmtFetch);
+    this.dispatcher = opts.dispatcher;
+    this.fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as MgmtFetch);
     if (!this.fetchImpl) {
       throw new Error("no fetch implementation available (Node >= 18 or pass fetchImpl)");
     }
@@ -42,6 +50,7 @@ export class MgmtHttp {
     const res = await this.fetchImpl(url, {
       method: "GET",
       headers: { accept: "application/json", authorization: this.authHeader },
+      ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
     });
     const text = await res.text();
     if (!res.ok) {
