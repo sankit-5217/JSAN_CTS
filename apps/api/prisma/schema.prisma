@@ -227,6 +227,8 @@ model SupportGroup {
   name      String   @unique
   createdAt DateTime @default(now()) @map("created_at")
 
+  incidents Incident[]
+
   @@map("support_groups")
 }
 
@@ -346,6 +348,7 @@ model Incident {
   shortDescription String     @map("short_description")
   ownerGroupId String?        @map("owner_group_id")
   ownerUserId  String?        @map("owner_user_id")
+  acknowledgedAt DateTime?    @map("acknowledged_at")
   resolutionCategory String?  @map("resolution_category")
   rootCauseSummary   String?  @map("root_cause_summary")
   restoredAt   DateTime?      @map("restored_at")
@@ -353,9 +356,10 @@ model Incident {
   createdAt    DateTime       @default(now()) @map("created_at")
   updatedAt    DateTime       @updatedAt @map("updated_at")
 
-  site  Site               @relation(fields: [siteId], references: [id])
-  ci    ConfigurationItem? @relation(fields: [ciId], references: [id])
-  owner User?              @relation("IncidentOwner", fields: [ownerUserId], references: [id])
+  site       Site               @relation(fields: [siteId], references: [id])
+  ci         ConfigurationItem? @relation(fields: [ciId], references: [id])
+  owner      User?              @relation("IncidentOwner", fields: [ownerUserId], references: [id])
+  ownerGroup SupportGroup?      @relation(fields: [ownerGroupId], references: [id])
 
   events    IncidentEvent[]
   comments  IncidentComment[]
