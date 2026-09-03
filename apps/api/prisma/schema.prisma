@@ -435,25 +435,38 @@ model SlaPolicy {
   priority          Priority
   ackTargetMinutes  Int      @map("ack_target_minutes")
   resolveTargetMinutes Int   @map("resolve_target_minutes")
+  usesBusinessCalendar Boolean @default(false) @map("uses_business_calendar")
+  escalationThresholdsPercent Int[] @default([50, 75, 90]) @map("escalation_thresholds_percent")
+  pausesOnPendingVendor   Boolean @default(true) @map("pauses_on_pending_vendor")
+  pausesOnPendingCustomer Boolean @default(true) @map("pauses_on_pending_customer")
   effectiveFrom     DateTime @map("effective_from")
   effectiveTo       DateTime? @map("effective_to")
   isActive          Boolean  @default(true) @map("is_active")
 
   slaInstances SlaInstance[]
 
+  @@index([priority, isActive])
   @@map("sla_policies")
 }
 
+/// pausedAt is the start of the *current* pause window (null when not
+/// paused); pausedMinutes is the cumulative total, only incremented on
+/// resume — never derived from pausedAt alone, so a mid-pause read of
+/// resolveDueAt stays stable. firedMilestones dedupes the escalation scan
+/// (spec §10.8: "store exact timer events") so a threshold is recorded and
+/// notified exactly once, e.g. "ACK_75", "RESOLVE_BREACH".
 model SlaInstance {
-  id            String    @id @default(uuid())
-  incidentId    String    @map("incident_id")
-  slaPolicyId   String    @map("sla_policy_id")
-  ackDueAt      DateTime? @map("ack_due_at")
-  ackedAt       DateTime? @map("acked_at")
-  resolveDueAt  DateTime? @map("resolve_due_at")
-  resolvedAt    DateTime? @map("resolved_at")
-  pausedMinutes Int       @default(0) @map("paused_minutes")
-  breached      Boolean   @default(false)
+  id              String    @id @default(uuid())
+  incidentId      String    @map("incident_id")
+  slaPolicyId     String    @map("sla_policy_id")
+  ackDueAt        DateTime? @map("ack_due_at")
+  ackedAt         DateTime? @map("acked_at")
+  resolveDueAt    DateTime? @map("resolve_due_at")
+  resolvedAt      DateTime? @map("resolved_at")
+  pausedAt        DateTime? @map("paused_at")
+  pausedMinutes   Int       @default(0) @map("paused_minutes")
+  firedMilestones String[]  @default([]) @map("fired_milestones")
+  breached        Boolean   @default(false)
 
   incident  Incident  @relation(fields: [incidentId], references: [id])
   slaPolicy SlaPolicy @relation(fields: [slaPolicyId], references: [id])
