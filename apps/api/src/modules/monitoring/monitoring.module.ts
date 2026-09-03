@@ -14,6 +14,8 @@ import { MonitoringService } from "./monitoring.service";
  * POST /monitoring/health-snapshots — batch upsert (unknown CI rejected
  * per-item), service-account JWT + an ingest role; audit event per snapshot.
  * GET /monitoring/health-snapshots/:ciCode — current snapshot for a CI.
+ * POST /monitoring/collector-heartbeat — site collector liveness ping (spec §26),
+ * stored as an append-only COLLECTOR_HEARTBEAT audit event per site.
  * TODO: if Dev A treats HealthSnapshot as cmdb's to write, the upsert moves
  * behind CmdbService — the ingest contract stays.
  */

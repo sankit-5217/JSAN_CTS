@@ -18,6 +18,7 @@ import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { CollectorHeartbeatDto } from "./dto/collector-heartbeat.dto";
 import { HealthSnapshotBatchDto } from "./dto/health-snapshot.dto";
 import { MonitoringService } from "./monitoring.service";
 
@@ -60,5 +61,21 @@ export class MonitoringController {
   @ApiOperation({ summary: "Current health snapshot for a CI" })
   getForCi(@Param("ciCode") ciCode: string) {
     return this.monitoringService.getForCi(ciCode);
+  }
+
+  @Post("collector-heartbeat")
+  @Roles(...HEALTH_INGEST_ROLES)
+  @HttpCode(HttpStatus.OK)
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  @ApiOperation({ summary: "Site collector liveness ping (spec §26)" })
+  heartbeat(
+    @Body() body: CollectorHeartbeatDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.monitoringService.recordHeartbeat(body.siteCode, {
+      actorId: user.id,
+      correlationId,
+    });
   }
 }

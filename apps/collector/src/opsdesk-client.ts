@@ -63,8 +63,11 @@ export class OpsDeskClient {
     return this.post("/monitoring/health-snapshots", { snapshots });
   }
 
-  // TODO: heartbeat(siteCode) once the API exposes a collector-liveness endpoint
-  // (spec §26) — a silent collector must not read as "everything healthy".
+  /** Liveness ping (spec §26) — sent directly, not buffered, since a stale
+   *  heartbeat replayed after a long outage carries no signal. */
+  heartbeat(siteCode: string): Promise<unknown> {
+    return this.post("/monitoring/collector-heartbeat", { siteCode });
+  }
 
   private async post(path: string, body: unknown): Promise<unknown> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {

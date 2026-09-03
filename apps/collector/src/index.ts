@@ -110,7 +110,19 @@ function main(): void {
         console.warn(`[collector] ${r.delivered} delivered, ${r.remaining} still buffered`);
       }
     });
-  }, config.heartbeatIntervalSeconds * 1000);
+  }, config.pollIntervalSeconds * 1000);
+
+  // Liveness ping (spec §26) — direct, not buffered.
+  const beat = (): void => {
+    void client.heartbeat(config.siteCode).catch((err: unknown) => {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[collector] heartbeat failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  };
+  beat();
+  const heartbeat = setInterval(beat, config.heartbeatIntervalSeconds * 1000);
 
   // eslint-disable-next-line no-console
   console.log(
@@ -121,6 +133,7 @@ function main(): void {
   const shutdown = (): void => {
     clearInterval(poll);
     clearInterval(flush);
+    clearInterval(heartbeat);
     void trapListener.stop();
     process.exit(0);
   };
