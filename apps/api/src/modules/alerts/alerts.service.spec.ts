@@ -1,4 +1,5 @@
 import { NotFoundException } from "@nestjs/common";
+import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AlertsService } from "./alerts.service";
@@ -9,6 +10,7 @@ import { ZabbixWebhookEventDto } from "./dto/zabbix-webhook.dto";
 type PrismaMock = {
   site: { findUnique: jest.Mock };
   configurationItem: { findUnique: jest.Mock };
+  user: { findMany: jest.Mock };
   alert: {
     findUnique: jest.Mock;
     findMany: jest.Mock;
@@ -23,6 +25,7 @@ function createPrismaMock(): PrismaMock {
   const mock: PrismaMock = {
     site: { findUnique: jest.fn() },
     configurationItem: { findUnique: jest.fn() },
+    user: { findMany: jest.fn() },
     alert: {
       findUnique: jest.fn(),
       findMany: jest.fn(),
@@ -58,14 +61,17 @@ const ACTOR = { actorId: "collector-svc", correlationId: "corr-1" };
 describe("AlertsService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
+  let notifications: { enqueue: jest.Mock };
   let service: AlertsService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
     audit = { record: jest.fn() };
+    notifications = { enqueue: jest.fn() };
     service = new AlertsService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
+      notifications as unknown as NotificationsPublisher,
     );
     prisma.site.findUnique.mockResolvedValue({ id: "site-1", code: "SITE01" });
     prisma.configurationItem.findUnique.mockResolvedValue({
@@ -241,6 +247,47 @@ describe("AlertsService", () => {
     const result = await service.ingest(baseDto(), ACTOR);
 
     expect(result.suppressedByMaintenance).toBe(false);
+  });
+
+  it("pages the NOC roster on a brand-new CRITICAL alert", async () => {
+    prisma.alert.findUnique.mockResolvedValue(null);
+    prisma.alert.create.mockResolvedValue({ id: "alert-crit", state: "OPEN" });
+    prisma.user.findMany.mockResolvedValue([
+      { email: "noc@corp.example", displayName: "NOC Desk" },
+    ]);
+
+    await service.ingest(baseDto({ severity: "CRITICAL" }), ACTOR);
+
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "ALERT_RAISED",
+          alertType: "disk.predictive_failure",
+        }),
+        recipients: { to: [{ name: "NOC Desk", email: "noc@corp.example" }] },
+      }),
+      "ALERT_RAISED:alert-crit",
+    );
+  });
+
+  it("does not page on a non-critical alert or on a dedup", async () => {
+    prisma.alert.findUnique.mockResolvedValueOnce(null);
+    prisma.alert.create.mockResolvedValue({ id: "a", state: "OPEN" });
+    await service.ingest(baseDto({ severity: "HIGH" }), ACTOR);
+
+    prisma.alert.findUnique.mockResolvedValueOnce({
+      id: "a",
+      state: "OPEN",
+      severity: "HIGH",
+      siteId: "site-1",
+      ciId: "ci-1",
+      lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+    });
+    prisma.alert.update.mockResolvedValue({ id: "a", state: "OPEN" });
+    await service.ingest(baseDto({ severity: "CRITICAL" }), ACTOR); // dedup, no state change
+
+    expect(notifications.enqueue).not.toHaveBeenCalled();
+    expect(prisma.user.findMany).not.toHaveBeenCalled();
   });
 
   it("throws NotFoundException for an unknown alert id", async () => {

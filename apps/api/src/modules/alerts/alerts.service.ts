@@ -5,6 +5,8 @@ import {
   AlertNormalizationError as ZabbixNormalizationError,
   normalizeZabbixEvent,
 } from "@cts-dc-opsdesk/zabbix-adapter";
+import { UserRole } from "@prisma/client";
+import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
@@ -68,6 +70,7 @@ export class AlertsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsPublisher,
   ) {
     // config-over-hardcode stopgap: env-driven until the alert_rules table
     // (Dev B, spec §10.10) provides per-site / per-type thresholds.
@@ -204,6 +207,10 @@ export class AlertsService {
       where: { fingerprint, lastSeenAt: { gte: since } },
     });
 
+    if (!deduped && dto.severity === "CRITICAL") {
+      await this.notifyNocOfCriticalAlert(alertId, dto);
+    }
+
     return {
       alertId,
       fingerprint,
@@ -215,6 +222,47 @@ export class AlertsService {
       recentOccurrences,
       suppressedByMaintenance: ci?.lifecycleStatus === "MAINTENANCE",
     };
+  }
+
+  /**
+   * Best-effort: a brand-new CRITICAL alert pages the NOC roster. Only on first
+   * sighting (not dedup) so a re-fired trap doesn't re-page. Fully swallowed —
+   * ingestion never blocks or fails on the notification.
+   */
+  private async notifyNocOfCriticalAlert(alertId: string, dto: IngestAlertDto): Promise<void> {
+    try {
+      const roster = await this.prisma.user.findMany({
+        where: {
+          isActive: true,
+          role: { in: [UserRole.SERVICE_DESK_NOC, UserRole.INFRASTRUCTURE_LEAD] },
+        },
+        select: { email: true, displayName: true },
+      });
+      if (roster.length === 0) {
+        return;
+      }
+      await this.notifications.enqueue(
+        {
+          event: {
+            kind: "ALERT_RAISED",
+            entity: {
+              key: `ALRT-${alertId.slice(0, 8)}`,
+              title: dto.summary || dto.alertType,
+              siteCode: dto.siteCode,
+              severity: "CRITICAL",
+            },
+            alertType: dto.alertType,
+            state: dto.state,
+          },
+          recipients: { to: roster.map((u) => ({ name: u.displayName, email: u.email })) },
+        },
+        `ALERT_RAISED:${alertId}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `critical alert ${alertId} NOC notification skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /**
