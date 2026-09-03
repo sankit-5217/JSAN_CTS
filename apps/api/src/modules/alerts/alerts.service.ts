@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { normalizeAlertmanagerWebhook } from "@cts-dc-opsdesk/prometheus-adapter";
+import { normalizeSnmpTrap, SnmpNormalizationError } from "@cts-dc-opsdesk/snmp-adapter";
 import {
   AlertNormalizationError as ZabbixNormalizationError,
   normalizeZabbixEvent,
@@ -12,6 +13,7 @@ import { computeAlertFingerprint } from "./alerts.fingerprint";
 import { AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
 import { IngestAlertDto } from "./dto/ingest-alert.dto";
 import { QueryAlertsDto } from "./dto/query-alerts.dto";
+import { SnmpTrapDto } from "./dto/snmp-trap.dto";
 import { ZabbixWebhookEventDto } from "./dto/zabbix-webhook.dto";
 
 /** Outcome of an ingestion call. Safe to return to the calling adapter/collector. */
@@ -275,6 +277,32 @@ export class AlertsService {
     return { accepted, rejected };
   }
 
+  /**
+   * Ingest a batch of parsed SNMP traps from the site collector's trap receiver:
+   * normalize each via the SNMP adapter, then run it through {@link ingest}.
+   * Traps that fail normalization are reported in `rejected`, not thrown.
+   */
+  async ingestFromSnmp(traps: SnmpTrapDto[], actor: ActorContext): Promise<SourceIngestResult> {
+    const accepted: AlertIngestResult[] = [];
+    const rejected: RejectedAlert[] = [];
+
+    for (const [index, trap] of traps.entries()) {
+      let normalized: ReturnType<typeof normalizeSnmpTrap>;
+      try {
+        normalized = normalizeSnmpTrap(trap);
+      } catch (err) {
+        rejected.push(toRejectedAlert(index, err));
+        continue;
+      }
+      accepted.push(await this.ingest(normalized, actor));
+    }
+
+    if (rejected.length > 0) {
+      this.logger.warn(`SNMP batch: ${accepted.length} accepted, ${rejected.length} rejected`);
+    }
+    return { accepted, rejected };
+  }
+
   async findAll(query: QueryAlertsDto) {
     let ciId: string | undefined;
     if (query.ciCode) {
@@ -332,7 +360,7 @@ function extractRawReference(attributes: Record<string, unknown> | undefined): s
 }
 
 function toRejectedAlert(index: number, err: unknown): RejectedAlert {
-  if (err instanceof ZabbixNormalizationError) {
+  if (err instanceof ZabbixNormalizationError || err instanceof SnmpNormalizationError) {
     return { index, field: err.field, message: err.message };
   }
   return { index, message: err instanceof Error ? err.message : String(err) };

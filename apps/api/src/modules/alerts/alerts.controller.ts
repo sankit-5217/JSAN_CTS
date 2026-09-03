@@ -23,6 +23,7 @@ import { AlertsService } from "./alerts.service";
 import { AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
 import { IngestAlertDto } from "./dto/ingest-alert.dto";
 import { QueryAlertsDto } from "./dto/query-alerts.dto";
+import { SnmpTrapBatchDto } from "./dto/snmp-trap.dto";
 import { ZabbixWebhookBatchDto } from "./dto/zabbix-webhook.dto";
 
 // The ingestion endpoints are machine-to-machine — the site collector calls them
@@ -86,6 +87,19 @@ export class AlertsController {
     @CorrelationId() correlationId?: string,
   ) {
     return this.alertsService.ingestFromAlertmanager(body, { actorId: user.id, correlationId });
+  }
+
+  @Post("sources/snmp")
+  @Roles(...ALERT_INGEST_ROLES)
+  @HttpCode(HttpStatus.OK)
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  @ApiOperation({ summary: "Normalize + ingest a batch of parsed SNMP traps from the collector" })
+  ingestSnmp(
+    @Body() body: SnmpTrapBatchDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.alertsService.ingestFromSnmp(body.traps, { actorId: user.id, correlationId });
   }
 
   @Get()

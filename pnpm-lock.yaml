@@ -20,6 +20,9 @@ importers:
       '@cts-dc-opsdesk/prometheus-adapter':
         specifier: workspace:*
         version: link:../../integrations/prometheus
+      '@cts-dc-opsdesk/snmp-adapter':
+        specifier: workspace:*
+        version: link:../../integrations/snmp
       '@cts-dc-opsdesk/zabbix-adapter':
         specifier: workspace:*
         version: link:../../integrations/zabbix

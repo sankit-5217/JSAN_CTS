@@ -12,9 +12,10 @@ import { AlertsService } from "./alerts.service";
  * stable fingerprint = sha256(site + CI + alert type + component), OPEN/ACK/
  * RECOVERED state reduction, flapping signal, graceful unresolved site/CI;
  * GET /alerts + GET /alerts/:id read models.
- * Sprint 9 (done): POST /alerts/sources/zabbix and /alerts/sources/alertmanager —
- * normalize native webhook payloads via @cts-dc-opsdesk/{zabbix,prometheus}-adapter
- * then funnel into ingest(); per-event failures reported, never fatal.
+ * Sprint 9 (done): POST /alerts/sources/{zabbix,alertmanager,snmp} — normalize
+ * native payloads via @cts-dc-opsdesk/{zabbix,prometheus,snmp}-adapter then
+ * funnel into ingest(); per-event failures reported, never fatal. All ingest
+ * routes require a service-account JWT with an ALERT_INGEST role.
  * Sprint 11 (partial): ingest() flags suppressedByMaintenance when the linked CI
  * is in MAINTENANCE lifecycle. Broader change-window suppression (changes module,
  * GET /changes/maintenance/active) is layered on by the worker at correlation time.

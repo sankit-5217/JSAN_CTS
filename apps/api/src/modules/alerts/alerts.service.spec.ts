@@ -321,4 +321,35 @@ describe("AlertsService", () => {
       });
     });
   });
+
+  describe("ingestFromSnmp", () => {
+    beforeEach(() => {
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-s", state: "OPEN" });
+    });
+
+    it("normalizes a batch of traps and reports per-trap rejections", async () => {
+      const good = {
+        ciCode: "SITE01-R03-SW-002",
+        agentAddress: "10.20.3.2",
+        version: "v2c",
+        trapOid: "1.3.6.1.6.3.1.1.5.3",
+        trapName: "linkDown",
+        sysUpTimeTicks: 123456,
+        varbinds: [{ oid: "1.3.6.1.2.1.31.1.1.1.1.3", name: "ifName", value: "Gi1/0/3" }],
+      };
+      const bad = { ciCode: "  ", agentAddress: "10.20.3.9", trapOid: "1.3.6.1.6.3.1.1.5.3" };
+
+      const result = await service.ingestFromSnmp([good, bad], ACTOR);
+
+      expect(result.accepted).toHaveLength(1);
+      expect(result.rejected).toEqual([{ index: 1, field: "ciCode", message: expect.any(String) }]);
+      expect(prisma.alert.create).toHaveBeenCalledTimes(1);
+      expect(prisma.alert.create.mock.calls[0][0].data).toMatchObject({
+        source: "SNMP",
+        alertType: "network.link_state",
+        severity: "HIGH",
+      });
+    });
+  });
 });
