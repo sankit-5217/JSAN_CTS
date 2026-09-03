@@ -1,13 +1,15 @@
 /**
  * Local buffer for events the collector could not deliver (ADR-004: "buffers
- * locally on disconnect and uploads idempotently on reconnect"). In-memory for
- * now — a disk-backed implementation drops in behind the same shape. Every
- * buffered payload carries a stable id, so replaying a payload the API already
- * accepted is a no-op on the server (idempotent ingest).
+ * locally on disconnect and uploads idempotently on reconnect"). Every buffered
+ * payload carries a stable id, so replaying a payload the API already accepted
+ * is a no-op on the server (idempotent ingest).
+ *
+ * `DeliveryBuffer` keeps the queue in memory; `FileDeliveryBuffer` (same shape)
+ * persists it so buffered events survive a collector restart.
  */
 
 export interface BufferedItem<T = unknown> {
-  /** Stable key for dedupe + ordering, e.g. `snmp:<eventId>` or `hb:<iso>`. */
+  /** Stable key for dedupe + ordering, e.g. `snmp:<eventId>` or `health:<ci>:<iso>`. */
   key: string;
   /** What kind of send this is — picks the OpsDeskClient method on flush. */
   channel: string;
@@ -24,9 +26,9 @@ export interface FlushResult {
 }
 
 export class DeliveryBuffer {
-  private items: BufferedItem[] = [];
+  protected items: BufferedItem[] = [];
 
-  constructor(private readonly maxItems: number) {}
+  constructor(protected readonly maxItems: number) {}
 
   get size(): number {
     return this.items.length;
@@ -41,6 +43,7 @@ export class DeliveryBuffer {
     if (this.items.length > this.maxItems) {
       this.items.splice(0, this.items.length - this.maxItems);
     }
+    this.onChange();
   }
 
   /**
@@ -60,6 +63,12 @@ export class DeliveryBuffer {
       this.items.shift();
       delivered += 1;
     }
+    if (delivered > 0) {
+      this.onChange();
+    }
     return { delivered, remaining: this.items.length };
   }
+
+  /** Hook: called after every mutation so a subclass can persist. */
+  protected onChange(): void {}
 }

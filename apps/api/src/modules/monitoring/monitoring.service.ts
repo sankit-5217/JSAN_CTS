@@ -108,6 +108,25 @@ export class MonitoringService {
     return { accepted, rejected };
   }
 
+  /**
+   * Record a site collector's liveness ping (spec §26). Written as an
+   * append-only audit event (entityType "collector", entityId the site code) so
+   * a monitoring check / report can flag any site whose last COLLECTOR_HEARTBEAT
+   * is stale — a silent collector must not read as "everything healthy".
+   */
+  async recordHeartbeat(siteCode: string, actor: ActorContext): Promise<{ recordedAt: string }> {
+    const recordedAt = new Date().toISOString();
+    await this.audit.record({
+      actorId: actor.actorId,
+      correlationId: actor.correlationId,
+      entityType: "collector",
+      entityId: siteCode,
+      action: "COLLECTOR_HEARTBEAT",
+      after: { recordedAt },
+    });
+    return { recordedAt };
+  }
+
   /** Current snapshot for a CI by its code. */
   async getForCi(ciCode: string) {
     const ci = await this.prisma.configurationItem.findUnique({ where: { ciCode } });

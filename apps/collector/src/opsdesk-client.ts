@@ -1,13 +1,15 @@
 import type { HealthSnapshotPayload, NormalizedAlertPayload } from "@cts-dc-opsdesk/shared-types";
 import type { SnmpTrap } from "@cts-dc-opsdesk/snmp-adapter";
 
-/** Just the bits of `fetch` this client uses — lets tests inject a fake. */
+/** Just the bits of `fetch` this client uses — lets tests inject a fake.
+ *  `dispatcher` is undici's client-cert hook, ignored by fakes. */
 export type FetchLike = (
   url: string,
   init: {
     method: string;
     headers: Record<string, string>;
     body: string;
+    dispatcher?: unknown;
   },
 ) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
@@ -27,6 +29,8 @@ export interface OpsDeskClientOptions {
   token: string;
   /** Defaults to the global `fetch` (Node 18+). */
   fetchImpl?: FetchLike;
+  /** undici Agent presenting the client cert (mTLS, ADR-004). */
+  dispatcher?: unknown;
 }
 
 /**
@@ -38,10 +42,12 @@ export class OpsDeskClient {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly fetchImpl: FetchLike;
+  private readonly dispatcher: unknown;
 
   constructor(opts: OpsDeskClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.token = opts.token;
+    this.dispatcher = opts.dispatcher;
     this.fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
     if (!this.fetchImpl) {
       throw new Error("no fetch implementation available (Node >= 18 or pass fetchImpl)");
@@ -63,8 +69,11 @@ export class OpsDeskClient {
     return this.post("/monitoring/health-snapshots", { snapshots });
   }
 
-  // TODO: heartbeat(siteCode) once the API exposes a collector-liveness endpoint
-  // (spec §26) — a silent collector must not read as "everything healthy".
+  /** Liveness ping (spec §26) — sent directly, not buffered, since a stale
+   *  heartbeat replayed after a long outage carries no signal. */
+  heartbeat(siteCode: string): Promise<unknown> {
+    return this.post("/monitoring/collector-heartbeat", { siteCode });
+  }
 
   private async post(path: string, body: unknown): Promise<unknown> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
@@ -74,6 +83,7 @@ export class OpsDeskClient {
         authorization: `Bearer ${this.token}`,
       },
       body: JSON.stringify(body),
+      ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
     });
     const text = await res.text();
     if (!res.ok) {

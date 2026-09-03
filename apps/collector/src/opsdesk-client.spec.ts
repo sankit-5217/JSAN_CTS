@@ -107,6 +107,16 @@ describe("OpsDeskClient", () => {
     expect(calls[0].body).toMatchObject({ snapshots: [{ ciCode: "SITE01-R01-SRV-040" }] });
   });
 
+  it("POSTs a heartbeat to /monitoring/collector-heartbeat", async () => {
+    const { fetchImpl, calls } = fakeFetch(() => ({ ok: true, status: 200, text: "{}" }));
+    const client = new OpsDeskClient({ baseUrl: "https://x/api/v1", token: "t", fetchImpl });
+
+    await client.heartbeat("SITE01");
+
+    expect(calls[0].url).toBe("https://x/api/v1/monitoring/collector-heartbeat");
+    expect(calls[0].body).toEqual({ siteCode: "SITE01" });
+  });
+
   it("throws OpsDeskApiError on a non-2xx response", async () => {
     const { fetchImpl } = fakeFetch(() => ({ ok: false, status: 403, text: "Forbidden" }));
     const client = new OpsDeskClient({ baseUrl: "https://x/api/v1", token: "t", fetchImpl });

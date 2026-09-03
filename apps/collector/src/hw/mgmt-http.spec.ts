@@ -24,7 +24,7 @@ const CRED = { username: "root", password: "calvin" };
 describe("MgmtHttp", () => {
   it("GETs with Basic auth and an Accept header", async () => {
     const { fetchImpl, calls } = fake(() => ({ ok: true, status: 200, text: '{"ok":1}' }));
-    const http = new MgmtHttp("https://10.20.1.40/", CRED, fetchImpl);
+    const http = new MgmtHttp("https://10.20.1.40/", CRED, { fetchImpl });
 
     const body = await http.get("/redfish/v1/Systems");
 
@@ -38,7 +38,7 @@ describe("MgmtHttp", () => {
 
   it("throws MgmtHttpError on a non-2xx", async () => {
     const { fetchImpl } = fake(() => ({ ok: false, status: 401, text: "no" }));
-    const http = new MgmtHttp("https://x", CRED, fetchImpl);
+    const http = new MgmtHttp("https://x", CRED, { fetchImpl });
     await expect(http.get("/y")).rejects.toBeInstanceOf(MgmtHttpError);
   });
 
@@ -48,7 +48,7 @@ describe("MgmtHttp", () => {
         ? { ok: false, status: 404, text: "" }
         : { ok: false, status: 500, text: "" },
     );
-    const http = new MgmtHttp("https://x", CRED, fetchImpl);
+    const http = new MgmtHttp("https://x", CRED, { fetchImpl });
     await expect(http.tryGet("/missing")).resolves.toBeUndefined();
     await expect(http.tryGet("/boom")).rejects.toBeInstanceOf(MgmtHttpError);
   });

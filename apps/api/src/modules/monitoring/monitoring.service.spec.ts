@@ -105,6 +105,22 @@ describe("MonitoringService", () => {
     });
   });
 
+  describe("recordHeartbeat", () => {
+    it("writes an append-only COLLECTOR_HEARTBEAT audit event for the site", async () => {
+      const result = await service.recordHeartbeat("SITE01", ACTOR);
+
+      expect(result.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entityType: "collector",
+          entityId: "SITE01",
+          action: "COLLECTOR_HEARTBEAT",
+          actorId: "collector-svc",
+        }),
+      );
+    });
+  });
+
   describe("getForCi", () => {
     it("404s an unknown CI", async () => {
       prisma.configurationItem.findUnique.mockResolvedValue(null);
