@@ -185,6 +185,7 @@ model Site {
   configurationItems   ConfigurationItem[]
   incidents            Incident[]
   userAccess           UserSiteAccess[]
+  racks                Rack[]
 
   @@map("sites")
 }
@@ -233,10 +234,30 @@ model SupportGroup {
 // CMDB (owner: Dev A / cmdb module) — spec §9
 // ---------------------------------------------------------------------------
 
+/// Physical placement, not a monitorable asset — spec's Figure 2 hierarchy
+/// (Site -> Rack -> Server/Switch/UPS) treats a rack as containment, so it
+/// stays out of CiType/ConfigurationItem and out of CI search results.
+model Rack {
+  id        String   @id @default(uuid())
+  siteId    String   @map("site_id")
+  rackCode  String   @map("rack_code")
+  name      String?
+  location  String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  site               Site                @relation(fields: [siteId], references: [id])
+  configurationItems ConfigurationItem[]
+
+  @@unique([siteId, rackCode])
+  @@map("racks")
+}
+
 model ConfigurationItem {
   id                 String          @id @default(uuid())
   ciCode             String          @unique @map("ci_code")
   siteId             String          @map("site_id")
+  rackId             String?         @map("rack_id")
   ciType             CiType          @map("ci_type")
   name               String
   manufacturer       String?
@@ -252,6 +273,7 @@ model ConfigurationItem {
   updatedAt          DateTime        @updatedAt @map("updated_at")
 
   site         Site           @relation(fields: [siteId], references: [id])
+  rack         Rack?          @relation(fields: [rackId], references: [id])
   incidents    Incident[]
   alerts       Alert[]
   healthSnapshot HealthSnapshot?
@@ -262,6 +284,7 @@ model ConfigurationItem {
   childOf  CiRelation[] @relation("ChildCi")
 
   @@index([siteId])
+  @@index([rackId])
   @@map("configuration_items")
 }
 
