@@ -10,6 +10,7 @@ import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { CmdbService } from "./cmdb.service";
 import { CreateCiDto } from "./dto/create-ci.dto";
+import { CreateCiRelationDto } from "./dto/create-ci-relation.dto";
 import { ListCisQueryDto } from "./dto/list-cis-query.dto";
 import { UpdateCiDto } from "./dto/update-ci.dto";
 
@@ -69,5 +70,21 @@ export class CisController {
     @CorrelationId() correlationId?: string,
   ) {
     return this.cmdbService.update(id, dto, user, { actorId: user.id, correlationId });
+  }
+
+  @Get(":id/relations")
+  listRelations(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.cmdbService.listRelations(id, user);
+  }
+
+  @Post(":id/relations")
+  @Roles(...CMDB_WRITE_ROLES)
+  createRelation(
+    @Param("id") id: string,
+    @Body() dto: CreateCiRelationDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.cmdbService.createRelation(id, dto, { actorId: user.id, correlationId }, user);
   }
 }

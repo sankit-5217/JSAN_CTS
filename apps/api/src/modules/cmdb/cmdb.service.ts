@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { ConfigurationItem, Prisma } from "@prisma/client";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -6,6 +11,7 @@ import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { CreateCiDto } from "./dto/create-ci.dto";
+import { CreateCiRelationDto } from "./dto/create-ci-relation.dto";
 import { CreateRackDto } from "./dto/create-rack.dto";
 import { ListCisQueryDto } from "./dto/list-cis-query.dto";
 import { UpdateCiDto } from "./dto/update-ci.dto";
@@ -219,6 +225,56 @@ export class CmdbService {
         tx,
       );
       return rack;
+    });
+  }
+
+  // --- CI relationships (spec §9.2) ---------------------------------
+
+  /**
+   * Site scope is checked against `:id`'s own site only, not the related
+   * CI's — a v1 simplification. A relation almost always sits within one
+   * site's rack hierarchy in practice; cross-site relations (e.g. a
+   * shared ISP circuit) are rare enough to defer tightening this until
+   * it's a real problem.
+   */
+  async listRelations(ciId: string, user: AuthenticatedUser) {
+    await this.findOneScoped(ciId, user);
+    return this.prisma.ciRelation.findMany({
+      where: { OR: [{ parentCiId: ciId }, { childCiId: ciId }] },
+    });
+  }
+
+  async createRelation(
+    ciId: string,
+    dto: CreateCiRelationDto,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ) {
+    if (dto.relatedCiId === ciId) {
+      throw new BadRequestException("A CI cannot be related to itself");
+    }
+    await this.findOneScoped(ciId, user);
+    await this.findOne(dto.relatedCiId); // 404s if the related CI doesn't exist
+
+    const parentCiId = dto.direction === "CHILD" ? ciId : dto.relatedCiId;
+    const childCiId = dto.direction === "CHILD" ? dto.relatedCiId : ciId;
+
+    return this.prisma.$transaction(async (tx) => {
+      const relation = await tx.ciRelation.create({
+        data: { parentCiId, childCiId, relationType: dto.relationType },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "CiRelation",
+          entityId: relation.id,
+          action: "CREATE",
+          after: relation,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return relation;
     });
   }
 }
