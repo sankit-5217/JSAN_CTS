@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import { IncidentStatus, Priority, UserRole } from "@prisma/client";
+import { StorageService } from "../../common/storage/storage.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
@@ -120,11 +121,17 @@ function makeService(
     getAccessibleSiteIds: overrides.getAccessibleSiteIds ?? jest.fn().mockResolvedValue(null),
   } as unknown as AuthzService;
 
+  const storageService = {
+    putObject: jest.fn().mockResolvedValue(undefined),
+    getSignedDownloadUrl: jest.fn().mockResolvedValue("https://signed.example/download"),
+  } as unknown as StorageService;
+
   return {
-    service: new IncidentsService(prisma, auditService, authzService),
+    service: new IncidentsService(prisma, auditService, authzService, storageService),
     prisma,
     auditService,
     authzService,
+    storageService,
     tx,
   };
 }

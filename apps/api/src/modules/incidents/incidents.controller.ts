@@ -1,5 +1,17 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
-import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { ApiBearerAuth, ApiConsumes, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { AuthzService } from "../auth/authz.service";
@@ -13,7 +25,7 @@ import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
 import { TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
-import { IncidentsService } from "./incidents.service";
+import { IncidentsService, UploadedAttachmentFile } from "./incidents.service";
 
 // Wider than CMDB's write set by exactly SERVICE_DESK_NOC — spec §4 gives
 // that role "Triage, acknowledge, route, update incidents" as its primary
@@ -103,5 +115,37 @@ export class IncidentsController {
   @Get(":id/events")
   listEvents(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.incidentsService.listEvents(id, user);
+  }
+
+  @Post(":id/attachments")
+  @Roles(...INCIDENT_WRITE_ROLES)
+  @ApiConsumes("multipart/form-data")
+  @UseInterceptors(FileInterceptor("file"))
+  uploadAttachment(
+    @Param("id") id: string,
+    @UploadedFile() file: UploadedAttachmentFile,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.incidentsService.uploadAttachment(
+      id,
+      file,
+      { actorId: user.id, correlationId },
+      user,
+    );
+  }
+
+  @Get(":id/attachments")
+  listAttachments(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.incidentsService.listAttachments(id, user);
+  }
+
+  @Get(":id/attachments/:attachmentId/download")
+  getAttachmentDownloadUrl(
+    @Param("id") id: string,
+    @Param("attachmentId") attachmentId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.incidentsService.getAttachmentDownloadUrl(id, attachmentId, user);
   }
 }
