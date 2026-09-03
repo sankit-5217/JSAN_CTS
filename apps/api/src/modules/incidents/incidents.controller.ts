@@ -8,6 +8,7 @@ import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
 import { TransitionIncidentDto } from "./dto/transition-incident.dto";
@@ -81,5 +82,26 @@ export class IncidentsController {
       { actorId: user.id, correlationId },
       user,
     );
+  }
+
+  @Get(":id/comments")
+  listComments(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.incidentsService.listComments(id, user);
+  }
+
+  @Post(":id/comments")
+  @Roles(...INCIDENT_WRITE_ROLES)
+  createComment(
+    @Param("id") id: string,
+    @Body() dto: CreateIncidentCommentDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.incidentsService.createComment(id, dto, { actorId: user.id, correlationId }, user);
+  }
+
+  @Get(":id/events")
+  listEvents(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.incidentsService.listEvents(id, user);
   }
 }

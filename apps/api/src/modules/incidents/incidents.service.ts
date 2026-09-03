@@ -4,12 +4,13 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { Incident, Prisma } from "@prisma/client";
+import { Incident, IncidentComment, IncidentEvent, Prisma, UserRole } from "@prisma/client";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
 import { TransitionIncidentDto } from "./dto/transition-incident.dto";
@@ -303,6 +304,81 @@ export class IncidentsService {
       );
 
       return after;
+    });
+  }
+
+  // --- Comments + timeline reads (spec §19, §29) -----------------------
+
+  async createComment(
+    incidentId: string,
+    dto: CreateIncidentCommentDto,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ): Promise<IncidentComment> {
+    await this.findOneScoped(incidentId, user);
+
+    return this.prisma.$transaction(async (tx) => {
+      const comment = await tx.incidentComment.create({
+        data: {
+          incidentId,
+          authorId: actor.actorId,
+          body: dto.body,
+          isInternal: dto.isInternal ?? true,
+        },
+      });
+
+      await tx.incidentEvent.create({
+        data: {
+          incidentId,
+          eventType: "COMMENT",
+          actorId: actor.actorId,
+          payload: {
+            commentId: comment.id,
+            isInternal: comment.isInternal,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "IncidentComment",
+          entityId: comment.id,
+          action: "CREATE",
+          after: comment,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+
+      return comment;
+    });
+  }
+
+  /**
+   * Spec §19: "separate internal engineer notes from customer-visible
+   * comments." CTS_MANAGER_VIEWER never sees isInternal rows; every other
+   * role (including AUDITOR_READ_ONLY, which needs full evidence per §4)
+   * sees everything.
+   */
+  async listComments(incidentId: string, user: AuthenticatedUser): Promise<IncidentComment[]> {
+    await this.findOneScoped(incidentId, user);
+    const comments = await this.prisma.incidentComment.findMany({
+      where: { incidentId },
+      orderBy: { createdAt: "asc" },
+    });
+    if (user.role === UserRole.CTS_MANAGER_VIEWER) {
+      return comments.filter((comment) => !comment.isInternal);
+    }
+    return comments;
+  }
+
+  /** Powers the "Sample Incident Page" (spec §29) ordered timeline. */
+  async listEvents(incidentId: string, user: AuthenticatedUser): Promise<IncidentEvent[]> {
+    await this.findOneScoped(incidentId, user);
+    return this.prisma.incidentEvent.findMany({
+      where: { incidentId },
+      orderBy: { createdAt: "asc" },
     });
   }
 }
