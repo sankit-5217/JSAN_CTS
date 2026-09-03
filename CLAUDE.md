@@ -19,6 +19,7 @@ JSAN CTS Data Center OpsDesk — an ITSM + CMDB + monitoring-integration platfor
 - **Never expose management interfaces to the Internet.** iDRAC/iLO/SNMP stay behind the site collector, which connects outbound over TLS/mTLS only.
 - **No "utils" folder with business logic.** Logic lives inside the owning domain module, with tests alongside it.
 - **Don't build AI features yet.** Ticket, CMDB and telemetry data must be stable and trustworthy first (see spec §27).
+- Do not make any changes if you have 95% confidence in what you need to build. Ask me follow-up questions until you reach the confidence.
 
 ## Module ownership boundaries (spec §12)
 
