@@ -145,6 +145,7 @@ model User {
   worklogs        Worklog[]
   auditEvents     AuditEvent[]
   siteAccess      UserSiteAccess[]
+  attachments     Attachment[]
 
   @@map("users")
 }
@@ -621,6 +622,8 @@ model Attachment {
   sha256      String
   uploadedById String? @map("uploaded_by_id")
   createdAt   DateTime @default(now()) @map("created_at")
+
+  uploadedBy User? @relation(fields: [uploadedById], references: [id])
 
   @@index([entityType, entityId])
   @@map("attachments")
