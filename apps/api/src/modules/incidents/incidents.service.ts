@@ -4,18 +4,39 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { Incident, IncidentComment, IncidentEvent, Prisma, UserRole } from "@prisma/client";
+import { createHash, randomUUID } from "crypto";
+import {
+  Attachment,
+  Incident,
+  IncidentComment,
+  IncidentEvent,
+  Prisma,
+  UserRole,
+} from "@prisma/client";
+import { StorageService } from "../../common/storage/storage.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import {
+  ALLOWED_ATTACHMENT_CONTENT_TYPES,
+  MAX_ATTACHMENT_SIZE_BYTES,
+} from "./attachment.constants";
 import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
 import { TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
 import { findTransitionRule, isOwnerOrElevated } from "./incident-transitions";
+
+/** Minimal shape of what NestJS's FileInterceptor hands us (multer.File). */
+export interface UploadedAttachmentFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
 
 export interface Paginated<T> {
   items: T[];
@@ -40,6 +61,7 @@ export class IncidentsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly authzService: AuthzService,
+    private readonly storageService: StorageService,
   ) {}
 
   async assertSiteAccess(user: AuthenticatedUser, siteId: string): Promise<void> {
@@ -380,5 +402,103 @@ export class IncidentsService {
       where: { incidentId },
       orderBy: { createdAt: "asc" },
     });
+  }
+
+  // --- Attachments (spec §17, §29) -------------------------------------
+  //
+  // No dedicated module owns attachments (CLAUDE.md's ownership table has
+  // no "attachments" row) — the Attachment model's polymorphic
+  // entityType/entityId design means each owning module handles its own
+  // entity's attachments. This sprint only wires up entityType "INCIDENT".
+
+  async uploadAttachment(
+    incidentId: string,
+    file: UploadedAttachmentFile,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ): Promise<Attachment> {
+    await this.findOneScoped(incidentId, user);
+
+    if (!ALLOWED_ATTACHMENT_CONTENT_TYPES.includes(file.mimetype)) {
+      throw new BadRequestException(`Content type ${file.mimetype} is not allowed`);
+    }
+    if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+      throw new BadRequestException(
+        `File exceeds the ${MAX_ATTACHMENT_SIZE_BYTES} byte size limit`,
+      );
+    }
+
+    const sha256 = createHash("sha256").update(file.buffer).digest("hex");
+    const objectKey = `incidents/${incidentId}/${randomUUID()}-${file.originalname}`;
+
+    // Uploaded before the DB transaction starts, not inside it — an S3 PUT
+    // isn't rollback-able the way a DB write is. If the DB write then
+    // fails, the object is orphaned in storage rather than a row
+    // referencing a key that was never actually written.
+    await this.storageService.putObject(objectKey, file.buffer, file.mimetype);
+
+    return this.prisma.$transaction(async (tx) => {
+      const attachment = await tx.attachment.create({
+        data: {
+          entityType: "INCIDENT",
+          entityId: incidentId,
+          objectKey,
+          contentType: file.mimetype,
+          sizeBytes: file.size,
+          sha256,
+          uploadedById: actor.actorId,
+        },
+      });
+
+      await tx.incidentEvent.create({
+        data: {
+          incidentId,
+          eventType: "ATTACHMENT",
+          actorId: actor.actorId,
+          payload: {
+            attachmentId: attachment.id,
+            contentType: attachment.contentType,
+            sizeBytes: attachment.sizeBytes,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Attachment",
+          entityId: attachment.id,
+          action: "CREATE",
+          after: attachment,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+
+      return attachment;
+    });
+  }
+
+  async listAttachments(incidentId: string, user: AuthenticatedUser): Promise<Attachment[]> {
+    await this.findOneScoped(incidentId, user);
+    return this.prisma.attachment.findMany({
+      where: { entityType: "INCIDENT", entityId: incidentId },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  /** Short-lived signed URL, not a proxied stream or a public object (spec §17). */
+  async getAttachmentDownloadUrl(
+    incidentId: string,
+    attachmentId: string,
+    user: AuthenticatedUser,
+  ): Promise<{ url: string }> {
+    await this.findOneScoped(incidentId, user);
+    const attachment = await this.prisma.attachment.findUnique({ where: { id: attachmentId } });
+    if (!attachment || attachment.entityType !== "INCIDENT" || attachment.entityId !== incidentId) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found on this incident`);
+    }
+    const url = await this.storageService.getSignedDownloadUrl(attachment.objectKey);
+    return { url };
   }
 }

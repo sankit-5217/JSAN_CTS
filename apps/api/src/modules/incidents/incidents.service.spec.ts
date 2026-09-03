@@ -1,5 +1,6 @@
-import { BadRequestException, ForbiddenException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { IncidentStatus, Priority, UserRole } from "@prisma/client";
+import { StorageService } from "../../common/storage/storage.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
@@ -97,6 +98,11 @@ function makeService(
         .fn()
         .mockImplementation(({ data }) => Promise.resolve({ id: "comment-1", ...data })),
     },
+    attachment: {
+      create: jest
+        .fn()
+        .mockImplementation(({ data }) => Promise.resolve({ id: "attachment-1", ...data })),
+    },
     $queryRaw: jest.fn().mockResolvedValue([{ nextval: BigInt(1) }]),
   };
 
@@ -109,6 +115,10 @@ function makeService(
     },
     incidentComment: { findMany: jest.fn().mockResolvedValue([]) },
     incidentEvent: { findMany: jest.fn().mockResolvedValue([]) },
+    attachment: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
   } as unknown as PrismaService;
 
   const auditService = {
@@ -120,11 +130,17 @@ function makeService(
     getAccessibleSiteIds: overrides.getAccessibleSiteIds ?? jest.fn().mockResolvedValue(null),
   } as unknown as AuthzService;
 
+  const storageService = {
+    putObject: jest.fn().mockResolvedValue(undefined),
+    getSignedDownloadUrl: jest.fn().mockResolvedValue("https://signed.example/download"),
+  } as unknown as StorageService;
+
   return {
-    service: new IncidentsService(prisma, auditService, authzService),
+    service: new IncidentsService(prisma, auditService, authzService, storageService),
     prisma,
     auditService,
     authzService,
+    storageService,
     tx,
   };
 }
@@ -321,5 +337,81 @@ describe("IncidentsService comment visibility", () => {
 
     const result = await service.listComments("incident-1", engineer);
     expect(result).toEqual(comments);
+  });
+});
+
+describe("IncidentsService attachments", () => {
+  const validFile = {
+    originalname: "log.txt",
+    mimetype: "text/plain",
+    size: 1024,
+    buffer: Buffer.from("hello"),
+  };
+
+  it("rejects a disallowed content type before touching storage", async () => {
+    const { service, storageService } = makeService();
+    await expect(
+      service.uploadAttachment(
+        "incident-1",
+        { ...validFile, mimetype: "application/x-msdownload" },
+        { actorId: "user-1" },
+        engineer,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(storageService.putObject).not.toHaveBeenCalled();
+  });
+
+  it("rejects a file over the size ceiling before touching storage", async () => {
+    const { service, storageService } = makeService();
+    await expect(
+      service.uploadAttachment(
+        "incident-1",
+        { ...validFile, size: 999_999_999 },
+        { actorId: "user-1" },
+        engineer,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(storageService.putObject).not.toHaveBeenCalled();
+  });
+
+  it("uploads to storage, records the Attachment row, and writes both the timeline event and the audit record", async () => {
+    const { service, tx, storageService, auditService } = makeService();
+    const result = await service.uploadAttachment(
+      "incident-1",
+      validFile,
+      { actorId: "user-1" },
+      engineer,
+    );
+
+    expect(result).toMatchObject({ entityType: "INCIDENT", entityId: "incident-1" });
+    expect(storageService.putObject).toHaveBeenCalledTimes(1);
+    expect(tx.attachment.create).toHaveBeenCalledTimes(1);
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ eventType: "ATTACHMENT" }) }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "Attachment", action: "CREATE" }),
+      tx,
+    );
+  });
+
+  it("404s a download-url request for an attachment that doesn't belong to this incident", async () => {
+    const { service } = makeService();
+    await expect(
+      service.getAttachmentDownloadUrl("incident-1", "missing-attachment", engineer),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("returns a signed URL for a valid attachment", async () => {
+    const { service, prisma } = makeService();
+    (prisma.attachment.findUnique as jest.Mock).mockResolvedValue({
+      id: "attachment-1",
+      entityType: "INCIDENT",
+      entityId: "incident-1",
+      objectKey: "incidents/incident-1/foo.txt",
+    });
+
+    const result = await service.getAttachmentDownloadUrl("incident-1", "attachment-1", engineer);
+    expect(result).toEqual({ url: "https://signed.example/download" });
   });
 });

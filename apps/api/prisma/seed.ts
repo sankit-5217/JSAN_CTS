@@ -8,14 +8,17 @@ import {
   PrismaClient,
   Priority,
   UserRole,
+  WorklogActivityType,
 } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
 /**
  * Sites/users seeded in Sprint 2; a rack and a couple of CIs per site
- * added in Sprint 3; an incident walked through a few transitions plus a
- * comment added in Sprint 4, so there's real ticketing data to exercise.
+ * added in Sprint 3; an incident walked through a few transitions, a
+ * comment, and a worklog added in Sprint 4/5, so there's real ticketing
+ * data to exercise. No seeded attachment — that needs a live MinIO the
+ * local dev setup doesn't have running (Sprint 5 plan, Decision 7).
  * Extend per §31 "Recommended First Development Demo" as SLA lands — do
  * not seed production data here.
  */
@@ -240,6 +243,39 @@ async function main() {
         isInternal: true,
       },
     });
+
+    // durationMinutes computed the same way the real create() flow derives
+    // it (endedAt - startedAt) rather than hand-picked, so the seeded row
+    // matches what the API would actually produce.
+    const worklogStartedAt = new Date("2026-09-03T09:15:00Z");
+    const worklogEndedAt = new Date("2026-09-03T09:35:00Z");
+    await prisma.worklog.create({
+      data: {
+        incidentId: incident.id,
+        engineerId: siteEngineer1.id,
+        activityType: WorklogActivityType.REMOTE_WORK,
+        startedAt: worklogStartedAt,
+        endedAt: worklogEndedAt,
+        durationMinutes: Math.round(
+          (worklogEndedAt.getTime() - worklogStartedAt.getTime()) / 60000,
+        ),
+        billable: true,
+        notes: "Checked iDRAC event log for power/thermal anomalies.",
+      },
+    });
+
+    await prisma.incidentEvent.create({
+      data: {
+        incidentId: incident.id,
+        eventType: "WORKLOG",
+        actorId: siteEngineer1.id,
+        payload: {
+          action: "CREATE",
+          activityType: "REMOTE_WORK",
+          durationMinutes: 20,
+        } as Prisma.InputJsonValue,
+      },
+    });
   }
 
   // eslint-disable-next-line no-console
@@ -249,7 +285,7 @@ async function main() {
       `${siteEngineer.email} (SITE_ENGINEER, ${site2.code} only), ` +
       `${siteEngineer1.email} (SITE_ENGINEER, ${site1.code} only), ` +
       `1 rack and 3 CIs (1 CI-to-CI relation), ` +
-      `1 incident (INC-SEED-001, IN_PROGRESS, 4 timeline events, 1 comment).`,
+      `1 incident (INC-SEED-001, IN_PROGRESS, 5 timeline events, 1 comment, 1 worklog).`,
   );
 }
 
