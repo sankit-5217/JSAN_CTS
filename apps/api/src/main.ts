@@ -3,10 +3,12 @@ import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
+import { correlationIdMiddleware } from "./common/middleware/correlation-id.middleware";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: true });
 
+  app.use(correlationIdMiddleware);
   app.setGlobalPrefix("api/v1");
   app.useGlobalPipes(
     new ValidationPipe({
