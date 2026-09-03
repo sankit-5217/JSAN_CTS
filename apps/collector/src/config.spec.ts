@@ -24,6 +24,8 @@ describe("loadConfig", () => {
     expect(cfg.pollIntervalSeconds).toBe(300);
     expect(cfg.heartbeatIntervalSeconds).toBe(60);
     expect(cfg.bufferMaxItems).toBe(10_000);
+    expect(cfg.snmpTrapPort).toBe(162);
+    expect(cfg.snmpSources).toEqual([]);
     expect(cfg.endpoints).toHaveLength(1);
     expect(cfg.endpoints[0]).toEqual({
       ciCode: "SITE01-R01-SRV-040",
@@ -68,5 +70,22 @@ describe("loadConfig", () => {
     const noSite = raw();
     delete (noSite as Record<string, unknown>).siteCode;
     expect(() => loadConfig(noSite)).toThrow(CollectorConfigError);
+  });
+
+  it("parses snmpSources and a custom trap port", () => {
+    const cfg = loadConfig(
+      raw({
+        snmpTrapPort: 1620,
+        snmpSources: [{ address: "10.20.3.2", ciCode: "SITE01-R03-SW-002" }],
+      }),
+    );
+    expect(cfg.snmpTrapPort).toBe(1620);
+    expect(cfg.snmpSources).toEqual([{ address: "10.20.3.2", ciCode: "SITE01-R03-SW-002" }]);
+  });
+
+  it("rejects an snmpSources entry with no ciCode", () => {
+    expect(() => loadConfig(raw({ snmpSources: [{ address: "10.20.3.2" }] }))).toThrow(
+      CollectorConfigError,
+    );
   });
 });

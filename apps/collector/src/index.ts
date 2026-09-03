@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
+import type { SnmpTrap } from "@cts-dc-opsdesk/snmp-adapter";
 import { loadConfig } from "./config";
 import type { CollectorConfig } from "./config";
 import { DeliveryBuffer } from "./delivery-buffer";
 import type { BufferedItem } from "./delivery-buffer";
 import { OpsDeskClient } from "./opsdesk-client";
+import { makePduSink, NoopTrapListener } from "./snmp/trap-listener";
 
 /**
  * Site-collector entrypoint (ADR-004, spec §11). One process per site: polls
@@ -11,9 +13,10 @@ import { OpsDeskClient } from "./opsdesk-client";
  * events outbound to the OpsDesk API — buffering locally while the API is
  * unreachable. No inbound ports.
  *
- * This slice wires config + the outbound client + the delivery buffer + the
- * loop scaffolding. The Redfish/OME/iLO HTTP fetchers and the SNMP trap
- * listener land next, each feeding `buffer.enqueue(...)`.
+ * Wires config + the outbound client + the delivery buffer + the loop
+ * scaffolding, plus the SNMP trap path (decoded PDU -> SnmpTrap -> buffer ->
+ * POST /alerts/sources/snmp). The Redfish/OME/iLO HTTP fetchers and a real
+ * (net-snmp-backed) trap listener land next.
  */
 
 function readConfig(): CollectorConfig {
@@ -34,7 +37,7 @@ function main(): void {
   const send = async (item: BufferedItem): Promise<void> => {
     switch (item.channel) {
       case "snmp":
-        await client.ingestSnmpTraps(item.payload as never);
+        await client.ingestSnmpTraps([item.payload as SnmpTrap]);
         break;
       case "alert":
         await client.ingestAlert(item.payload as never);
@@ -43,6 +46,20 @@ function main(): void {
         throw new Error(`unknown delivery channel "${item.channel}"`);
     }
   };
+
+  // SNMP trap path: decoded PDU -> SnmpTrap -> buffer -> POST /alerts/sources/snmp.
+  const onTrap = (trap: SnmpTrap): void => {
+    const occurrence = trap.sysUpTimeTicks ?? Date.parse(trap.receivedAt ?? "") ?? Date.now();
+    buffer.enqueue({
+      key: `snmp:${trap.agentAddress}:${trap.trapOid ?? trap.v1?.specificTrap ?? "?"}:${occurrence}`,
+      channel: "snmp",
+      payload: trap,
+    });
+  };
+  const pduSink = makePduSink(config.snmpSources, onTrap);
+  void pduSink; // handed to the real listener once it lands
+  const trapListener = new NoopTrapListener();
+  void trapListener.start();
 
   const poll = setInterval(() => {
     // TODO: for each config.endpoints — fetch via the matching adapter's HTTP
@@ -68,6 +85,7 @@ function main(): void {
   const shutdown = (): void => {
     clearInterval(poll);
     clearInterval(flush);
+    void trapListener.stop();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);

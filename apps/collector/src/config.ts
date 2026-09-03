@@ -17,6 +17,13 @@ export interface EndpointTarget {
   credentialRef: string;
 }
 
+/** An SNMP trap source — maps a device's source IP to its OpsDesk CI code. */
+export interface SnmpSource {
+  /** Source address traps arrive from (SNMPv1 agent-addr / v2c transport source). */
+  address: string;
+  ciCode: string;
+}
+
 export interface CollectorConfig {
   /** The one site this collector reports for. */
   siteCode: string;
@@ -31,6 +38,11 @@ export interface CollectorConfig {
   /** How many undelivered events to buffer locally before dropping the oldest. */
   bufferMaxItems: number;
   endpoints: EndpointTarget[];
+  /** UDP port the trap listener binds (default 162). */
+  snmpTrapPort: number;
+  /** Known trap sources; a trap from an address not listed here is delivered with
+   *  no ciCode and the API rejects it (visible in the collector log). */
+  snmpSources: SnmpSource[];
 }
 
 export class CollectorConfigError extends Error {
@@ -109,6 +121,18 @@ export function loadConfig(raw: unknown): CollectorConfig {
     };
   });
 
+  const snmpSourcesRaw = r.snmpSources ?? [];
+  if (!Array.isArray(snmpSourcesRaw)) {
+    throw new CollectorConfigError('"snmpSources" must be an array', "snmpSources");
+  }
+  const snmpSources: SnmpSource[] = snmpSourcesRaw.map((s, i) => {
+    if (typeof s !== "object" || s === null) {
+      throw new CollectorConfigError(`snmpSources[${i}] must be an object`, `snmpSources[${i}]`);
+    }
+    const sr = s as Record<string, unknown>;
+    return { address: str(sr, "address"), ciCode: str(sr, "ciCode") };
+  });
+
   return {
     siteCode: str(r, "siteCode"),
     apiBaseUrl: requireHttps(str(r, "apiBaseUrl"), "apiBaseUrl"),
@@ -117,5 +141,7 @@ export function loadConfig(raw: unknown): CollectorConfig {
     heartbeatIntervalSeconds: posInt(r, "heartbeatIntervalSeconds", 60),
     bufferMaxItems: posInt(r, "bufferMaxItems", 10_000),
     endpoints,
+    snmpTrapPort: posInt(r, "snmpTrapPort", 162),
+    snmpSources,
   };
 }
