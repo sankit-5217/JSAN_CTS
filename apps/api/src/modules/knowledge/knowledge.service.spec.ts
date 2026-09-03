@@ -48,6 +48,8 @@ function storedArticle(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const ACTOR = { actorId: "user-1", correlationId: "corr-1" };
+
 describe("KnowledgeService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
@@ -65,7 +67,7 @@ describe("KnowledgeService", () => {
   describe("create", () => {
     it("creates a DRAFT article that is not authoritative", async () => {
       prisma.knowledgeArticle.create.mockResolvedValue(storedArticle());
-      const result = await service.create({ title: "T", body: "B" });
+      const result = await service.create({ title: "T", body: "B" }, ACTOR);
       expect(prisma.knowledgeArticle.create).toHaveBeenCalledTimes(1);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -131,7 +133,7 @@ describe("KnowledgeService", () => {
         storedArticle({ approvalState: "APPROVED", reviewDueAt: new Date(FUTURE) }),
       );
       prisma.knowledgeArticle.update.mockResolvedValue(storedArticle({ version: 2 }));
-      await service.update("art-1", { body: "rewritten" });
+      await service.update("art-1", { body: "rewritten" }, ACTOR);
       const data = prisma.knowledgeArticle.update.mock.calls[0][0].data;
       expect(data.version).toEqual({ increment: 1 });
       expect(data.approvalState).toBe("DRAFT");
@@ -143,7 +145,7 @@ describe("KnowledgeService", () => {
         storedArticle({ approvalState: "APPROVED" }),
       );
       prisma.knowledgeArticle.update.mockResolvedValue(storedArticle());
-      await service.update("art-1", { ownerId: OWNER });
+      await service.update("art-1", { ownerId: OWNER }, ACTOR);
       const data = prisma.knowledgeArticle.update.mock.calls[0][0].data;
       expect(data.version).toBeUndefined();
       expect(data.approvalState).toBeUndefined();
@@ -155,7 +157,7 @@ describe("KnowledgeService", () => {
         storedArticle({ approvalState: "APPROVED" }),
       );
       prisma.knowledgeArticle.update.mockResolvedValue(storedArticle());
-      await service.update("art-1", { reviewDueAt: FUTURE });
+      await service.update("art-1", { reviewDueAt: FUTURE }, ACTOR);
       const data = prisma.knowledgeArticle.update.mock.calls[0][0].data;
       expect(data.reviewDueAt).toEqual(new Date(FUTURE));
       expect(data.version).toBeUndefined();
@@ -168,21 +170,21 @@ describe("KnowledgeService", () => {
         storedArticle({ approvalState: "APPROVED" }),
       );
       await expect(
-        service.approve("art-1", { approverId: REVIEWER, reviewDueAt: FUTURE }),
+        service.approve("art-1", { approverId: REVIEWER, reviewDueAt: FUTURE }, ACTOR),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
     it("rejects self-approval by the owner", async () => {
       prisma.knowledgeArticle.findUnique.mockResolvedValue(storedArticle({ ownerId: OWNER }));
       await expect(
-        service.approve("art-1", { approverId: OWNER, reviewDueAt: FUTURE }),
+        service.approve("art-1", { approverId: OWNER, reviewDueAt: FUTURE }, ACTOR),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it("rejects a review date in the past", async () => {
       prisma.knowledgeArticle.findUnique.mockResolvedValue(storedArticle());
       await expect(
-        service.approve("art-1", { approverId: REVIEWER, reviewDueAt: PAST }),
+        service.approve("art-1", { approverId: REVIEWER, reviewDueAt: PAST }, ACTOR),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -191,7 +193,11 @@ describe("KnowledgeService", () => {
       prisma.knowledgeArticle.update.mockResolvedValue(
         storedArticle({ approvalState: "APPROVED", reviewDueAt: new Date(FUTURE) }),
       );
-      const result = await service.approve("art-1", { approverId: REVIEWER, reviewDueAt: FUTURE });
+      const result = await service.approve(
+        "art-1",
+        { approverId: REVIEWER, reviewDueAt: FUTURE },
+        ACTOR,
+      );
       expect(prisma.knowledgeArticle.update).toHaveBeenCalledWith({
         where: { id: "art-1" },
         data: { approvalState: "APPROVED", reviewDueAt: new Date(FUTURE) },
@@ -207,7 +213,7 @@ describe("KnowledgeService", () => {
   describe("unpublish", () => {
     it("409s an article that is not published", async () => {
       prisma.knowledgeArticle.findUnique.mockResolvedValue(storedArticle());
-      await expect(service.unpublish("art-1", { reason: "n/a" })).rejects.toBeInstanceOf(
+      await expect(service.unpublish("art-1", { reason: "n/a" }, ACTOR)).rejects.toBeInstanceOf(
         ConflictException,
       );
     });
@@ -217,7 +223,7 @@ describe("KnowledgeService", () => {
         storedArticle({ approvalState: "APPROVED", reviewDueAt: new Date(FUTURE) }),
       );
       prisma.knowledgeArticle.update.mockResolvedValue(storedArticle());
-      await service.unpublish("art-1", { reason: "step 4 is unsafe" });
+      await service.unpublish("art-1", { reason: "step 4 is unsafe" }, ACTOR);
       expect(prisma.knowledgeArticle.update.mock.calls[0][0].data).toEqual({
         approvalState: "DRAFT",
         reviewDueAt: null,

@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AuthModule } from "../auth/auth.module";
 import { VendorCasesController } from "./vendor-cases.controller";
 import { VendorsController } from "./vendors.controller";
 import { VendorsService } from "./vendors.service";
@@ -18,6 +19,7 @@ import { VendorsService } from "./vendors.service";
  * warranty lifecycle stays with the cmdb module (Dev A) per the schema.
  */
 @Module({
+  imports: [AuthModule],
   controllers: [VendorsController, VendorCasesController],
   providers: [VendorsService],
   exports: [VendorsService],

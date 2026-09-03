@@ -5,6 +5,7 @@ import {
   normalizeZabbixEvent,
 } from "@cts-dc-opsdesk/zabbix-adapter";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import type { AlertState } from "./alerts.constants";
 import { computeAlertFingerprint } from "./alerts.fingerprint";
@@ -78,7 +79,7 @@ export class AlertsService {
     );
   }
 
-  async ingest(dto: IngestAlertDto): Promise<AlertIngestResult> {
+  async ingest(dto: IngestAlertDto, actor: ActorContext): Promise<AlertIngestResult> {
     const occurredAt = new Date(dto.occurredAt);
 
     const site = await this.prisma.site.findUnique({ where: { code: dto.siteCode } });
@@ -133,7 +134,8 @@ export class AlertsService {
           const u = await tx.alert.update({ where: { id: existing.id }, data: updateData });
           await this.audit.record(
             {
-              actorId: this.actorId(),
+              actorId: actor.actorId,
+              correlationId: actor.correlationId,
               entityType: "alert",
               entityId: existing.id,
               action: "ALERT_STATE_CHANGED",
@@ -173,7 +175,8 @@ export class AlertsService {
         });
         await this.audit.record(
           {
-            actorId: this.actorId(),
+            actorId: actor.actorId,
+            correlationId: actor.correlationId,
             entityType: "alert",
             entityId: c.id,
             action: "ALERT_RAISED",
@@ -218,7 +221,10 @@ export class AlertsService {
    * that fail normalization are reported in `rejected`, not thrown — one bad
    * event must not drop the batch.
    */
-  async ingestFromZabbix(events: ZabbixWebhookEventDto[]): Promise<SourceIngestResult> {
+  async ingestFromZabbix(
+    events: ZabbixWebhookEventDto[],
+    actor: ActorContext,
+  ): Promise<SourceIngestResult> {
     const accepted: AlertIngestResult[] = [];
     const rejected: RejectedAlert[] = [];
 
@@ -230,7 +236,7 @@ export class AlertsService {
         rejected.push(toRejectedAlert(index, err));
         continue;
       }
-      accepted.push(await this.ingest(normalized));
+      accepted.push(await this.ingest(normalized, actor));
     }
 
     if (rejected.length > 0) {
@@ -244,12 +250,15 @@ export class AlertsService {
    * the Prometheus adapter (per-alert failures collected, not fatal), then run
    * each through {@link ingest}.
    */
-  async ingestFromAlertmanager(payload: AlertmanagerWebhookDto): Promise<SourceIngestResult> {
+  async ingestFromAlertmanager(
+    payload: AlertmanagerWebhookDto,
+    actor: ActorContext,
+  ): Promise<SourceIngestResult> {
     const { normalized, errors } = normalizeAlertmanagerWebhook(payload);
 
     const accepted: AlertIngestResult[] = [];
     for (const alert of normalized) {
-      accepted.push(await this.ingest(alert));
+      accepted.push(await this.ingest(alert, actor));
     }
 
     const rejected: RejectedAlert[] = errors.map((err) => ({
@@ -296,15 +305,6 @@ export class AlertsService {
       throw new NotFoundException(`Alert ${id} not found`);
     }
     return alert;
-  }
-
-  /**
-   * Acting user id for the audit trail. Null — alert ingestion is
-   * machine-to-machine; the origin is captured in `alert.source`. A future
-   * collector-identity claim can populate this.
-   */
-  private actorId(): string | null {
-    return null;
   }
 }
 

@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import type { ChangeStatus } from "./changes.constants";
 import { deriveChangeStatus, isEditable, isPirOverdue } from "./changes.status";
@@ -50,7 +51,7 @@ export class ChangesService {
     private readonly audit: AuditService,
   ) {}
 
-  async create(dto: CreateChangeDto) {
+  async create(dto: CreateChangeDto, actor: ActorContext) {
     const windowStart = new Date(dto.windowStart);
     const windowEnd = new Date(dto.windowEnd);
     if (windowEnd.getTime() <= windowStart.getTime()) {
@@ -71,7 +72,8 @@ export class ChangesService {
       });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "change",
           entityId: created.id,
           action: "CHANGE_CREATED",
@@ -108,7 +110,7 @@ export class ChangesService {
     return this.decorate(change);
   }
 
-  async approve(id: string, dto: ApproveChangeDto) {
+  async approve(id: string, dto: ApproveChangeDto, actor: ActorContext) {
     const change = await this.requireChange(id);
     if (change.approverId) {
       throw new ConflictException(`Change ${id} is already approved`);
@@ -124,7 +126,8 @@ export class ChangesService {
       });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "change",
           entityId: id,
           action: "CHANGE_APPROVED",
@@ -138,7 +141,7 @@ export class ChangesService {
     return this.decorate(updated);
   }
 
-  async update(id: string, dto: UpdateChangeDto) {
+  async update(id: string, dto: UpdateChangeDto, actor: ActorContext) {
     const change = await this.requireChange(id);
     const now = new Date();
     const status = deriveChangeStatus(change, now);
@@ -188,7 +191,8 @@ export class ChangesService {
       });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "change",
           entityId: id,
           action: "CHANGE_UPDATED",
@@ -234,13 +238,5 @@ export class ChangesService {
       status: deriveChangeStatus(change, now),
       pirOverdue: isPirOverdue(change, now),
     };
-  }
-
-  /**
-   * Acting user id for the audit trail. Null until an auth guard is on the
-   * changes controller (spec §4) — then this returns `@CurrentUser().sub`.
-   */
-  private actorId(): string | null {
-    return null;
   }
 }

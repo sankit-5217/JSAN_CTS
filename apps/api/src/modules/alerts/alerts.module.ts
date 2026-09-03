@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AuthModule } from "../auth/auth.module";
 import { AlertsController } from "./alerts.controller";
 import { AlertsService } from "./alerts.service";
 
@@ -24,6 +25,7 @@ import { AlertsService } from "./alerts.service";
  * flapping thresholds into an alert_rules config table (config-over-hardcode).
  */
 @Module({
+  imports: [AuthModule],
   controllers: [AlertsController],
   providers: [AlertsService],
   exports: [AlertsService],

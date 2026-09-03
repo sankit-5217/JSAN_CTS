@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AuthModule } from "../auth/auth.module";
 import { ChangesController } from "./changes.controller";
 import { ChangesService } from "./changes.service";
 
@@ -19,6 +20,7 @@ import { ChangesService } from "./changes.service";
  * with Dev A) — until then alert suppression keys off ci.lifecycleStatus.
  */
 @Module({
+  imports: [AuthModule],
   controllers: [ChangesController],
   providers: [ChangesService],
   exports: [ChangesService],

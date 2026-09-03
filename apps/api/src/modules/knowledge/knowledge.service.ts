@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import { deriveKnowledgeView } from "./knowledge.status";
 import { ApproveArticleDto } from "./dto/approve-article.dto";
@@ -26,7 +27,7 @@ export class KnowledgeService {
     private readonly audit: AuditService,
   ) {}
 
-  async create(dto: CreateArticleDto) {
+  async create(dto: CreateArticleDto, actor: ActorContext) {
     // approvalState defaults to DRAFT and version to 1 in the schema.
     const article = await this.prisma.$transaction(async (tx) => {
       const created = await tx.knowledgeArticle.create({
@@ -38,7 +39,8 @@ export class KnowledgeService {
       });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "knowledge_article",
           entityId: created.id,
           action: "KNOWLEDGE_ARTICLE_CREATED",
@@ -92,7 +94,7 @@ export class KnowledgeService {
     return this.decorate(await this.requireArticle(id));
   }
 
-  async update(id: string, dto: UpdateArticleDto) {
+  async update(id: string, dto: UpdateArticleDto, actor: ActorContext) {
     const article = await this.requireArticle(id);
 
     const contentChanged =
@@ -119,7 +121,8 @@ export class KnowledgeService {
       const u = await tx.knowledgeArticle.update({ where: { id }, data });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "knowledge_article",
           entityId: id,
           // the before/after captures whether this edit revoked approval
@@ -134,7 +137,7 @@ export class KnowledgeService {
     return this.decorate(updated);
   }
 
-  async approve(id: string, dto: ApproveArticleDto) {
+  async approve(id: string, dto: ApproveArticleDto, actor: ActorContext) {
     const article = await this.requireArticle(id);
     if (article.approvalState === "APPROVED") {
       throw new ConflictException(`Knowledge article ${id} is already approved`);
@@ -154,7 +157,8 @@ export class KnowledgeService {
       });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "knowledge_article",
           entityId: id,
           action: "KNOWLEDGE_ARTICLE_APPROVED",
@@ -173,7 +177,7 @@ export class KnowledgeService {
     return this.decorate(updated);
   }
 
-  async unpublish(id: string, dto: UnpublishArticleDto) {
+  async unpublish(id: string, dto: UnpublishArticleDto, actor: ActorContext) {
     const article = await this.requireArticle(id);
     if (article.approvalState !== "APPROVED") {
       throw new ConflictException(`Knowledge article ${id} is not published`);
@@ -186,7 +190,8 @@ export class KnowledgeService {
       });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "knowledge_article",
           entityId: id,
           action: "KNOWLEDGE_ARTICLE_UNPUBLISHED",
@@ -228,13 +233,5 @@ export class KnowledgeService {
 
   private decorate<T extends Parameters<typeof deriveKnowledgeView>[0]>(article: T, now?: Date) {
     return { ...article, ...deriveKnowledgeView(article, now) };
-  }
-
-  /**
-   * Acting user id for the audit trail. Null until an auth guard is on the
-   * knowledge controller (spec §4) — then this returns `@CurrentUser().sub`.
-   */
-  private actorId(): string | null {
-    return null;
   }
 }

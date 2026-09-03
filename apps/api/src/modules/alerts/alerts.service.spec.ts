@@ -53,6 +53,8 @@ function baseDto(overrides: Partial<IngestAlertDto> = {}): IngestAlertDto {
   };
 }
 
+const ACTOR = { actorId: "collector-svc", correlationId: "corr-1" };
+
 describe("AlertsService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
@@ -78,7 +80,7 @@ describe("AlertsService", () => {
     prisma.alert.findUnique.mockResolvedValue(null);
     prisma.alert.create.mockResolvedValue({ id: "alert-1", state: "OPEN" });
 
-    const result = await service.ingest(baseDto());
+    const result = await service.ingest(baseDto(), ACTOR);
 
     expect(result.deduped).toBe(false);
     expect(result.alertId).toBe("alert-1");
@@ -112,7 +114,7 @@ describe("AlertsService", () => {
     });
     prisma.alert.update.mockResolvedValue({ id: "alert-1", state: "OPEN" });
 
-    const result = await service.ingest(baseDto());
+    const result = await service.ingest(baseDto(), ACTOR);
 
     expect(result.deduped).toBe(true);
     expect(result.stateChanged).toBe(false);
@@ -135,7 +137,7 @@ describe("AlertsService", () => {
     });
     prisma.alert.update.mockResolvedValue({ id: "alert-1", state: "OPEN" });
 
-    await service.ingest(baseDto({ occurredAt: "2026-09-02T10:15:00.000Z" }));
+    await service.ingest(baseDto({ occurredAt: "2026-09-02T10:15:00.000Z" }), ACTOR);
 
     const data = prisma.alert.update.mock.calls[0][0].data;
     expect(data.lastSeenAt).toEqual(new Date("2026-09-02T12:00:00.000Z"));
@@ -151,7 +153,7 @@ describe("AlertsService", () => {
     });
     prisma.alert.update.mockResolvedValue({ id: "alert-1", state: "RECOVERED" });
 
-    const result = await service.ingest(baseDto({ state: "RECOVERED" }));
+    const result = await service.ingest(baseDto({ state: "RECOVERED" }), ACTOR);
 
     expect(result.stateChanged).toBe(true);
     expect(prisma.alert.update.mock.calls[0][0].data.state).toBe("RECOVERED");
@@ -176,7 +178,7 @@ describe("AlertsService", () => {
     });
     prisma.alert.update.mockResolvedValue({ id: "alert-1", state: "RECOVERED" });
 
-    const result = await service.ingest(baseDto({ state: "OPEN" }));
+    const result = await service.ingest(baseDto({ state: "OPEN" }), ACTOR);
 
     expect(result.stateChanged).toBe(false);
     expect(prisma.alert.update.mock.calls[0][0].data.state).toBe("RECOVERED");
@@ -188,7 +190,7 @@ describe("AlertsService", () => {
     prisma.alert.findUnique.mockResolvedValue(null);
     prisma.alert.create.mockResolvedValue({ id: "alert-2", state: "OPEN" });
 
-    const result = await service.ingest(baseDto({ siteCode: "GHOST", ciCode: "GHOST-CI" }));
+    const result = await service.ingest(baseDto({ siteCode: "GHOST", ciCode: "GHOST-CI" }), ACTOR);
 
     expect(result.siteResolved).toBe(false);
     expect(result.ciResolved).toBe(false);
@@ -203,7 +205,7 @@ describe("AlertsService", () => {
     prisma.alert.create.mockResolvedValue({ id: "alert-3", state: "OPEN" });
     prisma.alert.count.mockResolvedValue(5);
 
-    const result = await service.ingest(baseDto());
+    const result = await service.ingest(baseDto(), ACTOR);
 
     expect(result.flapping).toBe(true);
     expect(result.recentOccurrences).toBe(5);
@@ -219,7 +221,7 @@ describe("AlertsService", () => {
     prisma.alert.findUnique.mockResolvedValue(null);
     prisma.alert.create.mockResolvedValue({ id: "alert-4", state: "OPEN" });
 
-    const result = await service.ingest(baseDto());
+    const result = await service.ingest(baseDto(), ACTOR);
 
     expect(result.suppressedByMaintenance).toBe(true);
     // the alert is still recorded, just annotated
@@ -236,7 +238,7 @@ describe("AlertsService", () => {
     prisma.alert.findUnique.mockResolvedValue(null);
     prisma.alert.create.mockResolvedValue({ id: "alert-5", state: "OPEN" });
 
-    const result = await service.ingest(baseDto());
+    const result = await service.ingest(baseDto(), ACTOR);
 
     expect(result.suppressedByMaintenance).toBe(false);
   });
@@ -264,7 +266,7 @@ describe("AlertsService", () => {
       };
       const bad: ZabbixWebhookEventDto = { ...good, eventId: "2", timestamp: "not-a-number" };
 
-      const result = await service.ingestFromZabbix([good, bad]);
+      const result = await service.ingestFromZabbix([good, bad], ACTOR);
 
       expect(result.accepted).toHaveLength(1);
       expect(result.rejected).toEqual([
@@ -309,7 +311,7 @@ describe("AlertsService", () => {
         ],
       };
 
-      const result = await service.ingestFromAlertmanager(payload);
+      const result = await service.ingestFromAlertmanager(payload, ACTOR);
 
       expect(result.accepted).toHaveLength(1);
       expect(result.rejected).toEqual([{ index: 1, field: "site", message: expect.any(String) }]);

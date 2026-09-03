@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import type { DispatchStatus } from "./vendors.constants";
 import { canTransitionDispatch } from "./vendors.dispatch";
@@ -28,12 +29,13 @@ export class VendorsService {
 
   // --- vendors -------------------------------------------------------------
 
-  async createVendor(dto: CreateVendorDto) {
+  async createVendor(dto: CreateVendorDto, actor: ActorContext) {
     return this.prisma.$transaction(async (tx) => {
       const vendor = await tx.vendor.create({ data: { name: dto.name, type: dto.type } });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "vendor",
           entityId: vendor.id,
           action: "VENDOR_REGISTERED",
@@ -59,7 +61,7 @@ export class VendorsService {
 
   // --- vendor cases ------------------------------------------------------------
 
-  async openCase(dto: CreateVendorCaseDto) {
+  async openCase(dto: CreateVendorCaseDto, actor: ActorContext) {
     await this.getVendor(dto.vendorId);
     if (dto.linkedIncidentId) {
       await this.assertIncidentExists(dto.linkedIncidentId);
@@ -82,7 +84,8 @@ export class VendorsService {
       });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "vendor_case",
           entityId: created.id,
           action: "VENDOR_CASE_OPENED",
@@ -119,7 +122,7 @@ export class VendorsService {
     return vendorCase;
   }
 
-  async updateCase(id: string, dto: UpdateVendorCaseDto) {
+  async updateCase(id: string, dto: UpdateVendorCaseDto, actor: ActorContext) {
     const current = await this.getCase(id);
     if (current.closedAt) {
       throw new ConflictException(`Vendor case ${id} is closed`);
@@ -151,7 +154,8 @@ export class VendorsService {
       });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "vendor_case",
           entityId: id,
           action: dto.closeOutcome ? "VENDOR_CASE_CLOSED" : "VENDOR_CASE_UPDATED",
@@ -164,7 +168,7 @@ export class VendorsService {
     });
   }
 
-  async addUpdate(id: string, dto: AddVendorCaseUpdateDto) {
+  async addUpdate(id: string, dto: AddVendorCaseUpdateDto, actor: ActorContext) {
     await this.getCase(id);
     return this.prisma.$transaction(async (tx) => {
       const note = await tx.vendorCaseUpdate.create({
@@ -172,7 +176,8 @@ export class VendorsService {
       });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "vendor_case",
           entityId: id,
           action: "VENDOR_CASE_NOTE_ADDED",
@@ -196,13 +201,5 @@ export class VendorsService {
     if (!ci) {
       throw new NotFoundException(`Configuration item ${id} not found`);
     }
-  }
-
-  /**
-   * Acting user id for the audit trail. Null until an auth guard is on the
-   * vendors controllers (spec §4) — then this returns `@CurrentUser().sub`.
-   */
-  private actorId(): string | null {
-    return null;
   }
 }

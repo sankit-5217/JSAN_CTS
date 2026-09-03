@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AuthModule } from "../auth/auth.module";
 import { KnowledgeController } from "./knowledge.controller";
 import { KnowledgeService } from "./knowledge.service";
 
@@ -20,6 +21,7 @@ import { KnowledgeService } from "./knowledge.service";
  * full-text search belongs in OpenSearch, not `body LIKE` (spec §10.14).
  */
 @Module({
+  imports: [AuthModule],
   controllers: [KnowledgeController],
   providers: [KnowledgeService],
   exports: [KnowledgeService],

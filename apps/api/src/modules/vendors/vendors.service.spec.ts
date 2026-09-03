@@ -43,6 +43,8 @@ function caseDto(overrides: Partial<CreateVendorCaseDto> = {}): CreateVendorCase
   return { vendorCaseNo: "SR100", vendorId: VENDOR_ID, ...overrides };
 }
 
+const ACTOR = { actorId: "user-1", correlationId: "corr-1" };
+
 describe("VendorsService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
@@ -60,7 +62,7 @@ describe("VendorsService", () => {
 
   it("creates a vendor", async () => {
     prisma.vendor.create.mockResolvedValue({ id: VENDOR_ID });
-    await service.createVendor({ name: "Dell ProSupport", type: "DELL" });
+    await service.createVendor({ name: "Dell ProSupport", type: "DELL" }, ACTOR);
     expect(prisma.vendor.create).toHaveBeenCalledWith({
       data: { name: "Dell ProSupport", type: "DELL" },
     });
@@ -78,7 +80,7 @@ describe("VendorsService", () => {
   describe("openCase", () => {
     it("opens a case with defaults when the vendor exists", async () => {
       prisma.vendorCase.create.mockResolvedValue({ id: "case-1" });
-      await service.openCase(caseDto());
+      await service.openCase(caseDto(), ACTOR);
       expect(prisma.vendorCase.create).toHaveBeenCalledWith({
         data: {
           vendorCaseNo: "SR100",
@@ -98,14 +100,17 @@ describe("VendorsService", () => {
 
     it("rejects an unknown vendor", async () => {
       prisma.vendor.findUnique.mockResolvedValue(null);
-      await expect(service.openCase(caseDto())).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.openCase(caseDto(), ACTOR)).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.vendorCase.create).not.toHaveBeenCalled();
     });
 
     it("rejects a linkedIncidentId that does not exist", async () => {
       prisma.incident.findUnique.mockResolvedValue(null);
       await expect(
-        service.openCase(caseDto({ linkedIncidentId: "22222222-2222-2222-2222-222222222222" })),
+        service.openCase(
+          caseDto({ linkedIncidentId: "22222222-2222-2222-2222-222222222222" }),
+          ACTOR,
+        ),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
@@ -127,7 +132,7 @@ describe("VendorsService", () => {
       mockCase();
       prisma.vendorCase.update.mockResolvedValue({ id: "case-1" });
 
-      await service.updateCase("case-1", { dispatchStatus: "REQUESTED" });
+      await service.updateCase("case-1", { dispatchStatus: "REQUESTED" }, ACTOR);
 
       expect(prisma.vendorCase.update).toHaveBeenCalledWith({
         where: { id: "case-1" },
@@ -142,7 +147,7 @@ describe("VendorsService", () => {
     it("rejects an invalid dispatch transition", async () => {
       mockCase({ dispatchStatus: "REQUESTED", rmaRequired: true });
       await expect(
-        service.updateCase("case-1", { dispatchStatus: "SHIPPED" }),
+        service.updateCase("case-1", { dispatchStatus: "SHIPPED" }, ACTOR),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.vendorCase.update).not.toHaveBeenCalled();
     });
@@ -150,7 +155,7 @@ describe("VendorsService", () => {
     it("refuses to update a closed case", async () => {
       mockCase({ closedAt: new Date() });
       await expect(
-        service.updateCase("case-1", { warrantyStatus: "ACTIVE" }),
+        service.updateCase("case-1", { warrantyStatus: "ACTIVE" }, ACTOR),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
@@ -158,7 +163,7 @@ describe("VendorsService", () => {
       mockCase({ dispatchStatus: "INSTALLED", rmaRequired: true });
       prisma.vendorCase.update.mockResolvedValue({ id: "case-1" });
 
-      await service.updateCase("case-1", { closeOutcome: "Replaced PSU, system healthy" });
+      await service.updateCase("case-1", { closeOutcome: "Replaced PSU, system healthy" }, ACTOR);
 
       const data = prisma.vendorCase.update.mock.calls[0][0].data;
       expect(data.outcome).toBe("Replaced PSU, system healthy");
@@ -173,7 +178,7 @@ describe("VendorsService", () => {
       mockCase({ acknowledgedAt: new Date("2026-09-01T00:00:00.000Z") });
       prisma.vendorCase.update.mockResolvedValue({ id: "case-1" });
 
-      await service.updateCase("case-1", { acknowledged: true });
+      await service.updateCase("case-1", { acknowledged: true }, ACTOR);
 
       expect(prisma.vendorCase.update.mock.calls[0][0].data).not.toHaveProperty("acknowledgedAt");
     });
@@ -184,7 +189,7 @@ describe("VendorsService", () => {
       prisma.vendorCase.findUnique.mockResolvedValue({ id: "case-1", updates: [] });
       prisma.vendorCaseUpdate.create.mockResolvedValue({ id: "u1" });
 
-      await service.addUpdate("case-1", { note: "Vendor acknowledged" });
+      await service.addUpdate("case-1", { note: "Vendor acknowledged" }, ACTOR);
 
       expect(prisma.vendorCaseUpdate.create).toHaveBeenCalledWith({
         data: { vendorCaseId: "case-1", note: "Vendor acknowledged" },
@@ -197,7 +202,7 @@ describe("VendorsService", () => {
 
     it("rejects a note on an unknown case", async () => {
       prisma.vendorCase.findUnique.mockResolvedValue(null);
-      await expect(service.addUpdate("missing", { note: "x" })).rejects.toBeInstanceOf(
+      await expect(service.addUpdate("missing", { note: "x" }, ACTOR)).rejects.toBeInstanceOf(
         NotFoundException,
       );
     });

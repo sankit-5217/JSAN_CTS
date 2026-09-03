@@ -61,6 +61,8 @@ function storedChange(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const ACTOR = { actorId: "user-1", correlationId: "corr-1" };
+
 describe("ChangesService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
@@ -78,14 +80,17 @@ describe("ChangesService", () => {
   describe("create", () => {
     it("rejects a window that ends before it starts", async () => {
       await expect(
-        service.create(createDto({ windowStart: FAR_FUTURE_END, windowEnd: FAR_FUTURE_START })),
+        service.create(
+          createDto({ windowStart: FAR_FUTURE_END, windowEnd: FAR_FUTURE_START }),
+          ACTOR,
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.change.create).not.toHaveBeenCalled();
     });
 
     it("creates a change and returns it as PENDING_APPROVAL", async () => {
       prisma.change.create.mockResolvedValue(storedChange());
-      const result = await service.create(createDto());
+      const result = await service.create(createDto(), ACTOR);
       expect(prisma.change.create).toHaveBeenCalled();
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ entityType: "change", action: "CHANGE_CREATED" }),
@@ -100,14 +105,14 @@ describe("ChangesService", () => {
     it("404s an unknown change", async () => {
       prisma.change.findUnique.mockResolvedValue(null);
       await expect(
-        service.approve("missing", { approverId: "11111111-1111-1111-1111-111111111111" }),
+        service.approve("missing", { approverId: "11111111-1111-1111-1111-111111111111" }, ACTOR),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it("409s a change that is already approved", async () => {
       prisma.change.findUnique.mockResolvedValue(storedChange({ approverId: "user-9" }));
       await expect(
-        service.approve("chg-1", { approverId: "11111111-1111-1111-1111-111111111111" }),
+        service.approve("chg-1", { approverId: "11111111-1111-1111-1111-111111111111" }, ACTOR),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
@@ -119,16 +124,20 @@ describe("ChangesService", () => {
         }),
       );
       await expect(
-        service.approve("chg-1", { approverId: "11111111-1111-1111-1111-111111111111" }),
+        service.approve("chg-1", { approverId: "11111111-1111-1111-1111-111111111111" }, ACTOR),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it("sets the approver and returns SCHEDULED for a future window", async () => {
       prisma.change.findUnique.mockResolvedValue(storedChange());
       prisma.change.update.mockResolvedValue(storedChange({ approverId: "user-7" }));
-      const result = await service.approve("chg-1", {
-        approverId: "11111111-1111-1111-1111-111111111111",
-      });
+      const result = await service.approve(
+        "chg-1",
+        {
+          approverId: "11111111-1111-1111-1111-111111111111",
+        },
+        ACTOR,
+      );
       expect(prisma.change.update).toHaveBeenCalledWith({
         where: { id: "chg-1" },
         data: { approverId: "11111111-1111-1111-1111-111111111111" },
@@ -144,7 +153,7 @@ describe("ChangesService", () => {
   describe("update", () => {
     it("409s a completed change", async () => {
       prisma.change.findUnique.mockResolvedValue(storedChange({ outcome: "done" }));
-      await expect(service.update("chg-1", { risk: "high" })).rejects.toBeInstanceOf(
+      await expect(service.update("chg-1", { risk: "high" }, ACTOR)).rejects.toBeInstanceOf(
         ConflictException,
       );
     });
@@ -158,13 +167,13 @@ describe("ChangesService", () => {
         }),
       );
       await expect(
-        service.update("chg-1", { implementationPlan: "new plan" }),
+        service.update("chg-1", { implementationPlan: "new plan" }, ACTOR),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
     it("rejects an outcome recorded before the window begins", async () => {
       prisma.change.findUnique.mockResolvedValue(storedChange({ approverId: "user-3" }));
-      await expect(service.update("chg-1", { outcome: "premature" })).rejects.toBeInstanceOf(
+      await expect(service.update("chg-1", { outcome: "premature" }, ACTOR)).rejects.toBeInstanceOf(
         BadRequestException,
       );
     });
@@ -180,7 +189,7 @@ describe("ChangesService", () => {
       prisma.change.update.mockResolvedValue(
         storedChange({ approverId: "user-3", outcome: "PSU replaced" }),
       );
-      const result = await service.update("chg-1", { outcome: "PSU replaced" });
+      const result = await service.update("chg-1", { outcome: "PSU replaced" }, ACTOR);
       expect(prisma.change.update.mock.calls[0][0].data).toEqual({ outcome: "PSU replaced" });
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: "CHANGE_UPDATED" }),

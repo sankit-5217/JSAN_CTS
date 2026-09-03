@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AuthModule } from "../auth/auth.module";
 import { RisksController } from "./risks.controller";
 import { RisksService } from "./risks.service";
 
@@ -14,11 +15,13 @@ import { RisksService } from "./risks.service";
  * re-openable) via a transition guard, with mitigation text mandatory for
  * MITIGATING / ACCEPTED; list filters by status, severity, site, owner and an
  * `overdue` view. Every mutation writes an audit event in the same transaction
- * (AuditService) — actorId/correlationId wire in with the auth guard.
+ * (AuditService) with the real actorId + correlationId from the request.
+ * Writes require SUPER_ADMIN / DELIVERY_OPS_MANAGER / INFRASTRUCTURE_LEAD.
  * TODO: BCP plans need a `bcp_plans` table (RTO/RPO/alternate site/test dates)
  * before that half of the module can be built.
  */
 @Module({
+  imports: [AuthModule],
   controllers: [RisksController],
   providers: [RisksService],
   exports: [RisksService],

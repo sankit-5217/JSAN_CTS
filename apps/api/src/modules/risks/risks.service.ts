@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import type { RiskStatus } from "./risks.constants";
 import { computeRiskScore, deriveRiskView, scoreRangeForSeverity } from "./risks.scoring";
@@ -32,7 +33,7 @@ export class RisksService {
     private readonly audit: AuditService,
   ) {}
 
-  async create(dto: CreateRiskDto) {
+  async create(dto: CreateRiskDto, actor: ActorContext) {
     const score = computeRiskScore(dto.likelihood, dto.impact);
 
     const risk = await this.prisma.$transaction(async (tx) => {
@@ -50,7 +51,8 @@ export class RisksService {
       });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "risk",
           entityId: created.id,
           action: "RISK_REGISTERED",
@@ -101,7 +103,7 @@ export class RisksService {
     return this.decorate(await this.requireRisk(id));
   }
 
-  async update(id: string, dto: UpdateRiskDto) {
+  async update(id: string, dto: UpdateRiskDto, actor: ActorContext) {
     const before = await this.requireRisk(id);
 
     const scoreChanged = dto.likelihood !== undefined || dto.impact !== undefined;
@@ -127,7 +129,8 @@ export class RisksService {
       const u = await tx.risk.update({ where: { id }, data });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "risk",
           entityId: id,
           action: "RISK_UPDATED",
@@ -142,7 +145,7 @@ export class RisksService {
     return this.decorate(updated);
   }
 
-  async changeStatus(id: string, dto: ChangeRiskStatusDto) {
+  async changeStatus(id: string, dto: ChangeRiskStatusDto, actor: ActorContext) {
     const risk = await this.requireRisk(id);
     const from = risk.status as RiskStatus;
     const to = dto.status;
@@ -173,7 +176,8 @@ export class RisksService {
       });
       await this.audit.record(
         {
-          actorId: this.actorId(),
+          actorId: actor.actorId,
+          correlationId: actor.correlationId,
           entityType: "risk",
           entityId: id,
           action: "RISK_STATUS_CHANGED",
@@ -198,13 +202,5 @@ export class RisksService {
 
   private decorate<T extends Parameters<typeof deriveRiskView>[0]>(risk: T, now?: Date) {
     return { ...risk, ...deriveRiskView(risk, now) };
-  }
-
-  /**
-   * The acting user id for the audit trail. Null until an auth guard is on the
-   * risks controller (spec §4) — then this returns `@CurrentUser().sub`.
-   */
-  private actorId(): string | null {
-    return null;
   }
 }

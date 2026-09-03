@@ -45,6 +45,8 @@ function storedRisk(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const ACTOR = { actorId: "user-1", correlationId: "corr-1" };
+
 describe("RisksService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
@@ -62,7 +64,7 @@ describe("RisksService", () => {
   describe("create", () => {
     it("computes score server-side and audits the registration in-transaction", async () => {
       prisma.risk.create.mockResolvedValue(storedRisk({ score: 12 }));
-      const result = await service.create({ description: "d", likelihood: 3, impact: 4 });
+      const result = await service.create({ description: "d", likelihood: 3, impact: 4 }, ACTOR);
 
       expect(prisma.risk.create.mock.calls[0][0].data.score).toBe(12);
       expect(audit.record).toHaveBeenCalledWith(
@@ -120,7 +122,7 @@ describe("RisksService", () => {
     it("re-computes score when likelihood changes and audits before/after", async () => {
       prisma.risk.findUnique.mockResolvedValue(storedRisk({ likelihood: 3, impact: 4, score: 12 }));
       prisma.risk.update.mockResolvedValue(storedRisk({ likelihood: 5, score: 20 }));
-      await service.update("risk-1", { likelihood: 5 });
+      await service.update("risk-1", { likelihood: 5 }, ACTOR);
 
       expect(prisma.risk.update.mock.calls[0][0].data.score).toBe(20);
       expect(audit.record).toHaveBeenCalledWith(
@@ -132,7 +134,7 @@ describe("RisksService", () => {
     it("leaves score alone for a description-only edit", async () => {
       prisma.risk.findUnique.mockResolvedValue(storedRisk());
       prisma.risk.update.mockResolvedValue(storedRisk());
-      await service.update("risk-1", { description: "clearer wording of the exposure" });
+      await service.update("risk-1", { description: "clearer wording of the exposure" }, ACTOR);
       expect(prisma.risk.update.mock.calls[0][0].data.score).toBeUndefined();
     });
   });
@@ -140,16 +142,16 @@ describe("RisksService", () => {
   describe("changeStatus", () => {
     it("409s an illegal transition", async () => {
       prisma.risk.findUnique.mockResolvedValue(storedRisk({ status: "CLOSED" }));
-      await expect(service.changeStatus("risk-1", { status: "ACCEPTED" })).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      await expect(
+        service.changeStatus("risk-1", { status: "ACCEPTED" }, ACTOR),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
 
     it("400s a move to ACCEPTED with no mitigation on record or in the request", async () => {
       prisma.risk.findUnique.mockResolvedValue(storedRisk({ status: "OPEN", mitigation: null }));
-      await expect(service.changeStatus("risk-1", { status: "ACCEPTED" })).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
+      await expect(
+        service.changeStatus("risk-1", { status: "ACCEPTED" }, ACTOR),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it("accepts the move when mitigation is supplied in the same call", async () => {
@@ -157,10 +159,11 @@ describe("RisksService", () => {
       prisma.risk.update.mockResolvedValue(
         storedRisk({ status: "ACCEPTED", mitigation: "residual owned by infra lead" }),
       );
-      const result = await service.changeStatus("risk-1", {
-        status: "ACCEPTED",
-        mitigation: "residual owned by infra lead",
-      });
+      const result = await service.changeStatus(
+        "risk-1",
+        { status: "ACCEPTED", mitigation: "residual owned by infra lead" },
+        ACTOR,
+      );
 
       expect(prisma.risk.update.mock.calls[0][0].data).toEqual({
         status: "ACCEPTED",
@@ -180,7 +183,7 @@ describe("RisksService", () => {
     it("allows CLOSE without mitigation", async () => {
       prisma.risk.findUnique.mockResolvedValue(storedRisk({ status: "OPEN", mitigation: null }));
       prisma.risk.update.mockResolvedValue(storedRisk({ status: "CLOSED" }));
-      const result = await service.changeStatus("risk-1", { status: "CLOSED" });
+      const result = await service.changeStatus("risk-1", { status: "CLOSED" }, ACTOR);
       expect(result.status).toBe("CLOSED");
     });
 
@@ -191,7 +194,7 @@ describe("RisksService", () => {
       prisma.risk.update.mockResolvedValue(
         storedRisk({ status: "MITIGATING", mitigation: "install the B feed" }),
       );
-      const result = await service.changeStatus("risk-1", { status: "MITIGATING" });
+      const result = await service.changeStatus("risk-1", { status: "MITIGATING" }, ACTOR);
       expect(result.status).toBe("MITIGATING");
       expect(prisma.risk.update.mock.calls[0][0].data).toEqual({ status: "MITIGATING" });
     });
