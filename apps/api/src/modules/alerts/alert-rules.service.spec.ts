@@ -40,6 +40,7 @@ function dbRow(overrides: Record<string, unknown> = {}) {
     flappingWindowMinutes: 45,
     pagingSeverities: ["CRITICAL", "HIGH"],
     autoCorrelateIncidents: false,
+    suppressAutoTicketDuringMaintenance: true,
     isActive: true,
     createdAt: new Date("2026-09-04T00:00:00.000Z"),
     updatedAt: new Date("2026-09-04T00:00:00.000Z"),
@@ -76,6 +77,7 @@ describe("AlertRulesService", () => {
         flappingWindowMinutes: 45,
         pagingSeverities: ["CRITICAL", "HIGH"],
         autoCorrelateIncidents: false,
+        suppressAutoTicketDuringMaintenance: true,
       });
     });
 
@@ -121,6 +123,8 @@ describe("AlertRulesService", () => {
           flappingWindowMinutes: DEFAULT_ALERT_RULE.flappingWindowMinutes,
           pagingSeverities: DEFAULT_ALERT_RULE.pagingSeverities,
           autoCorrelateIncidents: DEFAULT_ALERT_RULE.autoCorrelateIncidents,
+          suppressAutoTicketDuringMaintenance:
+            DEFAULT_ALERT_RULE.suppressAutoTicketDuringMaintenance,
           isActive: true,
         },
       });

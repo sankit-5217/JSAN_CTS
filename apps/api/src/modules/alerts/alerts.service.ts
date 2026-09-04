@@ -10,6 +10,7 @@ import { NotificationsPublisher } from "../../common/notifications/notifications
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
+import { ChangesService } from "../changes/changes.service";
 import { IncidentsService } from "../incidents/incidents.service";
 import { AlertRulesService } from "./alert-rules.service";
 import type { AlertState } from "./alerts.constants";
@@ -34,16 +35,23 @@ export interface AlertIngestResult {
   flapping: boolean;
   recentOccurrences: number;
   /**
-   * The linked CI is in MAINTENANCE lifecycle — the alert is still recorded, but
-   * downstream correlation should annotate rather than raise an incident. Broader
-   * change-window suppression is layered on by the worker via the changes module.
+   * The alert's CI is in MAINTENANCE lifecycle, or covered by an approved change
+   * window right now (spec §10.10 rule 5). The alert is still recorded; whether
+   * that also silences auto-ticketing is `autoTicketSuppressed`.
    */
   suppressedByMaintenance: boolean;
   /**
+   * `suppressedByMaintenance` AND the active rule's
+   * `suppressAutoTicketDuringMaintenance` — this ingest skipped incident
+   * correlation and the NOC page. When false a suppressed alert is only
+   * labelled expected and still correlates / pages.
+   */
+  autoTicketSuppressed: boolean;
+  /**
    * Id of a still-open incident on the same CI that this alert was attached to
    * (spec §10.10), or the id it was already linked to on an earlier ingest.
-   * null when the CI is unknown, has no open incident, or the alert has
-   * RECOVERED. Link-only — correlation never opens or mutates a ticket.
+   * null when the CI is unknown, has no open incident, the alert has RECOVERED,
+   * or auto-ticketing was suppressed. Link-only — never opens or mutates a ticket.
    */
   correlatedIncidentId: string | null;
 }
@@ -68,8 +76,9 @@ export interface SourceIngestResult {
  * IncidentsService (read `findOpenByCi`, write `linkAlert`), never the tables.
  *
  * Ingestion tunables (flapping threshold + window, NOC-paging severities,
- * auto-correlate toggle) come from the `alert_rules` table via
- * AlertRulesService, not env / constants (spec §10.10).
+ * auto-correlate + maintenance-suppression toggles) come from the `alert_rules`
+ * table via AlertRulesService, not env / constants (spec §10.10). Maintenance
+ * windows are read via ChangesService (best-effort).
  */
 @Injectable()
 export class AlertsService {
@@ -81,6 +90,7 @@ export class AlertsService {
     private readonly notifications: NotificationsPublisher,
     private readonly incidents: IncidentsService,
     private readonly alertRules: AlertRulesService,
+    private readonly changes: ChangesService,
   ) {}
 
   async ingest(dto: IngestAlertDto, actor: ActorContext): Promise<AlertIngestResult> {
@@ -210,13 +220,26 @@ export class AlertsService {
       where: { fingerprint, lastSeenAt: { gte: since } },
     });
 
-    if (!deduped && rule.pagingSeverities.includes(dto.severity)) {
+    // §10.10 rule 5: a CI in MAINTENANCE lifecycle, or under an approved change
+    // window right now, is expected to be noisy. `autoTicketSuppressed` decides
+    // whether that also silences correlation + the NOC page, or just labels it.
+    const suppressedByMaintenance =
+      ci?.lifecycleStatus === "MAINTENANCE" || (ci ? await this.isCiUnderMaintenance(ci.id) : false);
+    const autoTicketSuppressed = suppressedByMaintenance && rule.suppressAutoTicketDuringMaintenance;
+
+    if (!deduped && rule.pagingSeverities.includes(dto.severity) && !autoTicketSuppressed) {
       await this.notifyNocOfCriticalAlert(alertId, dto);
     }
 
     const ciId = ci?.id ?? existing?.ciId ?? null;
     let correlatedIncidentId = existing?.correlatedIncidentId ?? null;
-    if (rule.autoCorrelateIncidents && ciId && finalState !== "RECOVERED" && !correlatedIncidentId) {
+    if (
+      rule.autoCorrelateIncidents &&
+      !autoTicketSuppressed &&
+      ciId &&
+      finalState !== "RECOVERED" &&
+      !correlatedIncidentId
+    ) {
       correlatedIncidentId = await this.correlateToOpenIncident(
         alertId,
         ciId,
@@ -239,9 +262,29 @@ export class AlertsService {
       ciResolved: Boolean(ci),
       flapping: recentOccurrences >= rule.flappingThreshold,
       recentOccurrences,
-      suppressedByMaintenance: ci?.lifecycleStatus === "MAINTENANCE",
+      suppressedByMaintenance,
+      autoTicketSuppressed,
       correlatedIncidentId,
     };
+  }
+
+  /**
+   * Is the CI covered by an approved change window right now? Best-effort — a
+   * failure in the changes module must not fail alert ingestion, so it is
+   * logged and treated as "not under maintenance".
+   */
+  private async isCiUnderMaintenance(ciId: string): Promise<boolean> {
+    try {
+      const windows = await this.changes.getActiveMaintenanceWindows(new Date(), ciId);
+      return windows.length > 0;
+    } catch (err) {
+      this.logger.warn(
+        `maintenance-window check for CI ${ciId} failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return false;
+    }
   }
 
   /**

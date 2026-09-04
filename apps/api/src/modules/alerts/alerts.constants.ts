@@ -29,6 +29,8 @@ export interface EffectiveAlertRule {
   flappingWindowMinutes: number;
   pagingSeverities: AlertSeverity[];
   autoCorrelateIncidents: boolean;
+  /** §10.10 rule 5: maintenance window suppresses auto-ticketing vs only labels. */
+  suppressAutoTicketDuringMaintenance: boolean;
 }
 
 /**
@@ -41,4 +43,5 @@ export const DEFAULT_ALERT_RULE: EffectiveAlertRule = {
   flappingWindowMinutes: 30,
   pagingSeverities: ["CRITICAL"],
   autoCorrelateIncidents: true,
+  suppressAutoTicketDuringMaintenance: true,
 };

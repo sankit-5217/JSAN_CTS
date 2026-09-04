@@ -35,6 +35,13 @@ export class UpdateAlertRuleDto {
   @IsBoolean()
   autoCorrelateIncidents?: boolean;
 
+  @ApiPropertyOptional({
+    description: "Suppress auto-ticketing during a maintenance window (vs only labelling).",
+  })
+  @IsOptional()
+  @IsBoolean()
+  suppressAutoTicketDuringMaintenance?: boolean;
+
   @ApiPropertyOptional({ description: "Deactivate a rule without deleting it." })
   @IsOptional()
   @IsBoolean()

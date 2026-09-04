@@ -522,11 +522,13 @@ model Alert {
 }
 
 /// Tunable ingestion policy (spec §10.10 "config over hard-code"): flapping
-/// detection, which severities page the NOC, and whether a live alert is
-/// auto-correlated to an open incident. The alerts module reads the newest
-/// active row (falling back to code defaults when none exists) on every
-/// ingest, behind a short in-memory cache. Global for now — a per-site /
-/// per-alert-type override is a later iteration.
+/// detection, which severities page the NOC, whether a live alert is
+/// auto-correlated to an open incident, and whether an approved maintenance
+/// window on the CI suppresses auto-ticketing (§10.10 rule 5) or only labels
+/// the alert expected. The alerts module reads the newest active row (falling
+/// back to code defaults when none exists) on every ingest, behind a short
+/// in-memory cache. Global for now — a per-site / per-alert-type override is a
+/// later iteration.
 model AlertRule {
   id                     String          @id @default(uuid())
   name                   String
@@ -534,6 +536,7 @@ model AlertRule {
   flappingWindowMinutes  Int             @default(30) @map("flapping_window_minutes")
   pagingSeverities       AlertSeverity[] @default([CRITICAL]) @map("paging_severities")
   autoCorrelateIncidents Boolean         @default(true) @map("auto_correlate_incidents")
+  suppressAutoTicketDuringMaintenance Boolean @default(true) @map("suppress_auto_ticket_during_maintenance")
   isActive               Boolean         @default(true) @map("is_active")
   createdAt              DateTime        @default(now()) @map("created_at")
   updatedAt              DateTime        @updatedAt @map("updated_at")

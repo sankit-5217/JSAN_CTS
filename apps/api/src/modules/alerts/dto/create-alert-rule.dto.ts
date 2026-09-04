@@ -51,6 +51,16 @@ export class CreateAlertRuleDto {
   autoCorrelateIncidents?: boolean;
 
   @ApiPropertyOptional({
+    description:
+      "During an approved maintenance window on the CI, suppress auto-ticketing " +
+      "(no correlation, no NOC page). When false the alert is only labelled expected.",
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  suppressAutoTicketDuringMaintenance?: boolean;
+
+  @ApiPropertyOptional({
     description: "Only the newest active row is applied; set false to retire one.",
     default: true,
   })

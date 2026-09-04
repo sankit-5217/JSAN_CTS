@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
+import { ChangesModule } from "../changes/changes.module";
 import { IncidentsModule } from "../incidents/incidents.module";
 import { AlertRulesController } from "./alert-rules.controller";
 import { AlertRulesService } from "./alert-rules.service";
@@ -19,9 +20,12 @@ import { AlertsService } from "./alerts.service";
  * native payloads via @cts-dc-opsdesk/{zabbix,prometheus,snmp}-adapter then
  * funnel into ingest(); per-event failures reported, never fatal. All ingest
  * routes require a service-account JWT with an ALERT_INGEST role.
- * Sprint 11 (partial): ingest() flags suppressedByMaintenance when the linked CI
- * is in MAINTENANCE lifecycle. Broader change-window suppression (changes module,
- * GET /changes/maintenance/active) is layered on by the worker at correlation time.
+ * Maintenance suppression (spec §10.10 rule 5, done): ingest() flags
+ * suppressedByMaintenance when the linked CI is in MAINTENANCE lifecycle OR is
+ * covered by an approved change window right now (ChangesService, best-effort).
+ * When the active rule's suppressAutoTicketDuringMaintenance is set, a suppressed
+ * alert is still recorded but skips correlation and the NOC page; otherwise it is
+ * only labelled expected.
  * ingest() writes an AuditEvent in the same transaction as the write — ALERT_RAISED
  * on first sighting, ALERT_STATE_CHANGED on a lifecycle move; a plain dedup /
  * lastSeenAt bump is deliberately not audited (ingestion is high-volume).
@@ -35,7 +39,7 @@ import { AlertsService } from "./alerts.service";
  * TODO: per-site / per-alert-type rule overrides (global-only for now).
  */
 @Module({
-  imports: [AuthModule, IncidentsModule],
+  imports: [AuthModule, IncidentsModule, ChangesModule],
   controllers: [AlertsController, AlertRulesController],
   providers: [AlertsService, AlertRulesService],
   exports: [AlertsService, AlertRulesService],
