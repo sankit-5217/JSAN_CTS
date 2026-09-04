@@ -2,6 +2,7 @@ import { Navigate, Outlet, Route, Routes, Link, useLocation } from "react-router
 import { AppBar, Box, Toolbar, Typography, Button } from "@mui/material";
 import { clearStoredToken, getStoredToken } from "./api/client";
 import { decodeJwtPayload } from "./api/jwt";
+import { CiDetailPage } from "./pages/CiDetailPage";
 import { CisPage } from "./pages/CisPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { IncidentDetailPage } from "./pages/IncidentDetailPage";
@@ -77,6 +78,7 @@ export function App() {
         <Route path="/" element={<CommandCenterPage />} />
         <Route path="/sites" element={<SitesPage />} />
         <Route path="/cis" element={<CisPage />} />
+        <Route path="/cis/:id" element={<CiDetailPage />} />
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
       </Route>
