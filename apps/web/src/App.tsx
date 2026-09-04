@@ -11,6 +11,8 @@ import { LoginPage } from "./pages/LoginPage";
 import { SiteDetailPage } from "./pages/SiteDetailPage";
 import { SitesPage } from "./pages/SitesPage";
 import { SlaPoliciesPage } from "./pages/SlaPoliciesPage";
+import { VendorCaseDetailPage } from "./pages/VendorCaseDetailPage";
+import { VendorsPage } from "./pages/VendorsPage";
 
 function TopNav() {
   const token = getStoredToken();
@@ -36,6 +38,9 @@ function TopNav() {
         </Button>
         <Button color="inherit" component={Link} to="/sla-policies">
           SLA Policies
+        </Button>
+        <Button color="inherit" component={Link} to="/vendors">
+          Vendors
         </Button>
         {user && (
           <Typography variant="body2" sx={{ mx: 2, opacity: 0.85 }}>
@@ -88,6 +93,8 @@ export function App() {
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
         <Route path="/sla-policies" element={<SlaPoliciesPage />} />
+        <Route path="/vendors" element={<VendorsPage />} />
+        <Route path="/vendor-cases/:id" element={<VendorCaseDetailPage />} />
       </Route>
     </Routes>
   );
