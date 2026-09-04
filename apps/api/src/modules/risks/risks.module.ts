@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
+import { BcpController } from "./bcp.controller";
+import { BcpService } from "./bcp.service";
 import { RisksController } from "./risks.controller";
 import { RisksService } from "./risks.service";
 
@@ -17,13 +19,19 @@ import { RisksService } from "./risks.service";
  * `overdue` view. Every mutation writes an audit event in the same transaction
  * (AuditService) with the real actorId + correlationId from the request.
  * Writes require SUPER_ADMIN / DELIVERY_OPS_MANAGER / INFRASTRUCTURE_LEAD.
- * TODO: BCP plans need a `bcp_plans` table (RTO/RPO/alternate site/test dates)
- * before that half of the module can be built.
+ *
+ * BCP plans (done): `bcp_plans` table + BcpService / BcpController
+ * (/bcp-plans). A plan covers one site XOR one named service; carries the
+ * recovery strategy, alternate site, RTO/RPO, contacts and test cadence.
+ * "Readiness" (untested / test overdue / ready) is derived at read time from
+ * the test dates. POST /bcp-plans/:id/tests logs a test (spec §10.15 /
+ * §10.16 "test evidence"). Every mutation audits in the write transaction
+ * (BCP_PLAN_CREATED / _UPDATED / _TESTED).
  */
 @Module({
   imports: [AuthModule],
-  controllers: [RisksController],
-  providers: [RisksService],
-  exports: [RisksService],
+  controllers: [RisksController, BcpController],
+  providers: [RisksService, BcpService],
+  exports: [RisksService, BcpService],
 })
 export class RisksModule {}

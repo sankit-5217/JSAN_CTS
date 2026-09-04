@@ -83,6 +83,21 @@ enum Priority {
   P4
 }
 
+// Problem/RCA lifecycle (spec §10.5, owner: Dev B). Distinct from incident
+// status — closing an incident never changes a problem's status.
+enum ProblemStatus {
+  OPEN
+  INVESTIGATING
+  KNOWN_ERROR
+  RESOLVED
+  CLOSED
+}
+
+enum ProblemLinkType {
+  INCIDENT
+  CHANGE
+}
+
 enum AlertSeverity {
   CRITICAL
   HIGH
@@ -492,12 +507,45 @@ model Alert {
   lastSeenAt      DateTime      @map("last_seen_at")
   state           AlertState    @default(OPEN)
   rawReference    String?       @map("raw_reference") // pointer, not unlimited raw payload storage
+  // Set once when the alert is attached to a still-open incident on the same CI
+  // (spec §10.10). Scalar, no FK relation: the incidents module owns that table,
+  // correlation only reads it. Link-only — correlation never opens or mutates a
+  // ticket.
+  correlatedIncidentId String?  @map("correlated_incident_id")
 
   ci ConfigurationItem? @relation(fields: [ciId], references: [id])
 
   @@unique([source, externalEventId])
   @@index([fingerprint])
+  @@index([correlatedIncidentId])
   @@map("alerts")
+}
+
+/// Tunable ingestion policy (spec §10.10 "config over hard-code"): flapping
+/// detection, which severities page the NOC, whether a live alert is
+/// auto-correlated to an open incident, and whether an approved maintenance
+/// window on the CI suppresses auto-ticketing (§10.10 rule 5) or only labels
+/// the alert expected. `siteId` / `alertType` optionally scope a rule; the
+/// alerts module resolves the most specific active match per ingest
+/// (site+type > site > type > global), falling back to code defaults, behind
+/// a short in-memory cache.
+model AlertRule {
+  id                     String          @id @default(uuid())
+  name                   String
+  siteId                 String?         @map("site_id")
+  alertType              String?         @map("alert_type")
+  flappingThreshold      Int             @default(3) @map("flapping_threshold")
+  flappingWindowMinutes  Int             @default(30) @map("flapping_window_minutes")
+  pagingSeverities       AlertSeverity[] @default([CRITICAL]) @map("paging_severities")
+  autoCorrelateIncidents Boolean         @default(true) @map("auto_correlate_incidents")
+  suppressAutoTicketDuringMaintenance Boolean @default(true) @map("suppress_auto_ticket_during_maintenance")
+  isActive               Boolean         @default(true) @map("is_active")
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@index([siteId])
+  @@map("alert_rules")
 }
 
 // ---------------------------------------------------------------------------
@@ -517,7 +565,7 @@ model Vendor {
 
 model VendorCase {
   id                String          @id @default(uuid())
-  vendorCaseNo      String          @map("vendor_case_no")
+  vendorCaseNo      String          @unique @map("vendor_case_no")
   vendorId          String          @map("vendor_id")
   linkedIncidentId  String?         @map("linked_incident_id")
   ciId              String?         @map("ci_id")
@@ -557,6 +605,68 @@ model VendorCaseUpdate {
 // §10.15
 // ---------------------------------------------------------------------------
 
+/// Formal RCA record for repeated or major incidents (spec §10.5). Owns its
+/// own action items and the links to related incidents/changes, so linking
+/// never edits another module's table. Closing an incident must never
+/// auto-close a problem — that rule lives in this module only.
+model Problem {
+  id               String        @id @default(uuid())
+  problemNo        String        @unique @map("problem_no")
+  title            String
+  status           ProblemStatus @default(OPEN)
+  priority         Priority?
+  symptoms         String
+  knownError       String?       @map("known_error")
+  rootCause        String?       @map("root_cause")
+  correctiveAction String?       @map("corrective_action")
+  preventiveAction String?       @map("preventive_action")
+  ownerUserId      String?       @map("owner_user_id")
+  dueDate          DateTime?     @map("due_date")
+  resolvedAt       DateTime?     @map("resolved_at")
+  closedAt         DateTime?     @map("closed_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  actionItems ProblemActionItem[]
+  links       ProblemLink[]
+
+  @@index([status])
+  @@map("problems")
+}
+
+/// A corrective / preventive task on a problem, tracked to completion (spec §10.5).
+model ProblemActionItem {
+  id             String    @id @default(uuid())
+  problemId      String    @map("problem_id")
+  description    String
+  assigneeUserId String?   @map("assignee_user_id")
+  dueDate        DateTime? @map("due_date")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  problem Problem @relation(fields: [problemId], references: [id])
+
+  @@index([problemId])
+  @@map("problem_action_items")
+}
+
+/// Link from a problem to a related incident or change (spec §10.5). A plain
+/// join row (entityId is not an FK) so the problems module never writes to the
+/// incidents or changes tables.
+model ProblemLink {
+  id         String          @id @default(uuid())
+  problemId  String          @map("problem_id")
+  entityType ProblemLinkType @map("entity_type")
+  entityId   String          @map("entity_id")
+  createdAt  DateTime        @default(now()) @map("created_at")
+
+  problem Problem @relation(fields: [problemId], references: [id])
+
+  @@unique([problemId, entityType, entityId])
+  @@index([entityType, entityId])
+  @@map("problem_links")
+}
+
 model Change {
   id               String     @id @default(uuid())
   changeType       ChangeType @map("change_type")
@@ -568,6 +678,10 @@ model Change {
   windowEnd        DateTime   @map("window_end")
   approverId       String?    @map("approver_id")
   outcome          String?
+  // CIs this change touches. Empty = a site-wide window. Lets the
+  // alert-suppression feed answer "is CI X under maintenance right now?"
+  // rather than only keying off ci.lifecycleStatus.
+  affectedCiIds    String[]   @default([]) @map("affected_ci_ids")
   createdAt        DateTime   @default(now()) @map("created_at")
 
   @@map("changes")
@@ -601,6 +715,35 @@ model Risk {
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("risks")
+}
+
+/// Business-continuity plan for a site or a named service (spec §10.15):
+/// recovery strategy, alternate site, RTO/RPO, contacts and the test cadence
+/// (last tested / next due). "Readiness" (untested / test overdue / ready) is
+/// derived at read time from the test dates, not stored. Owner: Dev B / risks
+/// module. `siteId` is a bare scalar, same as `Risk.siteId`.
+model BcpPlan {
+  id                        String    @id @default(uuid())
+  name                      String
+  siteId                    String?   @map("site_id")
+  serviceName               String?   @map("service_name")
+  recoveryStrategy          String    @map("recovery_strategy")
+  alternateSite             String?   @map("alternate_site")
+  rtoMinutes                Int       @map("rto_minutes")
+  rpoMinutes                Int       @map("rpo_minutes")
+  targetAvailabilityPercent Float?    @map("target_availability_percent")
+  residualRisk              String?   @map("residual_risk")
+  contacts                  String?
+  ownerId                   String?   @map("owner_id")
+  lastTestedAt              DateTime? @map("last_tested_at")
+  nextTestDueAt             DateTime? @map("next_test_due_at")
+  isActive                  Boolean   @default(true) @map("is_active")
+  createdAt                 DateTime  @default(now()) @map("created_at")
+  updatedAt                 DateTime  @updatedAt @map("updated_at")
+
+  @@index([siteId])
+  @@index([isActive])
+  @@map("bcp_plans")
 }
 
 // ---------------------------------------------------------------------------

@@ -15,9 +15,9 @@ import { ChangesService } from "./changes.service";
  * pirOverdue flag; GET /changes/maintenance/active as the alert-suppression feed.
  * Every mutation writes an AuditEvent in the same transaction as the write
  * (CHANGE_CREATED / CHANGE_APPROVED / CHANGE_UPDATED via AuditService).
- * TODO: actorId/correlationId populate once the auth guard is on the controller;
- * per-CI window scoping needs a Change.affectedCiIds schema field (coordinate
- * with Dev A) — until then alert suppression keys off ci.lifecycleStatus.
+ * Per-CI window scoping (done): Change.affectedCiIds (empty = site-wide);
+ * GET /changes/maintenance/active?ciId=… answers whether a specific CI is
+ * under maintenance right now.
  */
 @Module({
   imports: [AuthModule],

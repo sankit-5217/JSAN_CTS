@@ -105,6 +105,17 @@ describe("ChangesService", () => {
       expect(result.status).toBe("PENDING_APPROVAL");
       expect(result.pirOverdue).toBe(false);
     });
+
+    it("persists affectedCiIds when given", async () => {
+      prisma.change.create.mockResolvedValue(storedChange());
+      await service.create(
+        createDto({ affectedCiIds: ["c1a11111-1111-1111-1111-111111111111"] }),
+        ACTOR,
+      );
+      expect(prisma.change.create.mock.calls[0][0].data.affectedCiIds).toEqual([
+        "c1a11111-1111-1111-1111-111111111111",
+      ]);
+    });
   });
 
   describe("approve", () => {
@@ -228,6 +239,19 @@ describe("ChangesService", () => {
         windowStart: { lte: at },
         windowEnd: { gte: at },
       });
+      expect(where.AND).toBeUndefined();
+    });
+
+    it("narrows to windows affecting a CI (or site-wide) when ciId is given", async () => {
+      prisma.change.findMany.mockResolvedValue([]);
+      const at = new Date("2026-09-05T22:30:00.000Z");
+      await service.getActiveMaintenanceWindows(at, "ci-9");
+      const where = prisma.change.findMany.mock.calls[0][0].where;
+      // NOT_COMPLETED still holds the top-level OR; the CI match is a nested AND.
+      expect(where.OR).toEqual([{ outcome: null }, { outcome: "" }]);
+      expect(where.AND).toEqual([
+        { OR: [{ affectedCiIds: { isEmpty: true } }, { affectedCiIds: { has: "ci-9" } }] },
+      ]);
     });
   });
 });

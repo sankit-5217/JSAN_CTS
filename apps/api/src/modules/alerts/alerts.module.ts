@@ -1,5 +1,9 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
+import { ChangesModule } from "../changes/changes.module";
+import { IncidentsModule } from "../incidents/incidents.module";
+import { AlertRulesController } from "./alert-rules.controller";
+import { AlertRulesService } from "./alert-rules.service";
 import { AlertsController } from "./alerts.controller";
 import { AlertsService } from "./alerts.service";
 
@@ -16,19 +20,29 @@ import { AlertsService } from "./alerts.service";
  * native payloads via @cts-dc-opsdesk/{zabbix,prometheus,snmp}-adapter then
  * funnel into ingest(); per-event failures reported, never fatal. All ingest
  * routes require a service-account JWT with an ALERT_INGEST role.
- * Sprint 11 (partial): ingest() flags suppressedByMaintenance when the linked CI
- * is in MAINTENANCE lifecycle. Broader change-window suppression (changes module,
- * GET /changes/maintenance/active) is layered on by the worker at correlation time.
+ * Maintenance suppression (spec §10.10 rule 5, done): ingest() flags
+ * suppressedByMaintenance when the linked CI is in MAINTENANCE lifecycle OR is
+ * covered by an approved change window right now (ChangesService, best-effort).
+ * When the active rule's suppressAutoTicketDuringMaintenance is set, a suppressed
+ * alert is still recorded but skips correlation and the NOC page; otherwise it is
+ * only labelled expected.
  * ingest() writes an AuditEvent in the same transaction as the write — ALERT_RAISED
  * on first sighting, ALERT_STATE_CHANGED on a lifecycle move; a plain dedup /
  * lastSeenAt bump is deliberately not audited (ingestion is high-volume).
- * TODO: correlate to OPEN incidents once the incidents module (Dev A) lands; move
- * flapping thresholds into an alert_rules config table (config-over-hardcode).
+ * Correlation (done): a non-RECOVERED alert on a CI that already has a still-open
+ * incident is linked to it (Alert.correlatedIncidentId + an ALERT_LINKED timeline
+ * event), via IncidentsService — link-only, never opens or transitions a ticket.
+ * Config (done): the `alert_rules` table (AlertRulesService, /alert-rules CRUD)
+ * holds the flapping threshold + window, NOC-paging severities, the
+ * auto-correlate toggle and the maintenance-suppression mode. A rule may be
+ * scoped by siteId / alertType; ingest() resolves the most specific active
+ * match (site+type > site > type > global) behind a ~30s cache, code defaults
+ * until a row is seeded (spec §10.10, "config over hard-code").
  */
 @Module({
-  imports: [AuthModule],
-  controllers: [AlertsController],
-  providers: [AlertsService],
-  exports: [AlertsService],
+  imports: [AuthModule, IncidentsModule, ChangesModule],
+  controllers: [AlertsController, AlertRulesController],
+  providers: [AlertsService, AlertRulesService],
+  exports: [AlertsService, AlertRulesService],
 })
 export class AlertsModule {}
