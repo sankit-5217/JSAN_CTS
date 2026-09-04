@@ -166,7 +166,26 @@ describe("CmdbService.createRelation", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("resolves parent/child correctly for direction=CHILD (the URL CI is the parent)", async () => {
+  it("resolves parent/child correctly for direction=PARENT (the URL CI is the parent)", async () => {
+    const findUnique = jest
+      .fn()
+      .mockResolvedValueOnce({ id: "ci-1", siteId: "site-a" })
+      .mockResolvedValueOnce({ id: "ci-2", siteId: "site-a" });
+    const { service, tx } = makeService({ configurationItemFindUnique: findUnique });
+
+    await service.createRelation(
+      "ci-1",
+      { relatedCiId: "ci-2", relationType: "CONTAINS", direction: "PARENT" },
+      { actorId: "user-1" },
+      scopedUser,
+    );
+
+    expect(tx.ciRelation.create).toHaveBeenCalledWith({
+      data: { parentCiId: "ci-1", childCiId: "ci-2", relationType: "CONTAINS" },
+    });
+  });
+
+  it("resolves parent/child correctly for direction=CHILD (the URL CI is the child)", async () => {
     const findUnique = jest
       .fn()
       .mockResolvedValueOnce({ id: "ci-1", siteId: "site-a" })
@@ -181,7 +200,7 @@ describe("CmdbService.createRelation", () => {
     );
 
     expect(tx.ciRelation.create).toHaveBeenCalledWith({
-      data: { parentCiId: "ci-1", childCiId: "ci-2", relationType: "CONTAINS" },
+      data: { parentCiId: "ci-2", childCiId: "ci-1", relationType: "CONTAINS" },
     });
   });
 });

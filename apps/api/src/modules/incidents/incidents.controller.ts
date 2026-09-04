@@ -117,6 +117,11 @@ export class IncidentsController {
     return this.incidentsService.listEvents(id, user);
   }
 
+  @Get(":id/sla")
+  findSlaState(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.incidentsService.findSlaState(id, user);
+  }
+
   @Post(":id/attachments")
   @Roles(...INCIDENT_WRITE_ROLES)
   @ApiConsumes("multipart/form-data")

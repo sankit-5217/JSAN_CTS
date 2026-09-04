@@ -279,8 +279,10 @@ export class CmdbService {
     await this.findOneScoped(ciId, user);
     await this.findOne(dto.relatedCiId); // 404s if the related CI doesn't exist
 
-    const parentCiId = dto.direction === "CHILD" ? ciId : dto.relatedCiId;
-    const childCiId = dto.direction === "CHILD" ? dto.relatedCiId : ciId;
+    // dto.direction describes the URL CI's own role (per CreateCiRelationDto's
+    // doc comment: "Is the CI in the URL the parent or child of relatedCiId?").
+    const parentCiId = dto.direction === "PARENT" ? ciId : dto.relatedCiId;
+    const childCiId = dto.direction === "PARENT" ? dto.relatedCiId : ciId;
 
     return this.prisma.$transaction(async (tx) => {
       const relation = await tx.ciRelation.create({

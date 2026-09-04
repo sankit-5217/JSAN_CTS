@@ -37,7 +37,11 @@ jobs:
       REDIS_URL: redis://localhost:6379
 
     steps:
+      # fetch-depth: 0 (full history) is required by the gitleaks secret
+      # scan step below — a shallow clone can't diff the pushed commits.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Version comes from package.json's "packageManager" field — passing
       # `version:` here too causes pnpm/action-setup to fail with
@@ -78,9 +82,56 @@ jobs:
       - name: Test
         run: pnpm test
 
-      # 7-8. Dependency/secret/container scanning and image build are added
-      # once the team reaches Sprint 12 (Hardening) per spec §20.1 / §22.
+      # 7. Dependency scan (spec §20.1). Informational, not build-blocking:
+      # `pnpm audit --audit-level=high` currently reports 11 pre-existing
+      # high-severity advisories in transitive deps (js-yaml via
+      # @nestjs/swagger, vite, etc.) that predate this step and need their
+      # own upgrade/compat pass — wiring this as a hard gate today would
+      # break every build for reasons unrelated to whatever a given PR
+      # actually changed. Flip `continue-on-error` off once that pass lands.
+      - name: Dependency scan
+        run: pnpm audit --audit-level=high
+        continue-on-error: true
+
+      # 7. Secret scan (spec §20.1) — scans the pushed commits / PR diff.
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 9. Build artifacts
       - name: Build
         run: pnpm build
+
+      # 8. Container build + scan (spec §20.1) — one image per app, scanned
+      # for HIGH/CRITICAL vulnerabilities. Runs after the plain build so a
+      # broken app build fails fast before spending time on image builds.
+      - name: Build API image
+        run: docker build -f infra/docker/api.Dockerfile -t opsdesk-api:ci .
+
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: opsdesk-api:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Build web image
+        run: docker build -f infra/docker/web.Dockerfile -t opsdesk-web:ci .
+
+      - name: Scan web image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: opsdesk-web:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Build worker image
+        run: docker build -f infra/docker/worker.Dockerfile -t opsdesk-worker:ci .
+
+      - name: Scan worker image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: opsdesk-worker:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"

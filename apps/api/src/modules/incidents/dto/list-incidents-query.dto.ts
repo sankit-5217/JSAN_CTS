@@ -1,7 +1,7 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import { IncidentStatus, Priority } from "@prisma/client";
-import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, Min } from "class-validator";
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, Min } from "class-validator";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -41,6 +41,20 @@ export class ListIncidentsQueryDto {
   @IsOptional()
   @IsString()
   q?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      "Open incidents with an SLA warning threshold already fired but not yet breached (spec §10.8)",
+  })
+  @IsOptional()
+  // Querystring values arrive as strings — `@Type(() => Boolean)` would
+  // coerce "false" to `true` (any non-empty string is truthy), so this is
+  // an explicit string comparison instead. Absent stays undefined (not
+  // coerced to false) so "not requested" and "explicitly false" differ.
+  @Transform(({ value }) => (value === undefined ? undefined : value === true || value === "true"))
+  @IsBoolean()
+  slaAtRisk?: boolean;
 
   @ApiProperty({ required: false, default: DEFAULT_LIMIT })
   @IsOptional()

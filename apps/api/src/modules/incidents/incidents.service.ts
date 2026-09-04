@@ -10,6 +10,7 @@ import {
   Incident,
   IncidentComment,
   IncidentEvent,
+  IncidentStatus,
   Prisma,
   UserRole,
 } from "@prisma/client";
@@ -19,6 +20,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { SlaService } from "../sla/sla.service";
 import {
   ALLOWED_ATTACHMENT_CONTENT_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
@@ -28,7 +30,7 @@ import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
 import { TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
-import { findTransitionRule, isOwnerOrElevated } from "./incident-transitions";
+import { findTransitionRule, isOwnerOrElevated, OPEN_STATUSES } from "./incident-transitions";
 
 /** Minimal shape of what NestJS's FileInterceptor hands us (multer.File). */
 export interface UploadedAttachmentFile {
@@ -62,6 +64,7 @@ export class IncidentsService {
     private readonly auditService: AuditService,
     private readonly authzService: AuthzService,
     private readonly storageService: StorageService,
+    private readonly slaService: SlaService,
   ) {}
 
   async assertSiteAccess(user: AuthenticatedUser, siteId: string): Promise<void> {
@@ -90,11 +93,17 @@ export class IncidentsService {
 
     const where: Prisma.IncidentWhereInput = {
       siteId: siteFilter ? { in: siteFilter } : undefined,
-      status: query.status,
+      // An explicit ?status= wins; slaAtRisk alone still implies "open"
+      // (a resolved incident's stale fired-milestone history isn't
+      // actionable risk) — matches ReportsService's own queue definition.
+      status: query.status ?? (query.slaAtRisk ? { in: OPEN_STATUSES } : undefined),
       priority: query.priority,
       ownerUserId: query.ownerUserId,
       ownerGroupId: query.ownerGroupId,
       ciId: query.ciId,
+      slaInstances: query.slaAtRisk
+        ? { some: { breached: false, firedMilestones: { isEmpty: false } } }
+        : undefined,
       OR: query.q
         ? [
             { incidentNo: { contains: query.q, mode: "insensitive" } },
@@ -174,6 +183,14 @@ export class IncidentsService {
         },
         tx,
       );
+      // SLA clock starts the moment a qualifying incident is created (spec
+      // §10.8) — same transaction as the incident row, never a follow-up call.
+      await this.slaService.startForIncident(
+        tx,
+        { id: incident.id, siteId: incident.siteId },
+        incident.priority,
+        actor,
+      );
       return incident;
     });
   }
@@ -183,6 +200,7 @@ export class IncidentsService {
     const ownerChanged =
       (dto.ownerGroupId !== undefined && dto.ownerGroupId !== before.ownerGroupId) ||
       (dto.ownerUserId !== undefined && dto.ownerUserId !== before.ownerUserId);
+    const priorityChanged = dto.priority !== undefined && dto.priority !== before.priority;
 
     return this.prisma.$transaction(async (tx) => {
       const after = await tx.incident.update({
@@ -227,6 +245,16 @@ export class IncidentsService {
         },
         tx,
       );
+
+      if (priorityChanged) {
+        await this.slaService.onPriorityChanged(
+          tx,
+          { id, siteId: before.siteId },
+          after.priority,
+          actor,
+        );
+      }
+
       return after;
     });
   }
@@ -325,8 +353,122 @@ export class IncidentsService {
         tx,
       );
 
+      // SLA hooks (spec §10.8) — same transaction as the status write, one
+      // per transition kind. `incident` here is the *pre*-transition row,
+      // so PENDING_* -> IN_PROGRESS can tell a genuine resume apart from
+      // ACKNOWLEDGED/REOPENED -> IN_PROGRESS (no pause to resume there).
+      if (dto.toStatus === "ACKNOWLEDGED" && after.acknowledgedAt) {
+        await this.slaService.onAcknowledged(tx, id, after.acknowledgedAt, actor);
+      } else if (dto.toStatus === "RESOLVED" && after.restoredAt) {
+        await this.slaService.onResolved(tx, id, after.restoredAt, actor);
+      } else if (dto.toStatus === "PENDING_VENDOR" || dto.toStatus === "PENDING_CUSTOMER") {
+        await this.slaService.onPaused(tx, id, dto.toStatus, actor);
+      } else if (
+        dto.toStatus === "IN_PROGRESS" &&
+        (incident.status === "PENDING_VENDOR" || incident.status === "PENDING_CUSTOMER")
+      ) {
+        await this.slaService.onResumed(tx, id, actor);
+      } else if (dto.toStatus === "REOPENED") {
+        await this.slaService.onReopened(tx, id, actor);
+      }
+
       return after;
     });
+  }
+
+  // --- Cross-module: alert correlation (spec §10.10) ------------------
+  //
+  // The alerts module owns the Alert row; the incident timeline is ours,
+  // so the seam is two methods here. `alerts` reads `findOpenByCi` to
+  // decide whether an incoming alert belongs to an existing ticket, then
+  // calls `linkAlert` to annotate this incident's timeline. Neither
+  // changes incident status — correlation never drives the state machine.
+
+  private static readonly OPEN_INCIDENT_STATUSES: IncidentStatus[] = [
+    IncidentStatus.NEW,
+    IncidentStatus.ASSIGNED,
+    IncidentStatus.ACKNOWLEDGED,
+    IncidentStatus.IN_PROGRESS,
+    IncidentStatus.PENDING_VENDOR,
+    IncidentStatus.PENDING_CUSTOMER,
+    IncidentStatus.REOPENED,
+  ];
+
+  /** Most-recently-created still-open incident for a CI, or null. Read-only. */
+  async findOpenByCi(ciId: string): Promise<Incident | null> {
+    return this.prisma.incident.findFirst({
+      where: { ciId, status: { in: IncidentsService.OPEN_INCIDENT_STATUSES } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  /**
+   * Attach a monitoring alert to an incident's timeline as an `ALERT_LINKED`
+   * event, audited in the same transaction. Idempotent — a repeat call for the
+   * same alert id is a no-op (returns `{ linked: false }`). Called by the
+   * alerts module during ingestion correlation.
+   */
+  async linkAlert(
+    incidentId: string,
+    alert: {
+      id: string;
+      alertType: string;
+      severity: string;
+      source: string;
+      fingerprint: string;
+    },
+    actor: ActorContext,
+  ): Promise<{ linked: boolean }> {
+    const incident = await this.prisma.incident.findUnique({ where: { id: incidentId } });
+    if (!incident) {
+      throw new NotFoundException(`Incident ${incidentId} not found`);
+    }
+
+    const already = await this.prisma.incidentEvent.findFirst({
+      where: {
+        incidentId,
+        eventType: "ALERT_LINKED",
+        payload: { path: ["alertId"], equals: alert.id },
+      },
+    });
+    if (already) {
+      return { linked: false };
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.incidentEvent.create({
+        data: {
+          incidentId,
+          eventType: "ALERT_LINKED",
+          actorId: actor.actorId,
+          payload: {
+            alertId: alert.id,
+            alertType: alert.alertType,
+            severity: alert.severity,
+            source: alert.source,
+            fingerprint: alert.fingerprint,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Incident",
+          entityId: incidentId,
+          action: "ALERT_LINKED",
+          after: {
+            alertId: alert.id,
+            alertType: alert.alertType,
+            severity: alert.severity,
+            source: alert.source,
+          },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+    });
+
+    return { linked: true };
   }
 
   // --- Comments + timeline reads (spec §19, §29) -----------------------
@@ -402,6 +544,12 @@ export class IncidentsService {
       where: { incidentId },
       orderBy: { createdAt: "asc" },
     });
+  }
+
+  /** SLA state for this incident's header/countdown (spec §29, §10.8). */
+  async findSlaState(incidentId: string, user: AuthenticatedUser) {
+    await this.findOneScoped(incidentId, user);
+    return this.slaService.findForIncident(incidentId);
   }
 
   // --- Attachments (spec §17, §29) -------------------------------------

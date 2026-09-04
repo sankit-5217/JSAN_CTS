@@ -5,6 +5,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { SlaService } from "../sla/sla.service";
 import { IncidentsService } from "./incidents.service";
 
 const engineer: AuthenticatedUser = {
@@ -110,11 +111,15 @@ function makeService(
     $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
     incident: {
       findUnique: overrides.incidentFindUnique ?? jest.fn().mockResolvedValue(baseIncident()),
+      findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
     },
     incidentComment: { findMany: jest.fn().mockResolvedValue([]) },
-    incidentEvent: { findMany: jest.fn().mockResolvedValue([]) },
+    incidentEvent: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     attachment: {
       findMany: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn().mockResolvedValue(null),
@@ -135,12 +140,24 @@ function makeService(
     getSignedDownloadUrl: jest.fn().mockResolvedValue("https://signed.example/download"),
   } as unknown as StorageService;
 
+  const slaService = {
+    startForIncident: jest.fn().mockResolvedValue(undefined),
+    onAcknowledged: jest.fn().mockResolvedValue(undefined),
+    onResolved: jest.fn().mockResolvedValue(undefined),
+    onPaused: jest.fn().mockResolvedValue(undefined),
+    onResumed: jest.fn().mockResolvedValue(undefined),
+    onPriorityChanged: jest.fn().mockResolvedValue(undefined),
+    onReopened: jest.fn().mockResolvedValue(undefined),
+    findForIncident: jest.fn().mockResolvedValue(null),
+  } as unknown as SlaService;
+
   return {
-    service: new IncidentsService(prisma, auditService, authzService, storageService),
+    service: new IncidentsService(prisma, auditService, authzService, storageService, slaService),
     prisma,
     auditService,
     authzService,
     storageService,
+    slaService,
     tx,
   };
 }
@@ -162,6 +179,54 @@ describe("IncidentsService.create", () => {
       expect.objectContaining({ entityType: "Incident", action: "CREATE" }),
       tx,
     );
+  });
+
+  it("starts the SLA clock in the same transaction as the incident row", async () => {
+    const { service, tx, slaService } = makeService();
+    const result = await service.create(baseCreateDto, { actorId: "user-1" });
+    expect(slaService.startForIncident).toHaveBeenCalledWith(
+      tx,
+      { id: result.id, siteId: result.siteId },
+      result.priority,
+      { actorId: "user-1" },
+    );
+  });
+});
+
+describe("IncidentsService.update", () => {
+  it("calls SlaService.onPriorityChanged when priority actually changes", async () => {
+    const { service, tx, slaService } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ siteId: "site-a", priority: Priority.P3 })),
+    });
+    await service.update(
+      "incident-1",
+      { priority: Priority.P1 },
+      engineer,
+      { actorId: engineer.id },
+    );
+    expect(slaService.onPriorityChanged).toHaveBeenCalledWith(
+      tx,
+      { id: "incident-1", siteId: "site-a" },
+      Priority.P1,
+      { actorId: engineer.id },
+    );
+  });
+
+  it("does not call onPriorityChanged when priority is left unchanged", async () => {
+    const { service, slaService } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ priority: Priority.P3 })),
+    });
+    await service.update(
+      "incident-1",
+      { shortDescription: "Updated text" },
+      engineer,
+      { actorId: engineer.id },
+    );
+    expect(slaService.onPriorityChanged).not.toHaveBeenCalled();
   });
 });
 
@@ -198,6 +263,30 @@ describe("IncidentsService.findAll", () => {
     await service.findAll({ limit: 50, offset: 0 }, null);
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ siteId: undefined }) }),
+    );
+  });
+
+  it("slaAtRisk=true filters to open incidents with a fired, non-breached milestone", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll({ slaAtRisk: true, limit: 50, offset: 0 }, null);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: { in: expect.arrayContaining(["NEW", "ASSIGNED"]) },
+          slaInstances: { some: { breached: false, firedMilestones: { isEmpty: false } } },
+        }),
+      }),
+    );
+  });
+
+  it("an explicit ?status still wins over slaAtRisk's implied open-status filter", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll(
+      { slaAtRisk: true, status: IncidentStatus.RESOLVED, limit: 50, offset: 0 },
+      null,
+    );
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ status: IncidentStatus.RESOLVED }) }),
     );
   });
 });
@@ -312,6 +401,121 @@ describe("IncidentsService.createTransition", () => {
       tx,
     );
   });
+
+  it("calls SlaService.onAcknowledged when transitioning to ACKNOWLEDGED", async () => {
+    const { service, tx, slaService } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.ASSIGNED, ownerUserId: engineer.id }),
+        ),
+    });
+    const result = await service.createTransition(
+      "incident-1",
+      { toStatus: IncidentStatus.ACKNOWLEDGED },
+      { actorId: engineer.id },
+      engineer,
+    );
+    expect(slaService.onAcknowledged).toHaveBeenCalledWith(
+      tx,
+      "incident-1",
+      result.acknowledgedAt,
+      { actorId: engineer.id },
+    );
+  });
+
+  it("calls SlaService.onResolved when transitioning to RESOLVED", async () => {
+    const { service, tx, slaService } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
+        ),
+    });
+    const result = await service.createTransition(
+      "incident-1",
+      {
+        toStatus: IncidentStatus.RESOLVED,
+        resolutionCategory: "HARDWARE_REPLACED",
+        rootCauseSummary: "Faulty PSU replaced",
+      },
+      { actorId: engineer.id },
+      engineer,
+    );
+    expect(slaService.onResolved).toHaveBeenCalledWith(tx, "incident-1", result.restoredAt, {
+      actorId: engineer.id,
+    });
+  });
+
+  it("calls SlaService.onPaused when transitioning to PENDING_VENDOR", async () => {
+    const { service, tx, slaService } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
+        ),
+    });
+    await service.createTransition(
+      "incident-1",
+      { toStatus: IncidentStatus.PENDING_VENDOR, reason: "Awaiting vendor dispatch" },
+      { actorId: engineer.id },
+      engineer,
+    );
+    expect(slaService.onPaused).toHaveBeenCalledWith(tx, "incident-1", "PENDING_VENDOR", {
+      actorId: engineer.id,
+    });
+  });
+
+  it("calls SlaService.onResumed when returning to IN_PROGRESS from a paused state", async () => {
+    const { service, tx, slaService } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.PENDING_CUSTOMER, ownerUserId: engineer.id }),
+        ),
+    });
+    await service.createTransition(
+      "incident-1",
+      { toStatus: IncidentStatus.IN_PROGRESS },
+      { actorId: engineer.id },
+      engineer,
+    );
+    expect(slaService.onResumed).toHaveBeenCalledWith(tx, "incident-1", { actorId: engineer.id });
+  });
+
+  it("does NOT call onResumed for ACKNOWLEDGED -> IN_PROGRESS (no pause to resume)", async () => {
+    const { service, slaService } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.ACKNOWLEDGED, ownerUserId: engineer.id }),
+        ),
+    });
+    await service.createTransition(
+      "incident-1",
+      { toStatus: IncidentStatus.IN_PROGRESS },
+      { actorId: engineer.id },
+      engineer,
+    );
+    expect(slaService.onResumed).not.toHaveBeenCalled();
+  });
+
+  it("calls SlaService.onReopened when transitioning to REOPENED", async () => {
+    const { service, tx, slaService } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.RESOLVED, ownerUserId: engineer.id })),
+    });
+    await service.createTransition(
+      "incident-1",
+      { toStatus: IncidentStatus.REOPENED, reason: "Issue recurred" },
+      { actorId: engineer.id },
+      serviceDesk,
+    );
+    expect(slaService.onReopened).toHaveBeenCalledWith(tx, "incident-1", {
+      actorId: engineer.id,
+    });
+  });
 });
 
 describe("IncidentsService comment visibility", () => {
@@ -413,5 +617,75 @@ describe("IncidentsService attachments", () => {
 
     const result = await service.getAttachmentDownloadUrl("incident-1", "attachment-1", engineer);
     expect(result).toEqual({ url: "https://signed.example/download" });
+  });
+});
+
+describe("IncidentsService alert correlation", () => {
+  const alertRef = {
+    id: "alert-9",
+    alertType: "disk.predictive_failure",
+    severity: "HIGH",
+    source: "ZABBIX",
+    fingerprint: "f".repeat(64),
+  };
+
+  it("findOpenByCi queries only still-open statuses, newest first", async () => {
+    const { service, prisma } = makeService();
+    (prisma.incident.findFirst as jest.Mock).mockResolvedValue(baseIncident({ id: "inc-open" }));
+
+    const result = await service.findOpenByCi("ci-1");
+
+    expect(result).toMatchObject({ id: "inc-open" });
+    const arg = (prisma.incident.findFirst as jest.Mock).mock.calls[0][0];
+    expect(arg.where.ciId).toBe("ci-1");
+    expect(arg.where.status.in).toEqual(
+      expect.arrayContaining([IncidentStatus.NEW, IncidentStatus.IN_PROGRESS, IncidentStatus.REOPENED]),
+    );
+    expect(arg.where.status.in).not.toContain(IncidentStatus.RESOLVED);
+    expect(arg.where.status.in).not.toContain(IncidentStatus.CLOSED);
+    expect(arg.orderBy).toEqual({ createdAt: "desc" });
+  });
+
+  it("findOpenByCi returns null when the CI has no open incident", async () => {
+    const { service } = makeService();
+    await expect(service.findOpenByCi("ci-1")).resolves.toBeNull();
+  });
+
+  it("linkAlert appends an ALERT_LINKED event + audit in one transaction", async () => {
+    const { service, tx, auditService } = makeService();
+
+    const result = await service.linkAlert("incident-1", alertRef, { actorId: "collector-svc" });
+
+    expect(result).toEqual({ linked: true });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          incidentId: "incident-1",
+          eventType: "ALERT_LINKED",
+          payload: expect.objectContaining({ alertId: "alert-9", source: "ZABBIX" }),
+        }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "Incident", action: "ALERT_LINKED" }),
+      tx,
+    );
+  });
+
+  it("linkAlert is idempotent — a repeat for the same alert is a no-op", async () => {
+    const { service, prisma, tx } = makeService();
+    (prisma.incidentEvent.findFirst as jest.Mock).mockResolvedValue({ id: "existing-event" });
+
+    const result = await service.linkAlert("incident-1", alertRef, { actorId: "collector-svc" });
+
+    expect(result).toEqual({ linked: false });
+    expect(tx.incidentEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("linkAlert 404s an unknown incident", async () => {
+    const { service } = makeService({ incidentFindUnique: jest.fn().mockResolvedValue(null) });
+    await expect(
+      service.linkAlert("missing", alertRef, { actorId: "collector-svc" }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
