@@ -68,6 +68,12 @@ export class VendorsService {
 
   async openCase(dto: CreateVendorCaseDto, actor: ActorContext) {
     await this.getVendor(dto.vendorId);
+    const duplicate = await this.prisma.vendorCase.findUnique({
+      where: { vendorCaseNo: dto.vendorCaseNo },
+    });
+    if (duplicate) {
+      throw new ConflictException(`Vendor case ${dto.vendorCaseNo} already exists`);
+    }
     if (dto.linkedIncidentId) {
       await this.assertIncidentExists(dto.linkedIncidentId);
     }

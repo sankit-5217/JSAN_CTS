@@ -110,6 +110,12 @@ describe("VendorsService", () => {
       expect(prisma.vendorCase.create).not.toHaveBeenCalled();
     });
 
+    it("rejects a duplicate vendorCaseNo with 409", async () => {
+      prisma.vendorCase.findUnique.mockResolvedValue({ id: "existing", vendorCaseNo: "SR100" });
+      await expect(service.openCase(caseDto(), ACTOR)).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.vendorCase.create).not.toHaveBeenCalled();
+    });
+
     it("rejects a linkedIncidentId that does not exist", async () => {
       prisma.incident.findUnique.mockResolvedValue(null);
       await expect(

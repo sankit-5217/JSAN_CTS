@@ -1,5 +1,13 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
-import { IsISO8601, IsOptional, IsString, Length } from "class-validator";
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+} from "class-validator";
 
 /**
  * Plan / window edits are only accepted while the change has not started
@@ -40,6 +48,17 @@ export class UpdateChangeDto {
   @IsOptional()
   @IsISO8601()
   windowEnd?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: "uuid",
+    description: "Replace the affected-CI list. Part of the plan — only editable before work starts.",
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID("4", { each: true })
+  affectedCiIds?: string[];
 
   @ApiPropertyOptional({ description: "Completion / post-implementation review notes" })
   @IsOptional()

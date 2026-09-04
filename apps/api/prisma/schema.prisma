@@ -559,7 +559,7 @@ model Vendor {
 
 model VendorCase {
   id                String          @id @default(uuid())
-  vendorCaseNo      String          @map("vendor_case_no")
+  vendorCaseNo      String          @unique @map("vendor_case_no")
   vendorId          String          @map("vendor_id")
   linkedIncidentId  String?         @map("linked_incident_id")
   ciId              String?         @map("ci_id")
@@ -672,6 +672,10 @@ model Change {
   windowEnd        DateTime   @map("window_end")
   approverId       String?    @map("approver_id")
   outcome          String?
+  // CIs this change touches. Empty = a site-wide window. Lets the
+  // alert-suppression feed answer "is CI X under maintenance right now?"
+  // rather than only keying off ci.lifecycleStatus.
+  affectedCiIds    String[]   @default([]) @map("affected_ci_ids")
   createdAt        DateTime   @default(now()) @map("created_at")
 
   @@map("changes")

@@ -1,5 +1,5 @@
-import { ApiProperty } from "@nestjs/swagger";
-import { IsIn, IsISO8601, IsString, Length } from "class-validator";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { ArrayMaxSize, IsArray, IsIn, IsISO8601, IsOptional, IsString, IsUUID, Length } from "class-validator";
 import { CHANGE_TYPES } from "../changes.constants";
 import type { ChangeType } from "../changes.constants";
 
@@ -40,4 +40,15 @@ export class CreateChangeDto {
   })
   @IsISO8601()
   windowEnd!: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: "uuid",
+    description: "CIs this change affects. Omit / empty for a site-wide window.",
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID("4", { each: true })
+  affectedCiIds?: string[];
 }
