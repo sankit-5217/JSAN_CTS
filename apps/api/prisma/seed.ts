@@ -7,6 +7,8 @@ import {
   Prisma,
   PrismaClient,
   Priority,
+  SlaPolicy,
+  SupportCalendar,
   UserRole,
   WorklogActivityType,
 } from "@prisma/client";
@@ -16,12 +18,40 @@ const prisma = new PrismaClient();
 /**
  * Sites/users seeded in Sprint 2; a rack and a couple of CIs per site
  * added in Sprint 3; an incident walked through a few transitions, a
- * comment, and a worklog added in Sprint 4/5, so there's real ticketing
- * data to exercise. No seeded attachment — that needs a live MinIO the
- * local dev setup doesn't have running (Sprint 5 plan, Decision 7).
- * Extend per §31 "Recommended First Development Demo" as SLA lands — do
- * not seed production data here.
+ * comment, and a worklog added in Sprint 4/5; SLA policies, a support
+ * calendar per site, and the seeded incident's SLA instance added in
+ * Sprint 6. No seeded attachment — that needs a live MinIO the local dev
+ * setup doesn't have running (Sprint 5 plan, Decision 7).
+ * Extend per §31 "Recommended First Development Demo" as later sprints
+ * land — do not seed production data here.
  */
+
+/**
+ * SlaPolicy/SupportCalendar have no natural unique key to `upsert()`
+ * against (only `id`), so this is a manual find-or-create — same
+ * "guarded, not upserted" idempotency approach as the seeded incident
+ * below, just for a table where the guard is a name lookup instead of a
+ * findUnique on a real unique column.
+ */
+async function findOrCreateSlaPolicy(data: Prisma.SlaPolicyCreateInput): Promise<SlaPolicy> {
+  const existing = await prisma.slaPolicy.findFirst({ where: { name: data.name } });
+  if (existing) {
+    return existing;
+  }
+  return prisma.slaPolicy.create({ data });
+}
+
+async function findOrCreateSupportCalendar(
+  data: Prisma.SupportCalendarUncheckedCreateInput,
+): Promise<SupportCalendar> {
+  const existing = await prisma.supportCalendar.findFirst({
+    where: { siteId: data.siteId, name: data.name },
+  });
+  if (existing) {
+    return existing;
+  }
+  return prisma.supportCalendar.create({ data });
+}
 async function main() {
   const site1 = await prisma.site.upsert({
     where: { code: "SITE01" },
@@ -181,6 +211,63 @@ async function main() {
     },
   });
 
+  // SLA policies (spec §10.8's illustrative P1-P4 table) and one support
+  // calendar per site. SITE01 stays is247 (matching the site's own flag)
+  // so its P1/P2 incidents resolve as a flat 24x7 clock; SITE02 is a real
+  // 09:00-18:00 Mon-Fri calendar, so a P3/P4 incident there exercises the
+  // business-hours math end to end.
+  const p1Policy = await findOrCreateSlaPolicy({
+    name: "P1 Critical (24x7)",
+    priority: Priority.P1,
+    ackTargetMinutes: 15,
+    resolveTargetMinutes: 4 * 60,
+    usesBusinessCalendar: false,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+  });
+  await findOrCreateSlaPolicy({
+    name: "P2 High",
+    priority: Priority.P2,
+    ackTargetMinutes: 30,
+    resolveTargetMinutes: 8 * 60,
+    usesBusinessCalendar: false,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+  });
+  await findOrCreateSlaPolicy({
+    name: "P3 Medium (business hours)",
+    priority: Priority.P3,
+    ackTargetMinutes: 4 * 60, // 4 business hours
+    resolveTargetMinutes: 2 * 9 * 60, // 2 business days at 9h/day
+    usesBusinessCalendar: true,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+  });
+  await findOrCreateSlaPolicy({
+    name: "P4 Low (business hours)",
+    priority: Priority.P4,
+    ackTargetMinutes: 9 * 60, // 1 business day
+    resolveTargetMinutes: 5 * 9 * 60, // 5 business days at 9h/day
+    usesBusinessCalendar: true,
+    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+  });
+
+  await findOrCreateSupportCalendar({
+    siteId: site1.id,
+    name: "Standard",
+    businessStart: "09:00",
+    businessEnd: "18:00",
+    workdays: [1, 2, 3, 4, 5],
+    holidays: [],
+    is247: true,
+  });
+  await findOrCreateSupportCalendar({
+    siteId: site2.id,
+    name: "Standard",
+    businessStart: "09:00",
+    businessEnd: "18:00",
+    workdays: [1, 2, 3, 4, 5],
+    holidays: [],
+    is247: false,
+  });
+
   // Incident + timeline + comment — only created once (not upserted, since
   // Incident has no natural business key besides incidentNo we'd want to
   // update on reseed). Guarded by a findUnique check so re-running the seed
@@ -276,6 +363,24 @@ async function main() {
         } as Prisma.InputJsonValue,
       },
     });
+
+    // SLA instance computed the same way IncidentsService.create()/
+    // createTransition() derive it — a flat 24x7 add (SITE01's calendar is
+    // is247) rather than hand-picked, so the seeded row matches what the
+    // API would actually produce. ackedAt mirrors the incident's own
+    // acknowledgedAt (already set above); resolvedAt stays null — the
+    // incident is IN_PROGRESS, not yet resolved.
+    await prisma.slaInstance.create({
+      data: {
+        incidentId: incident.id,
+        slaPolicyId: p1Policy.id,
+        ackDueAt: new Date(incident.createdAt.getTime() + p1Policy.ackTargetMinutes * 60_000),
+        ackedAt: incident.acknowledgedAt,
+        resolveDueAt: new Date(
+          incident.createdAt.getTime() + p1Policy.resolveTargetMinutes * 60_000,
+        ),
+      },
+    });
   }
 
   // eslint-disable-next-line no-console
@@ -285,7 +390,8 @@ async function main() {
       `${siteEngineer.email} (SITE_ENGINEER, ${site2.code} only), ` +
       `${siteEngineer1.email} (SITE_ENGINEER, ${site1.code} only), ` +
       `1 rack and 3 CIs (1 CI-to-CI relation), ` +
-      `1 incident (INC-SEED-001, IN_PROGRESS, 5 timeline events, 1 comment, 1 worklog).`,
+      `4 SLA policies (P1-P4) and 1 support calendar per site, ` +
+      `1 incident (INC-SEED-001, IN_PROGRESS, 5 timeline events, 1 comment, 1 worklog, 1 SLA instance).`,
   );
 }
 
