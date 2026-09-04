@@ -5,6 +5,8 @@ import { decodeJwtPayload } from "./api/jwt";
 import { AlertDetailPage } from "./pages/AlertDetailPage";
 import { AlertRulesPage } from "./pages/AlertRulesPage";
 import { AlertsPage } from "./pages/AlertsPage";
+import { BcpPlanDetailPage } from "./pages/BcpPlanDetailPage";
+import { BcpPlansPage } from "./pages/BcpPlansPage";
 import { ChangeDetailPage } from "./pages/ChangeDetailPage";
 import { ChangesPage } from "./pages/ChangesPage";
 import { CiDetailPage } from "./pages/CiDetailPage";
@@ -13,6 +15,8 @@ import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { IncidentDetailPage } from "./pages/IncidentDetailPage";
 import { IncidentsPage } from "./pages/IncidentsPage";
 import { LoginPage } from "./pages/LoginPage";
+import { RiskDetailPage } from "./pages/RiskDetailPage";
+import { RisksPage } from "./pages/RisksPage";
 import { SiteDetailPage } from "./pages/SiteDetailPage";
 import { SitesPage } from "./pages/SitesPage";
 import { SlaPoliciesPage } from "./pages/SlaPoliciesPage";
@@ -52,6 +56,9 @@ function TopNav() {
         </Button>
         <Button color="inherit" component={Link} to="/vendors">
           Vendors
+        </Button>
+        <Button color="inherit" component={Link} to="/risks">
+          Risks
         </Button>
         {user && (
           <Typography variant="body2" sx={{ mx: 2, opacity: 0.85 }}>
@@ -111,6 +118,10 @@ export function App() {
         <Route path="/changes/:id" element={<ChangeDetailPage />} />
         <Route path="/vendors" element={<VendorsPage />} />
         <Route path="/vendor-cases/:id" element={<VendorCaseDetailPage />} />
+        <Route path="/risks" element={<RisksPage />} />
+        <Route path="/risks/:id" element={<RiskDetailPage />} />
+        <Route path="/bcp-plans" element={<BcpPlansPage />} />
+        <Route path="/bcp-plans/:id" element={<BcpPlanDetailPage />} />
       </Route>
     </Routes>
   );
