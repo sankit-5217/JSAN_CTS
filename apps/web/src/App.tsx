@@ -5,6 +5,8 @@ import { decodeJwtPayload } from "./api/jwt";
 import { AlertDetailPage } from "./pages/AlertDetailPage";
 import { AlertRulesPage } from "./pages/AlertRulesPage";
 import { AlertsPage } from "./pages/AlertsPage";
+import { ChangeDetailPage } from "./pages/ChangeDetailPage";
+import { ChangesPage } from "./pages/ChangesPage";
 import { CiDetailPage } from "./pages/CiDetailPage";
 import { CisPage } from "./pages/CisPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
@@ -44,6 +46,9 @@ function TopNav() {
         </Button>
         <Button color="inherit" component={Link} to="/alerts">
           Alerts
+        </Button>
+        <Button color="inherit" component={Link} to="/changes">
+          Changes
         </Button>
         <Button color="inherit" component={Link} to="/vendors">
           Vendors
@@ -102,6 +107,8 @@ export function App() {
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/alerts/:id" element={<AlertDetailPage />} />
         <Route path="/alert-rules" element={<AlertRulesPage />} />
+        <Route path="/changes" element={<ChangesPage />} />
+        <Route path="/changes/:id" element={<ChangeDetailPage />} />
         <Route path="/vendors" element={<VendorsPage />} />
         <Route path="/vendor-cases/:id" element={<VendorCaseDetailPage />} />
       </Route>
