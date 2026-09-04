@@ -17,7 +17,7 @@ import { UpdateRiskDto } from "./dto/update-risk.dto";
 // rules — never trust the client for either (spec §4, §12).
 // Risk `siteId` is nullable and the register is a cross-site governance view, so
 // no SiteScopeGuard here; reads are visible to any authenticated user.
-const RISK_WRITE_ROLES = [
+export const RISK_WRITE_ROLES = [
   UserRole.SUPER_ADMIN,
   UserRole.DELIVERY_OPS_MANAGER,
   UserRole.INFRASTRUCTURE_LEAD,

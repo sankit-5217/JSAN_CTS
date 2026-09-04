@@ -707,6 +707,35 @@ model Risk {
   @@map("risks")
 }
 
+/// Business-continuity plan for a site or a named service (spec §10.15):
+/// recovery strategy, alternate site, RTO/RPO, contacts and the test cadence
+/// (last tested / next due). "Readiness" (untested / test overdue / ready) is
+/// derived at read time from the test dates, not stored. Owner: Dev B / risks
+/// module. `siteId` is a bare scalar, same as `Risk.siteId`.
+model BcpPlan {
+  id                        String    @id @default(uuid())
+  name                      String
+  siteId                    String?   @map("site_id")
+  serviceName               String?   @map("service_name")
+  recoveryStrategy          String    @map("recovery_strategy")
+  alternateSite             String?   @map("alternate_site")
+  rtoMinutes                Int       @map("rto_minutes")
+  rpoMinutes                Int       @map("rpo_minutes")
+  targetAvailabilityPercent Float?    @map("target_availability_percent")
+  residualRisk              String?   @map("residual_risk")
+  contacts                  String?
+  ownerId                   String?   @map("owner_id")
+  lastTestedAt              DateTime? @map("last_tested_at")
+  nextTestDueAt             DateTime? @map("next_test_due_at")
+  isActive                  Boolean   @default(true) @map("is_active")
+  createdAt                 DateTime  @default(now()) @map("created_at")
+  updatedAt                 DateTime  @updatedAt @map("updated_at")
+
+  @@index([siteId])
+  @@index([isActive])
+  @@map("bcp_plans")
+}
+
 // ---------------------------------------------------------------------------
 // Cross-cutting (owner: Dev A / audit module) — spec §17
 // ---------------------------------------------------------------------------
