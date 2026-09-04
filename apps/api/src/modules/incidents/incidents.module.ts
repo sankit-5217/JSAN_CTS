@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { StorageModule } from "../../common/storage/storage.module";
 import { AuthModule } from "../auth/auth.module";
+import { SlaModule } from "../sla/sla.module";
 import { IncidentsController } from "./incidents.controller";
 import { IncidentsService } from "./incidents.service";
 
@@ -15,9 +16,13 @@ import { IncidentsService } from "./incidents.service";
  * Also owns incident attachments (Sprint 5 step 3) via StorageModule — no
  * dedicated attachments module exists (see worklogs.module.ts's doc comment
  * and the Sprint 5 plan for why).
+ *
+ * Imports SlaModule (Sprint 6 step 3) to call SlaService's lifecycle hooks
+ * on create/transition/update — one-directional (SlaModule never imports
+ * this one) to avoid a circular dependency.
  */
 @Module({
-  imports: [AuthModule, StorageModule],
+  imports: [AuthModule, StorageModule, SlaModule],
   controllers: [IncidentsController],
   providers: [IncidentsService],
   exports: [IncidentsService],

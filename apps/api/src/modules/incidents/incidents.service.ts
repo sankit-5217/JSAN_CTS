@@ -19,6 +19,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { SlaService } from "../sla/sla.service";
 import {
   ALLOWED_ATTACHMENT_CONTENT_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
@@ -62,6 +63,7 @@ export class IncidentsService {
     private readonly auditService: AuditService,
     private readonly authzService: AuthzService,
     private readonly storageService: StorageService,
+    private readonly slaService: SlaService,
   ) {}
 
   async assertSiteAccess(user: AuthenticatedUser, siteId: string): Promise<void> {
@@ -174,6 +176,14 @@ export class IncidentsService {
         },
         tx,
       );
+      // SLA clock starts the moment a qualifying incident is created (spec
+      // §10.8) — same transaction as the incident row, never a follow-up call.
+      await this.slaService.startForIncident(
+        tx,
+        { id: incident.id, siteId: incident.siteId },
+        incident.priority,
+        actor,
+      );
       return incident;
     });
   }
@@ -183,6 +193,7 @@ export class IncidentsService {
     const ownerChanged =
       (dto.ownerGroupId !== undefined && dto.ownerGroupId !== before.ownerGroupId) ||
       (dto.ownerUserId !== undefined && dto.ownerUserId !== before.ownerUserId);
+    const priorityChanged = dto.priority !== undefined && dto.priority !== before.priority;
 
     return this.prisma.$transaction(async (tx) => {
       const after = await tx.incident.update({
@@ -227,6 +238,16 @@ export class IncidentsService {
         },
         tx,
       );
+
+      if (priorityChanged) {
+        await this.slaService.onPriorityChanged(
+          tx,
+          { id, siteId: before.siteId },
+          after.priority,
+          actor,
+        );
+      }
+
       return after;
     });
   }
@@ -325,6 +346,25 @@ export class IncidentsService {
         tx,
       );
 
+      // SLA hooks (spec §10.8) — same transaction as the status write, one
+      // per transition kind. `incident` here is the *pre*-transition row,
+      // so PENDING_* -> IN_PROGRESS can tell a genuine resume apart from
+      // ACKNOWLEDGED/REOPENED -> IN_PROGRESS (no pause to resume there).
+      if (dto.toStatus === "ACKNOWLEDGED" && after.acknowledgedAt) {
+        await this.slaService.onAcknowledged(tx, id, after.acknowledgedAt, actor);
+      } else if (dto.toStatus === "RESOLVED" && after.restoredAt) {
+        await this.slaService.onResolved(tx, id, after.restoredAt, actor);
+      } else if (dto.toStatus === "PENDING_VENDOR" || dto.toStatus === "PENDING_CUSTOMER") {
+        await this.slaService.onPaused(tx, id, dto.toStatus, actor);
+      } else if (
+        dto.toStatus === "IN_PROGRESS" &&
+        (incident.status === "PENDING_VENDOR" || incident.status === "PENDING_CUSTOMER")
+      ) {
+        await this.slaService.onResumed(tx, id, actor);
+      } else if (dto.toStatus === "REOPENED") {
+        await this.slaService.onReopened(tx, id, actor);
+      }
+
       return after;
     });
   }
@@ -402,6 +442,12 @@ export class IncidentsService {
       where: { incidentId },
       orderBy: { createdAt: "asc" },
     });
+  }
+
+  /** SLA state for this incident's header/countdown (spec §29, §10.8). */
+  async findSlaState(incidentId: string, user: AuthenticatedUser) {
+    await this.findOneScoped(incidentId, user);
+    return this.slaService.findForIncident(incidentId);
   }
 
   // --- Attachments (spec §17, §29) -------------------------------------
