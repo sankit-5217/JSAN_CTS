@@ -10,6 +10,7 @@ import {
   Incident,
   IncidentComment,
   IncidentEvent,
+  IncidentStatus,
   Prisma,
   UserRole,
 } from "@prisma/client";
@@ -373,6 +374,101 @@ export class IncidentsService {
 
       return after;
     });
+  }
+
+  // --- Cross-module: alert correlation (spec §10.10) ------------------
+  //
+  // The alerts module owns the Alert row; the incident timeline is ours,
+  // so the seam is two methods here. `alerts` reads `findOpenByCi` to
+  // decide whether an incoming alert belongs to an existing ticket, then
+  // calls `linkAlert` to annotate this incident's timeline. Neither
+  // changes incident status — correlation never drives the state machine.
+
+  private static readonly OPEN_INCIDENT_STATUSES: IncidentStatus[] = [
+    IncidentStatus.NEW,
+    IncidentStatus.ASSIGNED,
+    IncidentStatus.ACKNOWLEDGED,
+    IncidentStatus.IN_PROGRESS,
+    IncidentStatus.PENDING_VENDOR,
+    IncidentStatus.PENDING_CUSTOMER,
+    IncidentStatus.REOPENED,
+  ];
+
+  /** Most-recently-created still-open incident for a CI, or null. Read-only. */
+  async findOpenByCi(ciId: string): Promise<Incident | null> {
+    return this.prisma.incident.findFirst({
+      where: { ciId, status: { in: IncidentsService.OPEN_INCIDENT_STATUSES } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  /**
+   * Attach a monitoring alert to an incident's timeline as an `ALERT_LINKED`
+   * event, audited in the same transaction. Idempotent — a repeat call for the
+   * same alert id is a no-op (returns `{ linked: false }`). Called by the
+   * alerts module during ingestion correlation.
+   */
+  async linkAlert(
+    incidentId: string,
+    alert: {
+      id: string;
+      alertType: string;
+      severity: string;
+      source: string;
+      fingerprint: string;
+    },
+    actor: ActorContext,
+  ): Promise<{ linked: boolean }> {
+    const incident = await this.prisma.incident.findUnique({ where: { id: incidentId } });
+    if (!incident) {
+      throw new NotFoundException(`Incident ${incidentId} not found`);
+    }
+
+    const already = await this.prisma.incidentEvent.findFirst({
+      where: {
+        incidentId,
+        eventType: "ALERT_LINKED",
+        payload: { path: ["alertId"], equals: alert.id },
+      },
+    });
+    if (already) {
+      return { linked: false };
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.incidentEvent.create({
+        data: {
+          incidentId,
+          eventType: "ALERT_LINKED",
+          actorId: actor.actorId,
+          payload: {
+            alertId: alert.id,
+            alertType: alert.alertType,
+            severity: alert.severity,
+            source: alert.source,
+            fingerprint: alert.fingerprint,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Incident",
+          entityId: incidentId,
+          action: "ALERT_LINKED",
+          after: {
+            alertId: alert.id,
+            alertType: alert.alertType,
+            severity: alert.severity,
+            source: alert.source,
+          },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+    });
+
+    return { linked: true };
   }
 
   // --- Comments + timeline reads (spec §19, §29) -----------------------

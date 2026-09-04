@@ -73,6 +73,7 @@ export class ChangesService {
           risk: dto.risk,
           windowStart,
           windowEnd,
+          ...(dto.affectedCiIds !== undefined ? { affectedCiIds: dto.affectedCiIds } : {}),
         },
       });
       await this.audit.record(
@@ -206,7 +207,8 @@ export class ChangesService {
       dto.rollbackPlan !== undefined ||
       dto.risk !== undefined ||
       dto.windowStart !== undefined ||
-      dto.windowEnd !== undefined;
+      dto.windowEnd !== undefined ||
+      dto.affectedCiIds !== undefined;
 
     if (editsPlan && !isEditable(status)) {
       throw new ConflictException(
@@ -236,6 +238,7 @@ export class ChangesService {
           ...(dto.risk !== undefined ? { risk: dto.risk } : {}),
           ...(dto.windowStart ? { windowStart } : {}),
           ...(dto.windowEnd ? { windowEnd } : {}),
+          ...(dto.affectedCiIds !== undefined ? { affectedCiIds: dto.affectedCiIds } : {}),
           ...(dto.outcome !== undefined ? { outcome: dto.outcome } : {}),
         },
       });
@@ -259,15 +262,26 @@ export class ChangesService {
   /**
    * Approved, not-yet-reviewed changes whose window covers `at` (default now).
    * The feed the alert pipeline / collector uses to suppress or annotate the
-   * monitoring noise a planned change is expected to generate.
+   * monitoring noise a planned change is expected to generate. Pass `ciId` to
+   * ask only about that CI — a window matches if it names the CI in
+   * `affectedCiIds` or is site-wide (empty list).
    */
-  async getActiveMaintenanceWindows(at: Date = new Date()) {
+  async getActiveMaintenanceWindows(at: Date = new Date(), ciId?: string) {
     const changes = await this.prisma.change.findMany({
       where: {
         approverId: { not: null },
         windowStart: { lte: at },
         windowEnd: { gte: at },
+        // NOT_COMPLETED already occupies the top-level `OR`, so the CI match
+        // goes under `AND` as its own nested `OR` — both are ANDed together.
         ...NOT_COMPLETED,
+        ...(ciId
+          ? {
+              AND: [
+                { OR: [{ affectedCiIds: { isEmpty: true } }, { affectedCiIds: { has: ciId } }] },
+              ],
+            }
+          : {}),
       },
       orderBy: { windowEnd: "asc" },
     });

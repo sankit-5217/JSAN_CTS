@@ -13,6 +13,7 @@ import { WorklogsModule } from "./modules/worklogs/worklogs.module";
 import { VendorsModule } from "./modules/vendors/vendors.module";
 import { KnowledgeModule } from "./modules/knowledge/knowledge.module";
 import { ChangesModule } from "./modules/changes/changes.module";
+import { ProblemsModule } from "./modules/problems/problems.module";
 import { RisksModule } from "./modules/risks/risks.module";
 import { MonitoringModule } from "./modules/monitoring/monitoring.module";
 import { ReportsModule } from "./modules/reports/reports.module";
@@ -37,6 +38,7 @@ import { AuditModule } from "./modules/audit/audit.module";
     AlertsModule,
     VendorsModule,
     ChangesModule,
+    ProblemsModule,
     KnowledgeModule,
     RisksModule,
     MonitoringModule,

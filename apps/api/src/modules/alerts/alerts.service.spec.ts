@@ -2,6 +2,10 @@ import { NotFoundException } from "@nestjs/common";
 import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { ChangesService } from "../changes/changes.service";
+import { IncidentsService } from "../incidents/incidents.service";
+import { AlertRulesService } from "./alert-rules.service";
+import { DEFAULT_ALERT_RULE } from "./alerts.constants";
 import { AlertsService } from "./alerts.service";
 import { AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
 import { IngestAlertDto } from "./dto/ingest-alert.dto";
@@ -62,16 +66,28 @@ describe("AlertsService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
   let notifications: { enqueue: jest.Mock };
+  let incidents: { findOpenByCi: jest.Mock; linkAlert: jest.Mock };
+  let alertRules: { resolveRule: jest.Mock };
+  let changes: { getActiveMaintenanceWindows: jest.Mock };
   let service: AlertsService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
     audit = { record: jest.fn() };
     notifications = { enqueue: jest.fn() };
+    incidents = {
+      findOpenByCi: jest.fn().mockResolvedValue(null),
+      linkAlert: jest.fn().mockResolvedValue({ linked: true }),
+    };
+    alertRules = { resolveRule: jest.fn().mockResolvedValue({ ...DEFAULT_ALERT_RULE }) };
+    changes = { getActiveMaintenanceWindows: jest.fn().mockResolvedValue([]) };
     service = new AlertsService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       notifications as unknown as NotificationsPublisher,
+      incidents as unknown as IncidentsService,
+      alertRules as unknown as AlertRulesService,
+      changes as unknown as ChangesService,
     );
     prisma.site.findUnique.mockResolvedValue({ id: "site-1", code: "SITE01" });
     prisma.configurationItem.findUnique.mockResolvedValue({
@@ -247,6 +263,199 @@ describe("AlertsService", () => {
     const result = await service.ingest(baseDto(), ACTOR);
 
     expect(result.suppressedByMaintenance).toBe(false);
+  });
+
+  describe("maintenance-window suppression (§10.10 rule 5)", () => {
+    it("suppresses ticketing when the CI is under an approved change window", async () => {
+      changes.getActiveMaintenanceWindows.mockResolvedValue([{ id: "chg-1" }]);
+      incidents.findOpenByCi.mockResolvedValue({ id: "inc-7", incidentNo: "INC-000007" });
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-m", state: "OPEN" });
+      prisma.user.findMany.mockResolvedValue([{ email: "noc@corp.example", displayName: "NOC" }]);
+
+      const result = await service.ingest(baseDto({ severity: "CRITICAL" }), ACTOR);
+
+      expect(changes.getActiveMaintenanceWindows).toHaveBeenCalledWith(expect.any(Date), "ci-1");
+      expect(result.suppressedByMaintenance).toBe(true);
+      expect(result.autoTicketSuppressed).toBe(true);
+      expect(result.correlatedIncidentId).toBeNull();
+      expect(incidents.linkAlert).not.toHaveBeenCalled();
+      expect(notifications.enqueue).not.toHaveBeenCalled();
+    });
+
+    it("only labels (still correlates + pages) when the rule says label-not-suppress", async () => {
+      alertRules.resolveRule.mockResolvedValue({
+        ...DEFAULT_ALERT_RULE,
+        suppressAutoTicketDuringMaintenance: false,
+      });
+      changes.getActiveMaintenanceWindows.mockResolvedValue([{ id: "chg-1" }]);
+      incidents.findOpenByCi.mockResolvedValue({ id: "inc-7", incidentNo: "INC-000007" });
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-m2", state: "OPEN" });
+      prisma.user.findMany.mockResolvedValue([{ email: "noc@corp.example", displayName: "NOC" }]);
+
+      const result = await service.ingest(baseDto({ severity: "CRITICAL" }), ACTOR);
+
+      expect(result.suppressedByMaintenance).toBe(true);
+      expect(result.autoTicketSuppressed).toBe(false);
+      expect(result.correlatedIncidentId).toBe("inc-7");
+      expect(notifications.enqueue).toHaveBeenCalledTimes(1);
+    });
+
+    it("never fails ingestion when the maintenance-window check throws", async () => {
+      changes.getActiveMaintenanceWindows.mockRejectedValue(new Error("changes down"));
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-m3", state: "OPEN" });
+
+      const result = await service.ingest(baseDto(), ACTOR);
+
+      expect(result.alertId).toBe("alert-m3");
+      expect(result.suppressedByMaintenance).toBe(false);
+    });
+  });
+
+  describe("incident correlation", () => {
+    it("links a new alert to a still-open incident on the same CI", async () => {
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-c", state: "OPEN" });
+      incidents.findOpenByCi.mockResolvedValue({ id: "inc-7", incidentNo: "INC-000007" });
+
+      const result = await service.ingest(baseDto(), ACTOR);
+
+      expect(incidents.findOpenByCi).toHaveBeenCalledWith("ci-1");
+      expect(incidents.linkAlert).toHaveBeenCalledWith(
+        "inc-7",
+        expect.objectContaining({
+          id: "alert-c",
+          alertType: "disk.predictive_failure",
+          severity: "HIGH",
+          source: "ZABBIX",
+        }),
+        ACTOR,
+      );
+      expect(prisma.alert.update).toHaveBeenCalledWith({
+        where: { id: "alert-c" },
+        data: { correlatedIncidentId: "inc-7" },
+      });
+      expect(result.correlatedIncidentId).toBe("inc-7");
+    });
+
+    it("leaves correlatedIncidentId null when the CI has no open incident", async () => {
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-c", state: "OPEN" });
+      incidents.findOpenByCi.mockResolvedValue(null);
+
+      const result = await service.ingest(baseDto(), ACTOR);
+
+      expect(incidents.linkAlert).not.toHaveBeenCalled();
+      expect(result.correlatedIncidentId).toBeNull();
+    });
+
+    it("does not correlate a RECOVERED alert", async () => {
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-c",
+        state: "OPEN",
+        siteId: "site-1",
+        ciId: "ci-1",
+        correlatedIncidentId: null,
+        lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+      });
+      prisma.alert.update.mockResolvedValue({ id: "alert-c", state: "RECOVERED" });
+
+      const result = await service.ingest(baseDto({ state: "RECOVERED" }), ACTOR);
+
+      expect(incidents.findOpenByCi).not.toHaveBeenCalled();
+      expect(result.correlatedIncidentId).toBeNull();
+    });
+
+    it("does not re-link an alert that is already correlated, but echoes the link", async () => {
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-c",
+        state: "OPEN",
+        siteId: "site-1",
+        ciId: "ci-1",
+        correlatedIncidentId: "inc-3",
+        lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+      });
+      prisma.alert.update.mockResolvedValue({ id: "alert-c", state: "OPEN" });
+
+      const result = await service.ingest(baseDto(), ACTOR);
+
+      expect(incidents.findOpenByCi).not.toHaveBeenCalled();
+      expect(incidents.linkAlert).not.toHaveBeenCalled();
+      expect(result.correlatedIncidentId).toBe("inc-3");
+    });
+
+    it("never fails ingestion when correlation throws", async () => {
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-c", state: "OPEN" });
+      incidents.findOpenByCi.mockRejectedValue(new Error("incidents service down"));
+
+      const result = await service.ingest(baseDto(), ACTOR);
+
+      expect(result.alertId).toBe("alert-c");
+      expect(result.correlatedIncidentId).toBeNull();
+    });
+
+    it("does not correlate when the active rule disables auto-correlation", async () => {
+      alertRules.resolveRule.mockResolvedValue({
+        ...DEFAULT_ALERT_RULE,
+        autoCorrelateIncidents: false,
+      });
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-c", state: "OPEN" });
+      incidents.findOpenByCi.mockResolvedValue({ id: "inc-7", incidentNo: "INC-000007" });
+
+      const result = await service.ingest(baseDto(), ACTOR);
+
+      expect(incidents.findOpenByCi).not.toHaveBeenCalled();
+      expect(result.correlatedIncidentId).toBeNull();
+    });
+  });
+
+  describe("alert rules drive ingest behaviour", () => {
+    it("uses the rule's flapping threshold, not a constant", async () => {
+      alertRules.resolveRule.mockResolvedValue({ ...DEFAULT_ALERT_RULE, flappingThreshold: 10 });
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-f", state: "OPEN" });
+      prisma.alert.count.mockResolvedValue(5); // over the default 3, under the rule's 10
+
+      const result = await service.ingest(baseDto(), ACTOR);
+
+      expect(result.flapping).toBe(false);
+    });
+
+    it("uses the rule's window when counting recent occurrences", async () => {
+      alertRules.resolveRule.mockResolvedValue({
+        ...DEFAULT_ALERT_RULE,
+        flappingWindowMinutes: 120,
+      });
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-w", state: "OPEN" });
+
+      const before = Date.now();
+      await service.ingest(baseDto(), ACTOR);
+
+      const since = prisma.alert.count.mock.calls[0][0].where.lastSeenAt.gte as Date;
+      expect(before - since.getTime()).toBeGreaterThanOrEqual(119 * 60_000);
+    });
+
+    it("pages the NOC only for severities the rule lists", async () => {
+      alertRules.resolveRule.mockResolvedValue({
+        ...DEFAULT_ALERT_RULE,
+        pagingSeverities: ["HIGH"],
+      });
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-p", state: "OPEN" });
+      prisma.user.findMany.mockResolvedValue([{ email: "noc@corp.example", displayName: "NOC" }]);
+
+      await service.ingest(baseDto({ severity: "HIGH" }), ACTOR);
+      expect(notifications.enqueue).toHaveBeenCalledTimes(1);
+
+      notifications.enqueue.mockClear();
+      await service.ingest(baseDto({ eventId: "evt-2", severity: "CRITICAL" }), ACTOR);
+      expect(notifications.enqueue).not.toHaveBeenCalled();
+    });
   });
 
   it("pages the NOC roster on a brand-new CRITICAL alert", async () => {

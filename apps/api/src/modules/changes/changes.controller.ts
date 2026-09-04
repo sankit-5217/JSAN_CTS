@@ -53,9 +53,10 @@ export class ChangesController {
   @Get("maintenance/active")
   @ApiOperation({
     summary: "Approved, in-window changes right now — the alert-suppression feed",
+    description: "Pass ?ciId to get only windows affecting that CI (or site-wide windows).",
   })
-  activeMaintenance() {
-    return this.changesService.getActiveMaintenanceWindows();
+  activeMaintenance(@Query("ciId") ciId?: string) {
+    return this.changesService.getActiveMaintenanceWindows(new Date(), ciId);
   }
 
   @Get(":id")

@@ -3,6 +3,9 @@ import { AuthModule } from "../auth/auth.module";
 import { VendorCasesController } from "./vendor-cases.controller";
 import { VendorsController } from "./vendors.controller";
 import { VendorsService } from "./vendors.service";
+import { WarrantyController } from "./warranty.controller";
+import { warrantyProvidersProvider } from "./warranty.providers";
+import { WarrantyResyncService } from "./warranty-resync.service";
 
 /**
  * Owner: Dev B (Integrations, Hardware & Governance).
@@ -15,13 +18,17 @@ import { VendorsService } from "./vendors.service";
  * vendor_case_updates; linked_incident_id / ci_id existence checks. Every
  * mutation writes an AuditEvent in the same transaction as the write
  * (VENDOR_REGISTERED / VENDOR_CASE_OPENED / _UPDATED / _CLOSED / _NOTE_ADDED).
- * TODO: actorId/correlationId populate once the auth guard is on the controllers;
- * warranty lifecycle stays with the cmdb module (Dev A) per the schema.
+ *
+ * Warranty resync (spec §10.13): this module owns the append-only `Warranty`
+ * table (spec §12). `WarrantyResyncService` looks coverage up through the
+ * read-only warranty-adapter providers and appends a new row + a
+ * WARRANTY_REFRESHED audit event only when coverage changed. `apps/worker`
+ * schedules it nightly over HTTP against POST /vendors/warranty-sync.
  */
 @Module({
   imports: [AuthModule],
-  controllers: [VendorsController, VendorCasesController],
-  providers: [VendorsService],
-  exports: [VendorsService],
+  controllers: [VendorsController, VendorCasesController, WarrantyController],
+  providers: [VendorsService, WarrantyResyncService, warrantyProvidersProvider],
+  exports: [VendorsService, WarrantyResyncService],
 })
 export class VendorsModule {}
