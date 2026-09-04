@@ -14,7 +14,11 @@ import { CisPage } from "./pages/CisPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { IncidentDetailPage } from "./pages/IncidentDetailPage";
 import { IncidentsPage } from "./pages/IncidentsPage";
+import { KnowledgeDetailPage } from "./pages/KnowledgeDetailPage";
+import { KnowledgePage } from "./pages/KnowledgePage";
 import { LoginPage } from "./pages/LoginPage";
+import { ProblemDetailPage } from "./pages/ProblemDetailPage";
+import { ProblemsPage } from "./pages/ProblemsPage";
 import { RiskDetailPage } from "./pages/RiskDetailPage";
 import { RisksPage } from "./pages/RisksPage";
 import { SiteDetailPage } from "./pages/SiteDetailPage";
@@ -56,6 +60,12 @@ function TopNav() {
         </Button>
         <Button color="inherit" component={Link} to="/vendors">
           Vendors
+        </Button>
+        <Button color="inherit" component={Link} to="/problems">
+          Problems
+        </Button>
+        <Button color="inherit" component={Link} to="/knowledge">
+          Knowledge
         </Button>
         <Button color="inherit" component={Link} to="/risks">
           Risks
@@ -118,6 +128,10 @@ export function App() {
         <Route path="/changes/:id" element={<ChangeDetailPage />} />
         <Route path="/vendors" element={<VendorsPage />} />
         <Route path="/vendor-cases/:id" element={<VendorCaseDetailPage />} />
+        <Route path="/problems" element={<ProblemsPage />} />
+        <Route path="/problems/:id" element={<ProblemDetailPage />} />
+        <Route path="/knowledge" element={<KnowledgePage />} />
+        <Route path="/knowledge/:id" element={<KnowledgeDetailPage />} />
         <Route path="/risks" element={<RisksPage />} />
         <Route path="/risks/:id" element={<RiskDetailPage />} />
         <Route path="/bcp-plans" element={<BcpPlansPage />} />
