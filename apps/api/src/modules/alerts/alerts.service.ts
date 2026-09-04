@@ -10,6 +10,7 @@ import { NotificationsPublisher } from "../../common/notifications/notifications
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
+import { IncidentsService } from "../incidents/incidents.service";
 import type { AlertState } from "./alerts.constants";
 import { computeAlertFingerprint } from "./alerts.fingerprint";
 import { AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
@@ -37,6 +38,13 @@ export interface AlertIngestResult {
    * change-window suppression is layered on by the worker via the changes module.
    */
   suppressedByMaintenance: boolean;
+  /**
+   * Id of a still-open incident on the same CI that this alert was attached to
+   * (spec §10.10), or the id it was already linked to on an earlier ingest.
+   * null when the CI is unknown, has no open incident, or the alert has
+   * RECOVERED. Link-only — correlation never opens or mutates a ticket.
+   */
+  correlatedIncidentId: string | null;
 }
 
 /** One alert rejected during source-specific normalization. */
@@ -58,8 +66,8 @@ const DEFAULT_FLAPPING_WINDOW_MINUTES = 30;
 /**
  * Owns: normalized alerts, fingerprints, dedup, flapping signal (spec §10.9-10.10).
  * Must not own: raw time-series storage (that stays in Zabbix/Prometheus), and
- * must not mutate incident/SLA tables directly — correlation goes through the
- * incidents service once it lands.
+ * must not mutate incident/SLA tables directly — correlation calls
+ * IncidentsService (read `findOpenByCi`, write `linkAlert`), never the tables.
  */
 @Injectable()
 export class AlertsService {
@@ -71,6 +79,7 @@ export class AlertsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsPublisher,
+    private readonly incidents: IncidentsService,
   ) {
     // config-over-hardcode stopgap: env-driven until the alert_rules table
     // (Dev B, spec §10.10) provides per-site / per-type thresholds.
@@ -117,9 +126,11 @@ export class AlertsService {
     let alertId: string;
     let deduped: boolean;
     let stateChanged: boolean;
+    let finalState: AlertState;
 
     if (existing) {
       const nextState = reduceAlertState(existing.state as AlertState, dto.state);
+      finalState = nextState;
       deduped = true;
       stateChanged = nextState !== existing.state;
       const updateData = {
@@ -162,6 +173,7 @@ export class AlertsService {
     } else {
       deduped = false;
       stateChanged = true;
+      finalState = dto.state;
       const created = await this.prisma.$transaction(async (tx) => {
         const c = await tx.alert.create({
           data: {
@@ -211,6 +223,22 @@ export class AlertsService {
       await this.notifyNocOfCriticalAlert(alertId, dto);
     }
 
+    const ciId = ci?.id ?? existing?.ciId ?? null;
+    let correlatedIncidentId = existing?.correlatedIncidentId ?? null;
+    if (ciId && finalState !== "RECOVERED" && !correlatedIncidentId) {
+      correlatedIncidentId = await this.correlateToOpenIncident(
+        alertId,
+        ciId,
+        {
+          alertType: dto.alertType,
+          severity: dto.severity,
+          source: dto.source,
+          fingerprint,
+        },
+        actor,
+      );
+    }
+
     return {
       alertId,
       fingerprint,
@@ -221,7 +249,46 @@ export class AlertsService {
       flapping: recentOccurrences >= this.flappingThreshold,
       recentOccurrences,
       suppressedByMaintenance: ci?.lifecycleStatus === "MAINTENANCE",
+      correlatedIncidentId,
     };
+  }
+
+  /**
+   * Attach this alert to a still-open incident on the same CI, if one exists
+   * (spec §10.10). Link-only: never opens a ticket, never touches incident
+   * status. Best-effort — a correlation failure is logged and swallowed so it
+   * can't fail (or roll back) the ingest; the next ingest of the same alert
+   * retries until it is linked. `IncidentsService.linkAlert` is itself
+   * idempotent, so a re-link is a no-op even if the row update below is lost.
+   */
+  private async correlateToOpenIncident(
+    alertId: string,
+    ciId: string,
+    meta: { alertType: string; severity: string; source: string; fingerprint: string },
+    actor: ActorContext,
+  ): Promise<string | null> {
+    try {
+      const incident = await this.incidents.findOpenByCi(ciId);
+      if (!incident) {
+        return null;
+      }
+      await this.incidents.linkAlert(incident.id, { id: alertId, ...meta }, actor);
+      await this.prisma.alert.update({
+        where: { id: alertId },
+        data: { correlatedIncidentId: incident.id },
+      });
+      this.logger.log(
+        `alert ${alertId} correlated to open incident ${incident.incidentNo}`,
+      );
+      return incident.id;
+    } catch (err) {
+      this.logger.warn(
+        `alert ${alertId} incident correlation skipped: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
   }
 
   /**

@@ -492,11 +492,17 @@ model Alert {
   lastSeenAt      DateTime      @map("last_seen_at")
   state           AlertState    @default(OPEN)
   rawReference    String?       @map("raw_reference") // pointer, not unlimited raw payload storage
+  // Set once when the alert is attached to a still-open incident on the same CI
+  // (spec §10.10). Scalar, no FK relation: the incidents module owns that table,
+  // correlation only reads it. Link-only — correlation never opens or mutates a
+  // ticket.
+  correlatedIncidentId String?  @map("correlated_incident_id")
 
   ci ConfigurationItem? @relation(fields: [ciId], references: [id])
 
   @@unique([source, externalEventId])
   @@index([fingerprint])
+  @@index([correlatedIncidentId])
   @@map("alerts")
 }
 

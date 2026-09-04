@@ -111,11 +111,15 @@ function makeService(
     $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
     incident: {
       findUnique: overrides.incidentFindUnique ?? jest.fn().mockResolvedValue(baseIncident()),
+      findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
     },
     incidentComment: { findMany: jest.fn().mockResolvedValue([]) },
-    incidentEvent: { findMany: jest.fn().mockResolvedValue([]) },
+    incidentEvent: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     attachment: {
       findMany: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn().mockResolvedValue(null),
@@ -613,5 +617,75 @@ describe("IncidentsService attachments", () => {
 
     const result = await service.getAttachmentDownloadUrl("incident-1", "attachment-1", engineer);
     expect(result).toEqual({ url: "https://signed.example/download" });
+  });
+});
+
+describe("IncidentsService alert correlation", () => {
+  const alertRef = {
+    id: "alert-9",
+    alertType: "disk.predictive_failure",
+    severity: "HIGH",
+    source: "ZABBIX",
+    fingerprint: "f".repeat(64),
+  };
+
+  it("findOpenByCi queries only still-open statuses, newest first", async () => {
+    const { service, prisma } = makeService();
+    (prisma.incident.findFirst as jest.Mock).mockResolvedValue(baseIncident({ id: "inc-open" }));
+
+    const result = await service.findOpenByCi("ci-1");
+
+    expect(result).toMatchObject({ id: "inc-open" });
+    const arg = (prisma.incident.findFirst as jest.Mock).mock.calls[0][0];
+    expect(arg.where.ciId).toBe("ci-1");
+    expect(arg.where.status.in).toEqual(
+      expect.arrayContaining([IncidentStatus.NEW, IncidentStatus.IN_PROGRESS, IncidentStatus.REOPENED]),
+    );
+    expect(arg.where.status.in).not.toContain(IncidentStatus.RESOLVED);
+    expect(arg.where.status.in).not.toContain(IncidentStatus.CLOSED);
+    expect(arg.orderBy).toEqual({ createdAt: "desc" });
+  });
+
+  it("findOpenByCi returns null when the CI has no open incident", async () => {
+    const { service } = makeService();
+    await expect(service.findOpenByCi("ci-1")).resolves.toBeNull();
+  });
+
+  it("linkAlert appends an ALERT_LINKED event + audit in one transaction", async () => {
+    const { service, tx, auditService } = makeService();
+
+    const result = await service.linkAlert("incident-1", alertRef, { actorId: "collector-svc" });
+
+    expect(result).toEqual({ linked: true });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          incidentId: "incident-1",
+          eventType: "ALERT_LINKED",
+          payload: expect.objectContaining({ alertId: "alert-9", source: "ZABBIX" }),
+        }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "Incident", action: "ALERT_LINKED" }),
+      tx,
+    );
+  });
+
+  it("linkAlert is idempotent — a repeat for the same alert is a no-op", async () => {
+    const { service, prisma, tx } = makeService();
+    (prisma.incidentEvent.findFirst as jest.Mock).mockResolvedValue({ id: "existing-event" });
+
+    const result = await service.linkAlert("incident-1", alertRef, { actorId: "collector-svc" });
+
+    expect(result).toEqual({ linked: false });
+    expect(tx.incidentEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("linkAlert 404s an unknown incident", async () => {
+    const { service } = makeService({ incidentFindUnique: jest.fn().mockResolvedValue(null) });
+    await expect(
+      service.linkAlert("missing", alertRef, { actorId: "collector-svc" }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
