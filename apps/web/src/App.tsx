@@ -10,6 +10,7 @@ import { IncidentsPage } from "./pages/IncidentsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SiteDetailPage } from "./pages/SiteDetailPage";
 import { SitesPage } from "./pages/SitesPage";
+import { SlaPoliciesPage } from "./pages/SlaPoliciesPage";
 
 function TopNav() {
   const token = getStoredToken();
@@ -83,6 +84,7 @@ export function App() {
         <Route path="/cis/:id" element={<CiDetailPage />} />
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
+        <Route path="/sla-policies" element={<SlaPoliciesPage />} />
       </Route>
     </Routes>
   );
