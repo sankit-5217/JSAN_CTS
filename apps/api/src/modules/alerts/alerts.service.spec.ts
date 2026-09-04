@@ -3,6 +3,8 @@ import { NotificationsPublisher } from "../../common/notifications/notifications
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { IncidentsService } from "../incidents/incidents.service";
+import { AlertRulesService } from "./alert-rules.service";
+import { DEFAULT_ALERT_RULE } from "./alerts.constants";
 import { AlertsService } from "./alerts.service";
 import { AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
 import { IngestAlertDto } from "./dto/ingest-alert.dto";
@@ -64,6 +66,7 @@ describe("AlertsService", () => {
   let audit: { record: jest.Mock };
   let notifications: { enqueue: jest.Mock };
   let incidents: { findOpenByCi: jest.Mock; linkAlert: jest.Mock };
+  let alertRules: { getActiveRule: jest.Mock };
   let service: AlertsService;
 
   beforeEach(() => {
@@ -74,11 +77,13 @@ describe("AlertsService", () => {
       findOpenByCi: jest.fn().mockResolvedValue(null),
       linkAlert: jest.fn().mockResolvedValue({ linked: true }),
     };
+    alertRules = { getActiveRule: jest.fn().mockResolvedValue({ ...DEFAULT_ALERT_RULE }) };
     service = new AlertsService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
       notifications as unknown as NotificationsPublisher,
       incidents as unknown as IncidentsService,
+      alertRules as unknown as AlertRulesService,
     );
     prisma.site.findUnique.mockResolvedValue({ id: "site-1", code: "SITE01" });
     prisma.configurationItem.findUnique.mockResolvedValue({
@@ -337,6 +342,66 @@ describe("AlertsService", () => {
 
       expect(result.alertId).toBe("alert-c");
       expect(result.correlatedIncidentId).toBeNull();
+    });
+
+    it("does not correlate when the active rule disables auto-correlation", async () => {
+      alertRules.getActiveRule.mockResolvedValue({
+        ...DEFAULT_ALERT_RULE,
+        autoCorrelateIncidents: false,
+      });
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-c", state: "OPEN" });
+      incidents.findOpenByCi.mockResolvedValue({ id: "inc-7", incidentNo: "INC-000007" });
+
+      const result = await service.ingest(baseDto(), ACTOR);
+
+      expect(incidents.findOpenByCi).not.toHaveBeenCalled();
+      expect(result.correlatedIncidentId).toBeNull();
+    });
+  });
+
+  describe("alert rules drive ingest behaviour", () => {
+    it("uses the rule's flapping threshold, not a constant", async () => {
+      alertRules.getActiveRule.mockResolvedValue({ ...DEFAULT_ALERT_RULE, flappingThreshold: 10 });
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-f", state: "OPEN" });
+      prisma.alert.count.mockResolvedValue(5); // over the default 3, under the rule's 10
+
+      const result = await service.ingest(baseDto(), ACTOR);
+
+      expect(result.flapping).toBe(false);
+    });
+
+    it("uses the rule's window when counting recent occurrences", async () => {
+      alertRules.getActiveRule.mockResolvedValue({
+        ...DEFAULT_ALERT_RULE,
+        flappingWindowMinutes: 120,
+      });
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-w", state: "OPEN" });
+
+      const before = Date.now();
+      await service.ingest(baseDto(), ACTOR);
+
+      const since = prisma.alert.count.mock.calls[0][0].where.lastSeenAt.gte as Date;
+      expect(before - since.getTime()).toBeGreaterThanOrEqual(119 * 60_000);
+    });
+
+    it("pages the NOC only for severities the rule lists", async () => {
+      alertRules.getActiveRule.mockResolvedValue({
+        ...DEFAULT_ALERT_RULE,
+        pagingSeverities: ["HIGH"],
+      });
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-p", state: "OPEN" });
+      prisma.user.findMany.mockResolvedValue([{ email: "noc@corp.example", displayName: "NOC" }]);
+
+      await service.ingest(baseDto({ severity: "HIGH" }), ACTOR);
+      expect(notifications.enqueue).toHaveBeenCalledTimes(1);
+
+      notifications.enqueue.mockClear();
+      await service.ingest(baseDto({ eventId: "evt-2", severity: "CRITICAL" }), ACTOR);
+      expect(notifications.enqueue).not.toHaveBeenCalled();
     });
   });
 

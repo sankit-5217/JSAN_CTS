@@ -19,3 +19,26 @@ export const ALERT_SEVERITIES: readonly AlertSeverity[] = ["CRITICAL", "HIGH", "
 
 export type AlertState = "OPEN" | "ACKNOWLEDGED" | "RECOVERED";
 export const ALERT_STATES: readonly AlertState[] = ["OPEN", "ACKNOWLEDGED", "RECOVERED"];
+
+/**
+ * Effective ingestion policy the alerts service acts on — either the newest
+ * active `AlertRule` row or, when none exists, {@link DEFAULT_ALERT_RULE}.
+ */
+export interface EffectiveAlertRule {
+  flappingThreshold: number;
+  flappingWindowMinutes: number;
+  pagingSeverities: AlertSeverity[];
+  autoCorrelateIncidents: boolean;
+}
+
+/**
+ * Code fallback used only until the `alert_rules` table is seeded (or if every
+ * row is deactivated). Matches the Prisma column defaults so behaviour is the
+ * same whether or not a row exists.
+ */
+export const DEFAULT_ALERT_RULE: EffectiveAlertRule = {
+  flappingThreshold: 3,
+  flappingWindowMinutes: 30,
+  pagingSeverities: ["CRITICAL"],
+  autoCorrelateIncidents: true,
+};

@@ -506,6 +506,27 @@ model Alert {
   @@map("alerts")
 }
 
+/// Tunable ingestion policy (spec §10.10 "config over hard-code"): flapping
+/// detection, which severities page the NOC, and whether a live alert is
+/// auto-correlated to an open incident. The alerts module reads the newest
+/// active row (falling back to code defaults when none exists) on every
+/// ingest, behind a short in-memory cache. Global for now — a per-site /
+/// per-alert-type override is a later iteration.
+model AlertRule {
+  id                     String          @id @default(uuid())
+  name                   String
+  flappingThreshold      Int             @default(3) @map("flapping_threshold")
+  flappingWindowMinutes  Int             @default(30) @map("flapping_window_minutes")
+  pagingSeverities       AlertSeverity[] @default([CRITICAL]) @map("paging_severities")
+  autoCorrelateIncidents Boolean         @default(true) @map("auto_correlate_incidents")
+  isActive               Boolean         @default(true) @map("is_active")
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("alert_rules")
+}
+
 // ---------------------------------------------------------------------------
 // Vendors / RMA (owner: Dev B / vendors module) — spec §10.13
 // ---------------------------------------------------------------------------

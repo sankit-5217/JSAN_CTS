@@ -290,6 +290,14 @@ async function main() {
     is247: false,
   });
 
+  // Default alert ingestion policy (spec §10.10). Values match the Prisma
+  // column defaults / AlertsService code fallback — seeded so operators have a
+  // row to tune via PATCH /alert-rules/:id instead of a migration.
+  const existingAlertRule = await prisma.alertRule.findFirst({ where: { name: "default" } });
+  if (!existingAlertRule) {
+    await prisma.alertRule.create({ data: { name: "default" } });
+  }
+
   // Incident + timeline + comment — only created once (not upserted, since
   // Incident has no natural business key besides incidentNo we'd want to
   // update on reseed). Guarded by a findUnique check so re-running the seed

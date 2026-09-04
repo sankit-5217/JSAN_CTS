@@ -11,6 +11,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import { IncidentsService } from "../incidents/incidents.service";
+import { AlertRulesService } from "./alert-rules.service";
 import type { AlertState } from "./alerts.constants";
 import { computeAlertFingerprint } from "./alerts.fingerprint";
 import { AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
@@ -60,41 +61,31 @@ export interface SourceIngestResult {
   rejected: RejectedAlert[];
 }
 
-const DEFAULT_FLAPPING_THRESHOLD = 3;
-const DEFAULT_FLAPPING_WINDOW_MINUTES = 30;
-
 /**
  * Owns: normalized alerts, fingerprints, dedup, flapping signal (spec §10.9-10.10).
  * Must not own: raw time-series storage (that stays in Zabbix/Prometheus), and
  * must not mutate incident/SLA tables directly — correlation calls
  * IncidentsService (read `findOpenByCi`, write `linkAlert`), never the tables.
+ *
+ * Ingestion tunables (flapping threshold + window, NOC-paging severities,
+ * auto-correlate toggle) come from the `alert_rules` table via
+ * AlertRulesService, not env / constants (spec §10.10).
  */
 @Injectable()
 export class AlertsService {
   private readonly logger = new Logger(AlertsService.name);
-  private readonly flappingThreshold: number;
-  private readonly flappingWindowMinutes: number;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsPublisher,
     private readonly incidents: IncidentsService,
-  ) {
-    // config-over-hardcode stopgap: env-driven until the alert_rules table
-    // (Dev B, spec §10.10) provides per-site / per-type thresholds.
-    this.flappingThreshold = toPositiveInt(
-      process.env.ALERTS_FLAPPING_THRESHOLD,
-      DEFAULT_FLAPPING_THRESHOLD,
-    );
-    this.flappingWindowMinutes = toPositiveInt(
-      process.env.ALERTS_FLAPPING_WINDOW_MINUTES,
-      DEFAULT_FLAPPING_WINDOW_MINUTES,
-    );
-  }
+    private readonly alertRules: AlertRulesService,
+  ) {}
 
   async ingest(dto: IngestAlertDto, actor: ActorContext): Promise<AlertIngestResult> {
     const occurredAt = new Date(dto.occurredAt);
+    const rule = await this.alertRules.getActiveRule();
 
     const site = await this.prisma.site.findUnique({ where: { code: dto.siteCode } });
     const ci = await this.prisma.configurationItem.findUnique({ where: { ciCode: dto.ciCode } });
@@ -214,18 +205,18 @@ export class AlertsService {
       alertId = created.id;
     }
 
-    const since = new Date(Date.now() - this.flappingWindowMinutes * 60_000);
+    const since = new Date(Date.now() - rule.flappingWindowMinutes * 60_000);
     const recentOccurrences = await this.prisma.alert.count({
       where: { fingerprint, lastSeenAt: { gte: since } },
     });
 
-    if (!deduped && dto.severity === "CRITICAL") {
+    if (!deduped && rule.pagingSeverities.includes(dto.severity)) {
       await this.notifyNocOfCriticalAlert(alertId, dto);
     }
 
     const ciId = ci?.id ?? existing?.ciId ?? null;
     let correlatedIncidentId = existing?.correlatedIncidentId ?? null;
-    if (ciId && finalState !== "RECOVERED" && !correlatedIncidentId) {
+    if (rule.autoCorrelateIncidents && ciId && finalState !== "RECOVERED" && !correlatedIncidentId) {
       correlatedIncidentId = await this.correlateToOpenIncident(
         alertId,
         ciId,
@@ -246,7 +237,7 @@ export class AlertsService {
       stateChanged,
       siteResolved: Boolean(site),
       ciResolved: Boolean(ci),
-      flapping: recentOccurrences >= this.flappingThreshold,
+      flapping: recentOccurrences >= rule.flappingThreshold,
       recentOccurrences,
       suppressedByMaintenance: ci?.lifecycleStatus === "MAINTENANCE",
       correlatedIncidentId,
@@ -479,9 +470,4 @@ function toRejectedAlert(index: number, err: unknown): RejectedAlert {
     return { index, field: err.field, message: err.message };
   }
   return { index, message: err instanceof Error ? err.message : String(err) };
-}
-
-function toPositiveInt(raw: string | undefined, fallback: number): number {
-  const parsed = Number(raw);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

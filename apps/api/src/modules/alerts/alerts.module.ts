@@ -1,6 +1,8 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
 import { IncidentsModule } from "../incidents/incidents.module";
+import { AlertRulesController } from "./alert-rules.controller";
+import { AlertRulesService } from "./alert-rules.service";
 import { AlertsController } from "./alerts.controller";
 import { AlertsService } from "./alerts.service";
 
@@ -26,12 +28,16 @@ import { AlertsService } from "./alerts.service";
  * Correlation (done): a non-RECOVERED alert on a CI that already has a still-open
  * incident is linked to it (Alert.correlatedIncidentId + an ALERT_LINKED timeline
  * event), via IncidentsService — link-only, never opens or transitions a ticket.
- * TODO: move flapping thresholds into an alert_rules config table (config-over-hardcode).
+ * Config (done): the `alert_rules` table (AlertRulesService, /alert-rules CRUD)
+ * holds the flapping threshold + window, the NOC-paging severities and the
+ * auto-correlate toggle — read by ingest() behind a ~30s cache, code defaults
+ * until a row is seeded (spec §10.10, "config over hard-code").
+ * TODO: per-site / per-alert-type rule overrides (global-only for now).
  */
 @Module({
   imports: [AuthModule, IncidentsModule],
-  controllers: [AlertsController],
-  providers: [AlertsService],
-  exports: [AlertsService],
+  controllers: [AlertsController, AlertRulesController],
+  providers: [AlertsService, AlertRulesService],
+  exports: [AlertsService, AlertRulesService],
 })
 export class AlertsModule {}
