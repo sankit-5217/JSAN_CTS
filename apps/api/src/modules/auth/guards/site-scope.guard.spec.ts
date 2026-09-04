@@ -12,18 +12,14 @@ describe("SiteScopeGuard", () => {
   it("allows the request when the route has no siteId/id param (list endpoints filter in the service layer instead)", async () => {
     const authzService = { canAccessSite: jest.fn() } as unknown as AuthzService;
     const guard = new SiteScopeGuard(authzService);
-    await expect(
-      guard.canActivate(makeContext({ id: "user-1" }, {})),
-    ).resolves.toBe(true);
+    await expect(guard.canActivate(makeContext({ id: "user-1" }, {}))).resolves.toBe(true);
     expect(authzService.canAccessSite).not.toHaveBeenCalled();
   });
 
   it("allows the request when there's no authenticated user (JwtAuthGuard runs first and already rejected it)", async () => {
     const authzService = { canAccessSite: jest.fn() } as unknown as AuthzService;
     const guard = new SiteScopeGuard(authzService);
-    await expect(
-      guard.canActivate(makeContext(undefined, { id: "site-1" })),
-    ).resolves.toBe(true);
+    await expect(guard.canActivate(makeContext(undefined, { id: "site-1" }))).resolves.toBe(true);
     expect(authzService.canAccessSite).not.toHaveBeenCalled();
   });
 
@@ -33,9 +29,7 @@ describe("SiteScopeGuard", () => {
     } as unknown as AuthzService;
     const guard = new SiteScopeGuard(authzService);
     const user = { id: "user-1", role: "SITE_ENGINEER" };
-    await expect(
-      guard.canActivate(makeContext(user, { id: "site-1" })),
-    ).resolves.toBe(true);
+    await expect(guard.canActivate(makeContext(user, { id: "site-1" }))).resolves.toBe(true);
     expect(authzService.canAccessSite).toHaveBeenCalledWith(user, "site-1");
   });
 
@@ -56,9 +50,7 @@ describe("SiteScopeGuard", () => {
     } as unknown as AuthzService;
     const guard = new SiteScopeGuard(authzService);
     const user = { id: "user-1", role: "SITE_ENGINEER" };
-    await expect(
-      guard.canActivate(makeContext(user, { siteId: "site-1" })),
-    ).resolves.toBe(true);
+    await expect(guard.canActivate(makeContext(user, { siteId: "site-1" }))).resolves.toBe(true);
     expect(authzService.canAccessSite).toHaveBeenCalledWith(user, "site-1");
   });
 
@@ -68,8 +60,8 @@ describe("SiteScopeGuard", () => {
     } as unknown as AuthzService;
     const guard = new SiteScopeGuard(authzService);
     const user = { id: "user-1", role: "CTS_MANAGER_VIEWER" };
-    await expect(
-      guard.canActivate(makeContext(user, { siteId: "site-2" })),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(guard.canActivate(makeContext(user, { siteId: "site-2" }))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 });

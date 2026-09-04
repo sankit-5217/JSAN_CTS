@@ -67,7 +67,9 @@ export class ProblemsController {
 
   @Patch(":id")
   @Roles(...PROBLEM_WRITE_ROLES)
-  @ApiOperation({ summary: "Edit RCA fields (symptoms, root cause, corrective / preventive action)" })
+  @ApiOperation({
+    summary: "Edit RCA fields (symptoms, root cause, corrective / preventive action)",
+  })
   update(
     @Param("id") id: string,
     @Body() dto: UpdateProblemDto,

@@ -31,14 +31,29 @@ import { getCurrentUserRole } from "../api/jwt";
 // LIFECYCLE_STATUSES previously included "DECOMMISSIONED", which isn't a
 // LifecycleStatus enum value in schema.prisma (only PLANNED/ACTIVE/
 // MAINTENANCE/RETIRED) — that filter option could never match anything.
-const CI_TYPES = ["SERVER", "FIREWALL", "SWITCH", "UPS", "PDU", "STORAGE", "SERVICE", "CIRCUIT", "VM"];
+const CI_TYPES = [
+  "SERVER",
+  "FIREWALL",
+  "SWITCH",
+  "UPS",
+  "PDU",
+  "STORAGE",
+  "SERVICE",
+  "CIRCUIT",
+  "VM",
+];
 const CRITICALITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
 const MANAGED_BY = ["JSAN", "CTS", "SHARED", "VENDOR"];
 const LIFECYCLE_STATUSES = ["PLANNED", "ACTIVE", "MAINTENANCE", "RETIRED"];
 
 // Mirrors CisController's CMDB_WRITE_ROLES (apps/api/src/modules/cmdb/
 // cmdb.controller.ts) — UI-only gate, backend re-checks this regardless.
-const CMDB_WRITE_ROLES = ["SUPER_ADMIN", "DELIVERY_OPS_MANAGER", "INFRASTRUCTURE_LEAD", "SITE_ENGINEER"];
+const CMDB_WRITE_ROLES = [
+  "SUPER_ADMIN",
+  "DELIVERY_OPS_MANAGER",
+  "INFRASTRUCTURE_LEAD",
+  "SITE_ENGINEER",
+];
 
 const emptyCiForm = {
   ciCode: "",

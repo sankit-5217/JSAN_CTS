@@ -20,7 +20,7 @@ import type { AlertSeverity } from "../alerts.constants";
  * `alertType` scope the rule — omit both for the global rule.
  */
 export class CreateAlertRuleDto {
-  @ApiProperty({ description: "Human label, e.g. \"default\" or \"noisy-lab-sites\"." })
+  @ApiProperty({ description: 'Human label, e.g. "default" or "noisy-lab-sites".' })
   @IsString()
   name!: string;
 
@@ -30,7 +30,7 @@ export class CreateAlertRuleDto {
   siteId?: string;
 
   @ApiPropertyOptional({
-    description: "Scope to one alert type, e.g. \"disk.predictive_failure\". Omit for all types.",
+    description: 'Scope to one alert type, e.g. "disk.predictive_failure". Omit for all types.',
   })
   @IsOptional()
   @IsString()

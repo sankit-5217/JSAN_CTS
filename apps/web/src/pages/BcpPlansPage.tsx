@@ -93,9 +93,7 @@ export function BcpPlansPage() {
         alternateSite: form.alternateSite || undefined,
         rtoMinutes: Number(form.rtoMinutes),
         rpoMinutes: Number(form.rpoMinutes),
-        nextTestDueAt: form.nextTestDueAt
-          ? new Date(form.nextTestDueAt).toISOString()
-          : undefined,
+        nextTestDueAt: form.nextTestDueAt ? new Date(form.nextTestDueAt).toISOString() : undefined,
       });
       setForm((f) => ({
         ...f,
@@ -254,11 +252,11 @@ export function BcpPlansPage() {
                       <Link component={RouterLink} to={`/bcp-plans/${p.id}`}>
                         {p.name}
                       </Link>
-                      {!p.isActive && (
-                        <Chip size="small" label="retired" sx={{ ml: 0.5 }} />
-                      )}
+                      {!p.isActive && <Chip size="small" label="retired" sx={{ ml: 0.5 }} />}
                     </TableCell>
-                    <TableCell>{p.siteId ? `site ${p.siteId.slice(0, 8)}` : p.serviceName}</TableCell>
+                    <TableCell>
+                      {p.siteId ? `site ${p.siteId.slice(0, 8)}` : p.serviceName}
+                    </TableCell>
                     <TableCell>
                       {p.rtoMinutes}m / {p.rpoMinutes}m
                     </TableCell>

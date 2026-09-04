@@ -18,7 +18,14 @@ import {
 } from "@mui/material";
 import { apiGet, apiPatch, apiPost } from "../api/client";
 
-const DISPATCH_STATUSES = ["REQUESTED", "APPROVED", "SHIPPED", "DELIVERED", "INSTALLED", "RETURNED"];
+const DISPATCH_STATUSES = [
+  "REQUESTED",
+  "APPROVED",
+  "SHIPPED",
+  "DELIVERED",
+  "INSTALLED",
+  "RETURNED",
+];
 const WARRANTY_STATUSES = ["ACTIVE", "EXPIRED", "UNKNOWN"];
 
 interface VendorCaseUpdate {

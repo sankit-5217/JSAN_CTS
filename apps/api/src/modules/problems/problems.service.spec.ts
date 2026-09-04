@@ -160,7 +160,12 @@ describe("ProblemsService", () => {
       await service.addActionItem("prob-1", { description: "Replace the PDU" }, ACTOR);
 
       expect(prisma.problemActionItem.create).toHaveBeenCalledWith({
-        data: { problemId: "prob-1", description: "Replace the PDU", assigneeUserId: null, dueDate: null },
+        data: {
+          problemId: "prob-1",
+          description: "Replace the PDU",
+          assigneeUserId: null,
+          dueDate: null,
+        },
       });
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: "PROBLEM_ACTION_ITEM_ADDED" }),
@@ -190,9 +195,9 @@ describe("ProblemsService", () => {
 
     it("404s when the item does not belong to the problem", async () => {
       prisma.problemActionItem.findUnique.mockResolvedValue({ id: "ai-1", problemId: "other" });
-      await expect(
-        service.completeActionItem("prob-1", "ai-1", ACTOR),
-      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.completeActionItem("prob-1", "ai-1", ACTOR)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 

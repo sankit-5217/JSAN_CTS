@@ -255,9 +255,7 @@ export function BcpPlanDetailPage() {
                   type="number"
                   label="Target availability %"
                   value={edit.targetAvailabilityPercent}
-                  onChange={(e) =>
-                    setEdit({ ...edit, targetAvailabilityPercent: e.target.value })
-                  }
+                  onChange={(e) => setEdit({ ...edit, targetAvailabilityPercent: e.target.value })}
                 />
                 <TextField
                   size="small"
@@ -309,8 +307,9 @@ export function BcpPlanDetailPage() {
                   <Button
                     color="error"
                     onClick={() =>
-                      call(() => apiPatch(`/bcp-plans/${id}`, { isActive: !plan.isActive }), () =>
-                        setEdit(null),
+                      call(
+                        () => apiPatch(`/bcp-plans/${id}`, { isActive: !plan.isActive }),
+                        () => setEdit(null),
                       )
                     }
                   >

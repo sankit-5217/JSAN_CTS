@@ -23,7 +23,9 @@ export interface WarrantyResyncSummary {
  * the worker only owns *when* it runs. Exported bare so it can be tested
  * without Redis. A non-2xx propagates so BullMQ marks the job failed and retries.
  */
-export async function processWarrantySyncJob(client: WorkerApiClient): Promise<WarrantyResyncSummary> {
+export async function processWarrantySyncJob(
+  client: WorkerApiClient,
+): Promise<WarrantyResyncSummary> {
   const summary = await client.post<WarrantyResyncSummary>("/vendors/warranty-sync");
   // eslint-disable-next-line no-console
   console.log(

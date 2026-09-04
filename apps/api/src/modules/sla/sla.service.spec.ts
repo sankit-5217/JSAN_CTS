@@ -85,8 +85,7 @@ function makeService(
   } as unknown as AuditService;
 
   const sitesService = {
-    listSupportCalendars:
-      overrides.listSupportCalendars ?? jest.fn().mockResolvedValue([]),
+    listSupportCalendars: overrides.listSupportCalendars ?? jest.fn().mockResolvedValue([]),
   } as unknown as SitesService;
 
   return {
@@ -104,7 +103,9 @@ describe("SlaService.resolvePolicy", () => {
     const result = await service.resolvePolicy(Priority.P1, new Date("2026-09-03T10:00:00Z"));
     expect(result.id).toBe("policy-p1");
     expect(prisma.slaPolicy.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ priority: Priority.P1, isActive: true }) }),
+      expect.objectContaining({
+        where: expect.objectContaining({ priority: Priority.P1, isActive: true }),
+      }),
     );
   });
 
@@ -167,7 +168,9 @@ describe("SlaService.onAcknowledged", () => {
 
   it("no-ops when the instance was already acked", async () => {
     const { service, tx } = makeService({
-      txSlaInstance: { findFirst: jest.fn().mockResolvedValue(baseInstance({ ackedAt: new Date() })) },
+      txSlaInstance: {
+        findFirst: jest.fn().mockResolvedValue(baseInstance({ ackedAt: new Date() })),
+      },
     });
     await service.onAcknowledged(tx as never, "incident-1", new Date(), { actorId: "user-1" });
     expect(tx.slaInstance.update).not.toHaveBeenCalled();
@@ -232,7 +235,9 @@ describe("SlaService.onPaused / onResumed", () => {
 describe("SlaService.onPriorityChanged", () => {
   it("recomputes ackDueAt and resolveDueAt when neither clock has stopped yet", async () => {
     const { service, tx, prisma } = makeService({
-      slaPolicyFindFirst: jest.fn().mockResolvedValue(basePolicy({ id: "policy-p2", priority: Priority.P2 })),
+      slaPolicyFindFirst: jest
+        .fn()
+        .mockResolvedValue(basePolicy({ id: "policy-p2", priority: Priority.P2 })),
     });
     await service.onPriorityChanged(
       tx as never,
@@ -252,7 +257,9 @@ describe("SlaService.onPriorityChanged", () => {
   it("leaves ackDueAt untouched once the ack clock has already stopped", async () => {
     const { service, tx } = makeService({
       txSlaInstance: {
-        findFirst: jest.fn().mockResolvedValue(baseInstance({ ackedAt: new Date("2026-09-03T10:05:00Z") })),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(baseInstance({ ackedAt: new Date("2026-09-03T10:05:00Z") })),
       },
     });
     await service.onPriorityChanged(

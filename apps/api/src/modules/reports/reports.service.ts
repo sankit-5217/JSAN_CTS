@@ -135,7 +135,9 @@ export class ReportsService {
 
     const siteCards: SiteCard[] = sites.map((site) => {
       const siteCis = cis.filter((ci) => ci.siteId === site.id);
-      const health = worstOf(siteCis.map((ci) => normalizeHealth(ci.healthSnapshot?.overallHealth)));
+      const health = worstOf(
+        siteCis.map((ci) => normalizeHealth(ci.healthSnapshot?.overallHealth)),
+      );
       if (health === "CRITICAL") {
         sitesCritical += 1;
       } else if (health === "WARNING") {
@@ -199,7 +201,8 @@ export class ReportsService {
         unassigned: openIncidents.filter((i) => i.status === IncidentStatus.NEW).length,
         awaitingAck: openIncidents.filter((i) => i.status === IncidentStatus.ASSIGNED).length,
         slaBreachRisk: slaAtRiskIncidents,
-        vendorWaiting: openIncidents.filter((i) => i.status === IncidentStatus.PENDING_VENDOR).length,
+        vendorWaiting: openIncidents.filter((i) => i.status === IncidentStatus.PENDING_VENDOR)
+          .length,
         reopened: openIncidents.filter((i) => i.status === IncidentStatus.REOPENED).length,
       },
     };

@@ -99,7 +99,14 @@ export function RisksPage() {
         siteId: form.siteId || undefined,
         dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : undefined,
       });
-      setForm((f) => ({ ...f, description: "", mitigation: "", ownerId: "", siteId: "", dueDate: "" }));
+      setForm((f) => ({
+        ...f,
+        description: "",
+        mitigation: "",
+        ownerId: "",
+        siteId: "",
+        dueDate: "",
+      }));
       load();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -183,11 +190,7 @@ export function RisksPage() {
                 value={form.dueDate}
                 onChange={(e) => set("dueDate", e.target.value)}
               />
-              <Button
-                variant="contained"
-                disabled={form.description.length < 3}
-                onClick={create}
-              >
+              <Button variant="contained" disabled={form.description.length < 3} onClick={create}>
                 Register risk
               </Button>
             </Stack>

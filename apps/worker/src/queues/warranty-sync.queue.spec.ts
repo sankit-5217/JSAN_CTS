@@ -16,7 +16,7 @@ const OK_SUMMARY = JSON.stringify({
   updated: 1,
   unchanged: 2,
   skipped: [],
-  failed: [{ ciCode: "CI-9", reason: "no warranty provider for \"Supermicro\"" }],
+  failed: [{ ciCode: "CI-9", reason: 'no warranty provider for "Supermicro"' }],
 });
 
 describe("warranty-sync queue", () => {

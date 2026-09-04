@@ -123,7 +123,9 @@ export function SiteDetailPage() {
   const toggleWorkday = (day: number) => {
     setCalendarForm((f) => ({
       ...f,
-      workdays: f.workdays.includes(day) ? f.workdays.filter((d) => d !== day) : [...f.workdays, day].sort(),
+      workdays: f.workdays.includes(day)
+        ? f.workdays.filter((d) => d !== day)
+        : [...f.workdays, day].sort(),
     }));
   };
 
@@ -151,7 +153,11 @@ export function SiteDetailPage() {
   };
 
   if (error) {
-    return <Alert severity="error">Could not load site {id}: {error}</Alert>;
+    return (
+      <Alert severity="error">
+        Could not load site {id}: {error}
+      </Alert>
+    );
   }
   if (!site) {
     return <Typography color="text.secondary">Loading...</Typography>;
@@ -189,7 +195,8 @@ export function SiteDetailPage() {
               {contacts.map((c) => (
                 <Box key={c.id}>
                   <Typography variant="body2">
-                    {c.name} — {c.role} {c.isOnCall && <Chip size="small" label="on-call" sx={{ ml: 1 }} />}
+                    {c.name} — {c.role}{" "}
+                    {c.isOnCall && <Chip size="small" label="on-call" sx={{ ml: 1 }} />}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {c.email ?? "—"} · {c.phone ?? "—"}
@@ -234,7 +241,9 @@ export function SiteDetailPage() {
                   control={
                     <Checkbox
                       checked={contactForm.isOnCall}
-                      onChange={(e) => setContactForm({ ...contactForm, isOnCall: e.target.checked })}
+                      onChange={(e) =>
+                        setContactForm({ ...contactForm, isOnCall: e.target.checked })
+                      }
                     />
                   }
                   label="On-call"
@@ -291,13 +300,17 @@ export function SiteDetailPage() {
                     label="Business start (HH:MM)"
                     size="small"
                     value={calendarForm.businessStart}
-                    onChange={(e) => setCalendarForm({ ...calendarForm, businessStart: e.target.value })}
+                    onChange={(e) =>
+                      setCalendarForm({ ...calendarForm, businessStart: e.target.value })
+                    }
                   />
                   <TextField
                     label="Business end (HH:MM)"
                     size="small"
                     value={calendarForm.businessEnd}
-                    onChange={(e) => setCalendarForm({ ...calendarForm, businessEnd: e.target.value })}
+                    onChange={(e) =>
+                      setCalendarForm({ ...calendarForm, businessEnd: e.target.value })
+                    }
                   />
                 </Stack>
                 <Box>
@@ -330,7 +343,9 @@ export function SiteDetailPage() {
                   control={
                     <Checkbox
                       checked={calendarForm.is247}
-                      onChange={(e) => setCalendarForm({ ...calendarForm, is247: e.target.checked })}
+                      onChange={(e) =>
+                        setCalendarForm({ ...calendarForm, is247: e.target.checked })
+                      }
                     />
                   }
                   label="24x7 (ignores business hours/workdays)"

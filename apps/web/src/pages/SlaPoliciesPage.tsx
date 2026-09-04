@@ -210,7 +210,11 @@ export function SlaPoliciesPage() {
                 <TableCell>{p.usesBusinessCalendar ? "Business hours" : "24x7"}</TableCell>
                 <TableCell>{p.escalationThresholdsPercent.join(", ")}</TableCell>
                 <TableCell>
-                  <Chip size="small" label={p.isActive ? "Active" : "Inactive"} color={p.isActive ? "success" : "default"} />
+                  <Chip
+                    size="small"
+                    label={p.isActive ? "Active" : "Inactive"}
+                    color={p.isActive ? "success" : "default"}
+                  />
                 </TableCell>
                 {canWrite && (
                   <TableCell>
@@ -241,7 +245,9 @@ export function SlaPoliciesPage() {
               label="Priority"
               size="small"
               disabled={!!editingId}
-              helperText={editingId ? "Not editable — create a new versioned policy instead" : undefined}
+              helperText={
+                editingId ? "Not editable — create a new versioned policy instead" : undefined
+              }
               value={form.priority}
               onChange={(e) => setForm({ ...form, priority: e.target.value })}
             >

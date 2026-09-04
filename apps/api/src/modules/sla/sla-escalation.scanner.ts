@@ -176,7 +176,10 @@ export class SlaEscalationScanner {
   private recipients(instance: InstanceWithContext): Party[] {
     const parties: Party[] = [];
     if (instance.incident.owner?.email) {
-      parties.push({ name: instance.incident.owner.displayName, email: instance.incident.owner.email });
+      parties.push({
+        name: instance.incident.owner.displayName,
+        email: instance.incident.owner.email,
+      });
     }
     for (const contact of instance.incident.site.contacts) {
       if (contact.isOnCall && contact.email) {
