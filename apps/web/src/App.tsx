@@ -2,6 +2,9 @@ import { Navigate, Outlet, Route, Routes, Link, useLocation } from "react-router
 import { AppBar, Box, Toolbar, Typography, Button } from "@mui/material";
 import { clearStoredToken, getStoredToken } from "./api/client";
 import { decodeJwtPayload } from "./api/jwt";
+import { AlertDetailPage } from "./pages/AlertDetailPage";
+import { AlertRulesPage } from "./pages/AlertRulesPage";
+import { AlertsPage } from "./pages/AlertsPage";
 import { CiDetailPage } from "./pages/CiDetailPage";
 import { CisPage } from "./pages/CisPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
@@ -38,6 +41,9 @@ function TopNav() {
         </Button>
         <Button color="inherit" component={Link} to="/sla-policies">
           SLA Policies
+        </Button>
+        <Button color="inherit" component={Link} to="/alerts">
+          Alerts
         </Button>
         <Button color="inherit" component={Link} to="/vendors">
           Vendors
@@ -93,6 +99,9 @@ export function App() {
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
         <Route path="/sla-policies" element={<SlaPoliciesPage />} />
+        <Route path="/alerts" element={<AlertsPage />} />
+        <Route path="/alerts/:id" element={<AlertDetailPage />} />
+        <Route path="/alert-rules" element={<AlertRulesPage />} />
         <Route path="/vendors" element={<VendorsPage />} />
         <Route path="/vendor-cases/:id" element={<VendorCaseDetailPage />} />
       </Route>
