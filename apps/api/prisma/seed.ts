@@ -195,7 +195,7 @@ async function main() {
     create: { parentCiId: server1.id, childCiId: switch1.id, relationType: "DEPENDS_ON" },
   });
 
-  await prisma.configurationItem.upsert({
+  const server2 = await prisma.configurationItem.upsert({
     where: { ciCode: "SITE02-SRV-001" },
     update: {},
     create: {
@@ -209,6 +209,28 @@ async function main() {
       criticality: Criticality.MEDIUM,
       lifecycleStatus: LifecycleStatus.ACTIVE,
     },
+  });
+
+  // Health snapshots (spec §10.1's Command Center rollup, Sprint 7) — a
+  // deliberate mix so the demo dashboard isn't all-green or all-empty:
+  // server1 WARNING (drives SITE01's card to WARNING), switch1 HEALTHY,
+  // server2 HEALTHY (SITE02 stays HEALTHY). One row per CI (upsert on the
+  // unique ciId), not guarded like the incident block — these are
+  // idempotent by nature.
+  await prisma.healthSnapshot.upsert({
+    where: { ciId: server1.id },
+    update: {},
+    create: { ciId: server1.id, overallHealth: "WARNING", lastHeartbeatAt: new Date() },
+  });
+  await prisma.healthSnapshot.upsert({
+    where: { ciId: switch1.id },
+    update: {},
+    create: { ciId: switch1.id, overallHealth: "HEALTHY", lastHeartbeatAt: new Date() },
+  });
+  await prisma.healthSnapshot.upsert({
+    where: { ciId: server2.id },
+    update: {},
+    create: { ciId: server2.id, overallHealth: "HEALTHY", lastHeartbeatAt: new Date() },
   });
 
   // SLA policies (spec §10.8's illustrative P1-P4 table) and one support
@@ -389,7 +411,7 @@ async function main() {
       `${serviceDesk.email} (SERVICE_DESK_NOC, ${site1.code} only), ` +
       `${siteEngineer.email} (SITE_ENGINEER, ${site2.code} only), ` +
       `${siteEngineer1.email} (SITE_ENGINEER, ${site1.code} only), ` +
-      `1 rack and 3 CIs (1 CI-to-CI relation), ` +
+      `1 rack and 3 CIs (1 CI-to-CI relation, 3 health snapshots), ` +
       `4 SLA policies (P1-P4) and 1 support calendar per site, ` +
       `1 incident (INC-SEED-001, IN_PROGRESS, 5 timeline events, 1 comment, 1 worklog, 1 SLA instance).`,
   );
