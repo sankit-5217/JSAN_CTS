@@ -148,7 +148,10 @@ export class SlaService {
     policy: SlaPolicy,
     from: Date,
   ): Promise<{ ackDueAt: Date; resolveDueAt: Date }> {
-    const site = await this.prisma.site.findUnique({ where: { id: siteId }, select: { timezone: true } });
+    const site = await this.prisma.site.findUnique({
+      where: { id: siteId },
+      select: { timezone: true },
+    });
     const timezone = site?.timezone ?? "UTC";
     const calendar = policy.usesBusinessCalendar ? await this.resolveCalendar(siteId) : null;
     return {
@@ -283,7 +286,9 @@ export class SlaService {
     }
     const policy = await tx.slaPolicy.findUnique({ where: { id: before.slaPolicyId } });
     const shouldPause =
-      toStatus === "PENDING_VENDOR" ? policy?.pausesOnPendingVendor : policy?.pausesOnPendingCustomer;
+      toStatus === "PENDING_VENDOR"
+        ? policy?.pausesOnPendingVendor
+        : policy?.pausesOnPendingCustomer;
     if (!shouldPause) {
       return;
     }

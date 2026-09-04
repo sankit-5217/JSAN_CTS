@@ -22,7 +22,10 @@ export class CreateBcpPlanDto {
   @Length(3, 200)
   name!: string;
 
-  @ApiPropertyOptional({ format: "uuid", description: "Site the plan covers (omit for a service plan)." })
+  @ApiPropertyOptional({
+    format: "uuid",
+    description: "Site the plan covers (omit for a service plan).",
+  })
   @IsOptional()
   @IsUUID()
   siteId?: string;
@@ -33,7 +36,9 @@ export class CreateBcpPlanDto {
   @Length(2, 200)
   serviceName?: string;
 
-  @ApiProperty({ description: "How the service is recovered (failover steps, order, dependencies)." })
+  @ApiProperty({
+    description: "How the service is recovered (failover steps, order, dependencies).",
+  })
   @IsString()
   @Length(3, 8000)
   recoveryStrategy!: string;
@@ -56,7 +61,9 @@ export class CreateBcpPlanDto {
   @Max(43200)
   rpoMinutes!: number;
 
-  @ApiPropertyOptional({ description: "Target availability %, e.g. 99.9. Do not claim what isn't real." })
+  @ApiPropertyOptional({
+    description: "Target availability %, e.g. 99.9. Do not claim what isn't real.",
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)

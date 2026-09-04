@@ -52,7 +52,8 @@ export class UpdateChangeDto {
   @ApiPropertyOptional({
     type: [String],
     format: "uuid",
-    description: "Replace the affected-CI list. Part of the plan — only editable before work starts.",
+    description:
+      "Replace the affected-CI list. Part of the plan — only editable before work starts.",
   })
   @IsOptional()
   @IsArray()

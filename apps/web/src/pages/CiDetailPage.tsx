@@ -21,7 +21,12 @@ import { getCurrentUserRole } from "../api/jwt";
 
 // Mirrors CisController's CMDB_WRITE_ROLES — UI-only gate (plan Decision 1),
 // same list as CisPage.tsx.
-const CMDB_WRITE_ROLES = ["SUPER_ADMIN", "DELIVERY_OPS_MANAGER", "INFRASTRUCTURE_LEAD", "SITE_ENGINEER"];
+const CMDB_WRITE_ROLES = [
+  "SUPER_ADMIN",
+  "DELIVERY_OPS_MANAGER",
+  "INFRASTRUCTURE_LEAD",
+  "SITE_ENGINEER",
+];
 const CRITICALITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
 const LIFECYCLE_STATUSES = ["PLANNED", "ACTIVE", "MAINTENANCE", "RETIRED"];
 // Matches CreateCiRelationDto's CI_RELATION_TYPES (cmdb/dto/create-ci-relation.dto.ts).
@@ -178,7 +183,11 @@ export function CiDetailPage() {
   };
 
   if (error) {
-    return <Alert severity="error">Could not load CI {id}: {error}</Alert>;
+    return (
+      <Alert severity="error">
+        Could not load CI {id}: {error}
+      </Alert>
+    );
   }
   if (!ci) {
     return <Typography color="text.secondary">Loading...</Typography>;
@@ -312,7 +321,8 @@ export function CiDetailPage() {
                 return (
                   <Box key={r.id}>
                     <Typography variant="body2">
-                      {isParent ? "→" : "←"} {r.relationType} — {other ? `${other.ciCode} (${other.name})` : otherId}
+                      {isParent ? "→" : "←"} {r.relationType} —{" "}
+                      {other ? `${other.ciCode} (${other.name})` : otherId}
                     </Typography>
                     <Divider sx={{ mt: 1 }} />
                   </Box>
@@ -335,7 +345,11 @@ export function CiDetailPage() {
                   inputValue={relatedQuery}
                   onInputChange={(_, value) => setRelatedQuery(value)}
                   renderInput={(params) => (
-                    <TextField {...params} label="Related CI (search by code or name)" size="small" />
+                    <TextField
+                      {...params}
+                      label="Related CI (search by code or name)"
+                      size="small"
+                    />
                   )}
                 />
                 <TextField
@@ -360,7 +374,9 @@ export function CiDetailPage() {
                 >
                   {DIRECTIONS.map((d) => (
                     <MenuItem key={d} value={d}>
-                      {d === "PARENT" ? "Parent (owns the related CI)" : "Child (belongs to the related CI)"}
+                      {d === "PARENT"
+                        ? "Parent (owns the related CI)"
+                        : "Child (belongs to the related CI)"}
                     </MenuItem>
                   ))}
                 </TextField>

@@ -49,7 +49,8 @@ export class CreateSlaPolicyDto {
     type: [Number],
     required: false,
     default: [50, 75, 90],
-    description: "Escalation notify thresholds, percent of target elapsed (breach = 100 always fires)",
+    description:
+      "Escalation notify thresholds, percent of target elapsed (breach = 100 always fires)",
   })
   @IsOptional()
   @IsArray()

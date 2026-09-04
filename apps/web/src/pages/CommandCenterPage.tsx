@@ -146,7 +146,10 @@ export function CommandCenterPage() {
               />
             </Grid>
             <Grid item xs={6} sm={4} md={2}>
-              <CounterTile label="Critical alerts" value={`${summary.counters.criticalAlertsOpen}`} />
+              <CounterTile
+                label="Critical alerts"
+                value={`${summary.counters.criticalAlertsOpen}`}
+              />
             </Grid>
             <Grid item xs={6} sm={4} md={2}>
               <CounterTile
