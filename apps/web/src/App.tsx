@@ -2,6 +2,7 @@ import { Navigate, Outlet, Route, Routes, Link, useLocation } from "react-router
 import { AppBar, Box, Toolbar, Typography, Button } from "@mui/material";
 import { clearStoredToken, getStoredToken } from "./api/client";
 import { decodeJwtPayload } from "./api/jwt";
+import { CisPage } from "./pages/CisPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { IncidentsPage } from "./pages/IncidentsPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -22,6 +23,9 @@ function TopNav() {
         </Button>
         <Button color="inherit" component={Link} to="/sites">
           Sites
+        </Button>
+        <Button color="inherit" component={Link} to="/cis">
+          CMDB
         </Button>
         <Button color="inherit" component={Link} to="/incidents">
           Incidents
@@ -71,6 +75,7 @@ export function App() {
       <Route element={<AuthenticatedLayout />}>
         <Route path="/" element={<CommandCenterPage />} />
         <Route path="/sites" element={<SitesPage />} />
+        <Route path="/cis" element={<CisPage />} />
         <Route path="/incidents" element={<IncidentsPage />} />
       </Route>
     </Routes>
