@@ -8,6 +8,7 @@ import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { IncidentDetailPage } from "./pages/IncidentDetailPage";
 import { IncidentsPage } from "./pages/IncidentsPage";
 import { LoginPage } from "./pages/LoginPage";
+import { SiteDetailPage } from "./pages/SiteDetailPage";
 import { SitesPage } from "./pages/SitesPage";
 
 function TopNav() {
@@ -77,6 +78,7 @@ export function App() {
       <Route element={<AuthenticatedLayout />}>
         <Route path="/" element={<CommandCenterPage />} />
         <Route path="/sites" element={<SitesPage />} />
+        <Route path="/sites/:id" element={<SiteDetailPage />} />
         <Route path="/cis" element={<CisPage />} />
         <Route path="/cis/:id" element={<CiDetailPage />} />
         <Route path="/incidents" element={<IncidentsPage />} />
