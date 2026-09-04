@@ -21,11 +21,15 @@ export function clearStoredToken(): void {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getStoredToken();
+  // A FormData body must NOT get an explicit Content-Type — the browser
+  // sets the multipart boundary itself when it builds the request; setting
+  // it manually breaks the server's multipart parser.
+  const isFormData = init?.body instanceof FormData;
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.body && !isFormData ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
     },
   });
@@ -44,4 +48,15 @@ export function apiGet<T>(path: string): Promise<T> {
 
 export function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
+}
+
+export function apiPatch<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
+}
+
+/** Field name must match `FileInterceptor("file")` server-side. */
+export function apiUpload<T>(path: string, file: File): Promise<T> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return request<T>(path, { method: "POST", body: formData });
 }
