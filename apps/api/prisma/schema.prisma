@@ -83,6 +83,21 @@ enum Priority {
   P4
 }
 
+// Problem/RCA lifecycle (spec §10.5, owner: Dev B). Distinct from incident
+// status — closing an incident never changes a problem's status.
+enum ProblemStatus {
+  OPEN
+  INVESTIGATING
+  KNOWN_ERROR
+  RESOLVED
+  CLOSED
+}
+
+enum ProblemLinkType {
+  INCIDENT
+  CHANGE
+}
+
 enum AlertSeverity {
   CRITICAL
   HIGH
@@ -583,6 +598,68 @@ model VendorCaseUpdate {
 // Changes / knowledge / risk (owner: Dev B) — spec §10.5, §10.6, §10.14,
 // §10.15
 // ---------------------------------------------------------------------------
+
+/// Formal RCA record for repeated or major incidents (spec §10.5). Owns its
+/// own action items and the links to related incidents/changes, so linking
+/// never edits another module's table. Closing an incident must never
+/// auto-close a problem — that rule lives in this module only.
+model Problem {
+  id               String        @id @default(uuid())
+  problemNo        String        @unique @map("problem_no")
+  title            String
+  status           ProblemStatus @default(OPEN)
+  priority         Priority?
+  symptoms         String
+  knownError       String?       @map("known_error")
+  rootCause        String?       @map("root_cause")
+  correctiveAction String?       @map("corrective_action")
+  preventiveAction String?       @map("preventive_action")
+  ownerUserId      String?       @map("owner_user_id")
+  dueDate          DateTime?     @map("due_date")
+  resolvedAt       DateTime?     @map("resolved_at")
+  closedAt         DateTime?     @map("closed_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  actionItems ProblemActionItem[]
+  links       ProblemLink[]
+
+  @@index([status])
+  @@map("problems")
+}
+
+/// A corrective / preventive task on a problem, tracked to completion (spec §10.5).
+model ProblemActionItem {
+  id             String    @id @default(uuid())
+  problemId      String    @map("problem_id")
+  description    String
+  assigneeUserId String?   @map("assignee_user_id")
+  dueDate        DateTime? @map("due_date")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  problem Problem @relation(fields: [problemId], references: [id])
+
+  @@index([problemId])
+  @@map("problem_action_items")
+}
+
+/// Link from a problem to a related incident or change (spec §10.5). A plain
+/// join row (entityId is not an FK) so the problems module never writes to the
+/// incidents or changes tables.
+model ProblemLink {
+  id         String          @id @default(uuid())
+  problemId  String          @map("problem_id")
+  entityType ProblemLinkType @map("entity_type")
+  entityId   String          @map("entity_id")
+  createdAt  DateTime        @default(now()) @map("created_at")
+
+  problem Problem @relation(fields: [problemId], references: [id])
+
+  @@unique([problemId, entityType, entityId])
+  @@index([entityType, entityId])
+  @@map("problem_links")
+}
 
 model Change {
   id               String     @id @default(uuid())
