@@ -4,6 +4,7 @@ import { clearStoredToken, getStoredToken } from "./api/client";
 import { decodeJwtPayload } from "./api/jwt";
 import { CisPage } from "./pages/CisPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
+import { IncidentDetailPage } from "./pages/IncidentDetailPage";
 import { IncidentsPage } from "./pages/IncidentsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SitesPage } from "./pages/SitesPage";
@@ -77,6 +78,7 @@ export function App() {
         <Route path="/sites" element={<SitesPage />} />
         <Route path="/cis" element={<CisPage />} />
         <Route path="/incidents" element={<IncidentsPage />} />
+        <Route path="/incidents/:id" element={<IncidentDetailPage />} />
       </Route>
     </Routes>
   );

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import {
   Alert,
   Chip,
+  Link,
   Paper,
   Table,
   TableBody,
@@ -131,7 +132,11 @@ export function IncidentsPage() {
           <TableBody>
             {incidents.map((incident) => (
               <TableRow key={incident.id}>
-                <TableCell>{incident.incidentNo}</TableCell>
+                <TableCell>
+                  <Link component={RouterLink} to={`/incidents/${incident.id}`}>
+                    {incident.incidentNo}
+                  </Link>
+                </TableCell>
                 <TableCell>{sitesById[incident.siteId] ?? incident.siteId}</TableCell>
                 <TableCell>
                   <Chip
