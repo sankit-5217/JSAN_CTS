@@ -34,6 +34,9 @@ function TopNav() {
         <Button color="inherit" component={Link} to="/incidents">
           Incidents
         </Button>
+        <Button color="inherit" component={Link} to="/sla-policies">
+          SLA Policies
+        </Button>
         {user && (
           <Typography variant="body2" sx={{ mx: 2, opacity: 0.85 }}>
             {user.email} ({user.role})
