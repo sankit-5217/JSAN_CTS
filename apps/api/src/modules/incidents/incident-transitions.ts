@@ -40,7 +40,9 @@ export const ELEVATED_ROLES: readonly UserRole[] = [
   UserRole.DELIVERY_OPS_MANAGER,
 ];
 
-const OPEN_STATUSES: IncidentStatus[] = [
+/** Reused by ReportsService for open-incident counters (Sprint 7) — the
+ * single definition of "open" lives here, not duplicated per consumer. */
+export const OPEN_STATUSES: IncidentStatus[] = [
   IncidentStatus.NEW,
   IncidentStatus.ASSIGNED,
   IncidentStatus.ACKNOWLEDGED,

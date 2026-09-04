@@ -29,7 +29,7 @@ import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
 import { TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
-import { findTransitionRule, isOwnerOrElevated } from "./incident-transitions";
+import { findTransitionRule, isOwnerOrElevated, OPEN_STATUSES } from "./incident-transitions";
 
 /** Minimal shape of what NestJS's FileInterceptor hands us (multer.File). */
 export interface UploadedAttachmentFile {
@@ -92,11 +92,17 @@ export class IncidentsService {
 
     const where: Prisma.IncidentWhereInput = {
       siteId: siteFilter ? { in: siteFilter } : undefined,
-      status: query.status,
+      // An explicit ?status= wins; slaAtRisk alone still implies "open"
+      // (a resolved incident's stale fired-milestone history isn't
+      // actionable risk) — matches ReportsService's own queue definition.
+      status: query.status ?? (query.slaAtRisk ? { in: OPEN_STATUSES } : undefined),
       priority: query.priority,
       ownerUserId: query.ownerUserId,
       ownerGroupId: query.ownerGroupId,
       ciId: query.ciId,
+      slaInstances: query.slaAtRisk
+        ? { some: { breached: false, firedMilestones: { isEmpty: false } } }
+        : undefined,
       OR: query.q
         ? [
             { incidentNo: { contains: query.q, mode: "insensitive" } },

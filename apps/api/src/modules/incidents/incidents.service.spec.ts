@@ -261,6 +261,30 @@ describe("IncidentsService.findAll", () => {
       expect.objectContaining({ where: expect.objectContaining({ siteId: undefined }) }),
     );
   });
+
+  it("slaAtRisk=true filters to open incidents with a fired, non-breached milestone", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll({ slaAtRisk: true, limit: 50, offset: 0 }, null);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: { in: expect.arrayContaining(["NEW", "ASSIGNED"]) },
+          slaInstances: { some: { breached: false, firedMilestones: { isEmpty: false } } },
+        }),
+      }),
+    );
+  });
+
+  it("an explicit ?status still wins over slaAtRisk's implied open-status filter", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll(
+      { slaAtRisk: true, status: IncidentStatus.RESOLVED, limit: 50, offset: 0 },
+      null,
+    );
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ status: IncidentStatus.RESOLVED }) }),
+    );
+  });
 });
 
 describe("IncidentsService.createTransition", () => {
