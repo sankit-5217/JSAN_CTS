@@ -67,7 +67,7 @@ describe("AlertsService", () => {
   let audit: { record: jest.Mock };
   let notifications: { enqueue: jest.Mock };
   let incidents: { findOpenByCi: jest.Mock; linkAlert: jest.Mock };
-  let alertRules: { getActiveRule: jest.Mock };
+  let alertRules: { resolveRule: jest.Mock };
   let changes: { getActiveMaintenanceWindows: jest.Mock };
   let service: AlertsService;
 
@@ -79,7 +79,7 @@ describe("AlertsService", () => {
       findOpenByCi: jest.fn().mockResolvedValue(null),
       linkAlert: jest.fn().mockResolvedValue({ linked: true }),
     };
-    alertRules = { getActiveRule: jest.fn().mockResolvedValue({ ...DEFAULT_ALERT_RULE }) };
+    alertRules = { resolveRule: jest.fn().mockResolvedValue({ ...DEFAULT_ALERT_RULE }) };
     changes = { getActiveMaintenanceWindows: jest.fn().mockResolvedValue([]) };
     service = new AlertsService(
       prisma as unknown as PrismaService,
@@ -284,7 +284,7 @@ describe("AlertsService", () => {
     });
 
     it("only labels (still correlates + pages) when the rule says label-not-suppress", async () => {
-      alertRules.getActiveRule.mockResolvedValue({
+      alertRules.resolveRule.mockResolvedValue({
         ...DEFAULT_ALERT_RULE,
         suppressAutoTicketDuringMaintenance: false,
       });
@@ -398,7 +398,7 @@ describe("AlertsService", () => {
     });
 
     it("does not correlate when the active rule disables auto-correlation", async () => {
-      alertRules.getActiveRule.mockResolvedValue({
+      alertRules.resolveRule.mockResolvedValue({
         ...DEFAULT_ALERT_RULE,
         autoCorrelateIncidents: false,
       });
@@ -415,7 +415,7 @@ describe("AlertsService", () => {
 
   describe("alert rules drive ingest behaviour", () => {
     it("uses the rule's flapping threshold, not a constant", async () => {
-      alertRules.getActiveRule.mockResolvedValue({ ...DEFAULT_ALERT_RULE, flappingThreshold: 10 });
+      alertRules.resolveRule.mockResolvedValue({ ...DEFAULT_ALERT_RULE, flappingThreshold: 10 });
       prisma.alert.findUnique.mockResolvedValue(null);
       prisma.alert.create.mockResolvedValue({ id: "alert-f", state: "OPEN" });
       prisma.alert.count.mockResolvedValue(5); // over the default 3, under the rule's 10
@@ -426,7 +426,7 @@ describe("AlertsService", () => {
     });
 
     it("uses the rule's window when counting recent occurrences", async () => {
-      alertRules.getActiveRule.mockResolvedValue({
+      alertRules.resolveRule.mockResolvedValue({
         ...DEFAULT_ALERT_RULE,
         flappingWindowMinutes: 120,
       });
@@ -441,7 +441,7 @@ describe("AlertsService", () => {
     });
 
     it("pages the NOC only for severities the rule lists", async () => {
-      alertRules.getActiveRule.mockResolvedValue({
+      alertRules.resolveRule.mockResolvedValue({
         ...DEFAULT_ALERT_RULE,
         pagingSeverities: ["HIGH"],
       });

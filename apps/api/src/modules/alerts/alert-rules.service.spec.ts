@@ -36,6 +36,8 @@ function dbRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "rule-1",
     name: "default",
+    siteId: null,
+    alertType: null,
     flappingThreshold: 5,
     flappingWindowMinutes: 45,
     pagingSeverities: ["CRITICAL", "HIGH"],
@@ -47,6 +49,14 @@ function dbRow(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+const EFFECTIVE_FROM_DBROW = {
+  flappingThreshold: 5,
+  flappingWindowMinutes: 45,
+  pagingSeverities: ["CRITICAL", "HIGH"],
+  autoCorrelateIncidents: false,
+  suppressAutoTicketDuringMaintenance: true,
+};
 
 describe("AlertRulesService", () => {
   let prisma: PrismaMock;
@@ -62,54 +72,78 @@ describe("AlertRulesService", () => {
     );
   });
 
-  describe("getActiveRule", () => {
-    it("maps the newest active row to the effective shape", async () => {
-      prisma.alertRule.findFirst.mockResolvedValue(dbRow());
+  describe("resolveRule", () => {
+    it("maps the matching active row to the effective shape", async () => {
+      prisma.alertRule.findMany.mockResolvedValue([dbRow()]);
 
-      const rule = await service.getActiveRule();
+      const rule = await service.resolveRule({ siteId: "site-1", alertType: "disk.fail" });
 
-      expect(prisma.alertRule.findFirst).toHaveBeenCalledWith({
+      expect(prisma.alertRule.findMany).toHaveBeenCalledWith({
         where: { isActive: true },
         orderBy: { createdAt: "desc" },
       });
-      expect(rule).toEqual({
-        flappingThreshold: 5,
-        flappingWindowMinutes: 45,
-        pagingSeverities: ["CRITICAL", "HIGH"],
-        autoCorrelateIncidents: false,
-        suppressAutoTicketDuringMaintenance: true,
-      });
+      expect(rule).toEqual(EFFECTIVE_FROM_DBROW);
     });
 
-    it("falls back to the code default when no active row exists", async () => {
-      prisma.alertRule.findFirst.mockResolvedValue(null);
-      await expect(service.getActiveRule()).resolves.toEqual(DEFAULT_ALERT_RULE);
+    it("falls back to the code default when no rule matches", async () => {
+      prisma.alertRule.findMany.mockResolvedValue([]);
+      await expect(service.resolveRule()).resolves.toEqual(DEFAULT_ALERT_RULE);
     });
 
-    it("caches — a second read inside the TTL does not hit the table", async () => {
-      prisma.alertRule.findFirst.mockResolvedValue(dbRow());
+    it("picks the most specific match: site+type > site > type > global", async () => {
+      prisma.alertRule.findMany.mockResolvedValue([
+        dbRow({ id: "global", name: "global", flappingThreshold: 1 }),
+        dbRow({ id: "type", name: "type", alertType: "disk.fail", flappingThreshold: 2 }),
+        dbRow({ id: "site", name: "site", siteId: "site-1", flappingThreshold: 3 }),
+        dbRow({
+          id: "site+type",
+          name: "site+type",
+          siteId: "site-1",
+          alertType: "disk.fail",
+          flappingThreshold: 4,
+        }),
+      ]);
 
-      await service.getActiveRule();
-      await service.getActiveRule();
+      const hit = await service.resolveRule({ siteId: "site-1", alertType: "disk.fail" });
+      expect(hit.flappingThreshold).toBe(4);
 
-      expect(prisma.alertRule.findFirst).toHaveBeenCalledTimes(1);
+      service.invalidateCache();
+      const siteOnly = await service.resolveRule({ siteId: "site-1", alertType: "cpu.hot" });
+      expect(siteOnly.flappingThreshold).toBe(3);
+
+      service.invalidateCache();
+      const typeOnly = await service.resolveRule({ siteId: "site-9", alertType: "disk.fail" });
+      expect(typeOnly.flappingThreshold).toBe(2);
+
+      service.invalidateCache();
+      const global = await service.resolveRule({ siteId: "site-9", alertType: "cpu.hot" });
+      expect(global.flappingThreshold).toBe(1);
+    });
+
+    it("caches — a second resolve inside the TTL does not hit the table", async () => {
+      prisma.alertRule.findMany.mockResolvedValue([dbRow()]);
+
+      await service.resolveRule();
+      await service.resolveRule({ siteId: "site-2" });
+
+      expect(prisma.alertRule.findMany).toHaveBeenCalledTimes(1);
     });
 
     it("re-reads after invalidateCache()", async () => {
-      prisma.alertRule.findFirst.mockResolvedValue(dbRow());
+      prisma.alertRule.findMany.mockResolvedValue([dbRow()]);
 
-      await service.getActiveRule();
+      await service.resolveRule();
       service.invalidateCache();
-      await service.getActiveRule();
+      await service.resolveRule();
 
-      expect(prisma.alertRule.findFirst).toHaveBeenCalledTimes(2);
+      expect(prisma.alertRule.findMany).toHaveBeenCalledTimes(2);
     });
   });
 
   describe("create", () => {
     it("applies defaults for omitted fields, audits in the transaction, and busts the cache", async () => {
-      prisma.alertRule.findFirst.mockResolvedValue(dbRow());
-      await service.getActiveRule(); // prime the cache
+      prisma.alertRule.findMany.mockResolvedValue([dbRow()]);
+      await service.resolveRule(); // prime the cache
       prisma.alertRule.create.mockImplementation(({ data }) =>
         Promise.resolve({ id: "rule-new", ...data }),
       );
@@ -119,6 +153,8 @@ describe("AlertRulesService", () => {
       expect(prisma.alertRule.create).toHaveBeenCalledWith({
         data: {
           name: "tighter",
+          siteId: null,
+          alertType: null,
           flappingThreshold: DEFAULT_ALERT_RULE.flappingThreshold,
           flappingWindowMinutes: DEFAULT_ALERT_RULE.flappingWindowMinutes,
           pagingSeverities: DEFAULT_ALERT_RULE.pagingSeverities,
@@ -133,9 +169,25 @@ describe("AlertRulesService", () => {
         prisma,
       );
 
-      prisma.alertRule.findFirst.mockClear();
-      await service.getActiveRule();
-      expect(prisma.alertRule.findFirst).toHaveBeenCalledTimes(1);
+      prisma.alertRule.findMany.mockClear();
+      await service.resolveRule();
+      expect(prisma.alertRule.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it("persists a site+type scope", async () => {
+      prisma.alertRule.create.mockImplementation(({ data }) =>
+        Promise.resolve({ id: "scoped", ...data }),
+      );
+
+      await service.create(
+        { name: "noisy-lab", siteId: "site-lab", alertType: "disk.fail" },
+        ACTOR,
+      );
+
+      expect(prisma.alertRule.create.mock.calls[0][0].data).toMatchObject({
+        siteId: "site-lab",
+        alertType: "disk.fail",
+      });
     });
   });
 

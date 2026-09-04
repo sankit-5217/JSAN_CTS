@@ -77,8 +77,9 @@ export interface SourceIngestResult {
  *
  * Ingestion tunables (flapping threshold + window, NOC-paging severities,
  * auto-correlate + maintenance-suppression toggles) come from the `alert_rules`
- * table via AlertRulesService, not env / constants (spec §10.10). Maintenance
- * windows are read via ChangesService (best-effort).
+ * table via AlertRulesService.resolveRule({ siteId, alertType }) — the most
+ * specific active rule for this alert wins — not env / constants (spec §10.10).
+ * Maintenance windows are read via ChangesService (best-effort).
  */
 @Injectable()
 export class AlertsService {
@@ -95,10 +96,14 @@ export class AlertsService {
 
   async ingest(dto: IngestAlertDto, actor: ActorContext): Promise<AlertIngestResult> {
     const occurredAt = new Date(dto.occurredAt);
-    const rule = await this.alertRules.getActiveRule();
 
     const site = await this.prisma.site.findUnique({ where: { code: dto.siteCode } });
     const ci = await this.prisma.configurationItem.findUnique({ where: { ciCode: dto.ciCode } });
+
+    const rule = await this.alertRules.resolveRule({
+      siteId: site?.id ?? null,
+      alertType: dto.alertType,
+    });
 
     if (!site) {
       this.logger.warn(

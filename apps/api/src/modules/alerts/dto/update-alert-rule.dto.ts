@@ -1,14 +1,39 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
-import { ArrayUnique, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
+import {
+  ArrayUnique,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Max,
+  Min,
+} from "class-validator";
 import { ALERT_SEVERITIES } from "../alerts.constants";
 import type { AlertSeverity } from "../alerts.constants";
 
-/** Patch an ingestion policy row. Every field optional; only what's sent changes. */
+/**
+ * Patch an ingestion policy row. Every field optional; only what's sent changes.
+ * Send `siteId` / `alertType` as `null` to widen a scoped rule back to global.
+ */
 export class UpdateAlertRuleDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   name?: string;
+
+  @ApiPropertyOptional({ format: "uuid", nullable: true })
+  @IsOptional()
+  @IsUUID()
+  siteId?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  alertType?: string | null;
 
   @ApiPropertyOptional({ minimum: 1, maximum: 100 })
   @IsOptional()

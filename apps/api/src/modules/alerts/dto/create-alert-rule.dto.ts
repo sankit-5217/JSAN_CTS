@@ -1,16 +1,41 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { ArrayUnique, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
+import {
+  ArrayUnique,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Max,
+  Min,
+} from "class-validator";
 import { ALERT_SEVERITIES } from "../alerts.constants";
 import type { AlertSeverity } from "../alerts.constants";
 
 /**
  * Create an ingestion policy row (spec §10.10). Anything omitted falls back to
- * the Prisma column default, so a minimal body just needs `name`.
+ * the Prisma column default, so a minimal body just needs `name`. `siteId` /
+ * `alertType` scope the rule — omit both for the global rule.
  */
 export class CreateAlertRuleDto {
   @ApiProperty({ description: "Human label, e.g. \"default\" or \"noisy-lab-sites\"." })
   @IsString()
   name!: string;
+
+  @ApiPropertyOptional({ format: "uuid", description: "Scope to one site. Omit for all sites." })
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
+  @ApiPropertyOptional({
+    description: "Scope to one alert type, e.g. \"disk.predictive_failure\". Omit for all types.",
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  alertType?: string;
 
   @ApiPropertyOptional({
     description: "Same fingerprint seen this many times in the window flags flapping.",

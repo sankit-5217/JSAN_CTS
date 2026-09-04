@@ -33,10 +33,11 @@ import { AlertsService } from "./alerts.service";
  * incident is linked to it (Alert.correlatedIncidentId + an ALERT_LINKED timeline
  * event), via IncidentsService — link-only, never opens or transitions a ticket.
  * Config (done): the `alert_rules` table (AlertRulesService, /alert-rules CRUD)
- * holds the flapping threshold + window, the NOC-paging severities and the
- * auto-correlate toggle — read by ingest() behind a ~30s cache, code defaults
+ * holds the flapping threshold + window, NOC-paging severities, the
+ * auto-correlate toggle and the maintenance-suppression mode. A rule may be
+ * scoped by siteId / alertType; ingest() resolves the most specific active
+ * match (site+type > site > type > global) behind a ~30s cache, code defaults
  * until a row is seeded (spec §10.10, "config over hard-code").
- * TODO: per-site / per-alert-type rule overrides (global-only for now).
  */
 @Module({
   imports: [AuthModule, IncidentsModule, ChangesModule],

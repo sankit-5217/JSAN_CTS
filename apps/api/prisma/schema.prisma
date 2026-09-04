@@ -525,13 +525,15 @@ model Alert {
 /// detection, which severities page the NOC, whether a live alert is
 /// auto-correlated to an open incident, and whether an approved maintenance
 /// window on the CI suppresses auto-ticketing (§10.10 rule 5) or only labels
-/// the alert expected. The alerts module reads the newest active row (falling
-/// back to code defaults when none exists) on every ingest, behind a short
-/// in-memory cache. Global for now — a per-site / per-alert-type override is a
-/// later iteration.
+/// the alert expected. `siteId` / `alertType` optionally scope a rule; the
+/// alerts module resolves the most specific active match per ingest
+/// (site+type > site > type > global), falling back to code defaults, behind
+/// a short in-memory cache.
 model AlertRule {
   id                     String          @id @default(uuid())
   name                   String
+  siteId                 String?         @map("site_id")
+  alertType              String?         @map("alert_type")
   flappingThreshold      Int             @default(3) @map("flapping_threshold")
   flappingWindowMinutes  Int             @default(30) @map("flapping_window_minutes")
   pagingSeverities       AlertSeverity[] @default([CRITICAL]) @map("paging_severities")
@@ -542,6 +544,7 @@ model AlertRule {
   updatedAt              DateTime        @updatedAt @map("updated_at")
 
   @@index([isActive])
+  @@index([siteId])
   @@map("alert_rules")
 }
 
