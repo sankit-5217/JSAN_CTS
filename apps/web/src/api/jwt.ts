@@ -1,3 +1,5 @@
+import { getStoredToken } from "./client";
+
 /** Payload shape the API's JWTs carry (apps/api's AuthenticatedUser). */
 export interface JwtPayload {
   sub: string;
@@ -21,4 +23,16 @@ export function decodeJwtPayload(token: string): JwtPayload | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Current user's role, for UI-only show/hide of write controls (e.g. "Create
+ * site" buttons) against a flat, static write-role list mirroring a
+ * controller's `@Roles(...)` decorator. This is UX, never the security
+ * boundary — the backend re-checks the same role server-side on every
+ * request regardless of what this returns.
+ */
+export function getCurrentUserRole(): string | null {
+  const token = getStoredToken();
+  return token ? (decodeJwtPayload(token)?.role ?? null) : null;
 }

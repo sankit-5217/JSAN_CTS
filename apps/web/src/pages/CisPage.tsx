@@ -1,9 +1,16 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import {
   Alert,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Link,
   MenuItem,
   Paper,
+  Stack,
   Table,
   TableBody,
   TableCell,
@@ -13,16 +20,40 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { apiGet } from "../api/client";
+import { apiGet, apiPost } from "../api/client";
+import { getCurrentUserRole } from "../api/jwt";
 
 // Mirrors the Prisma enums in apps/api/prisma/schema.prisma (CiType,
 // Criticality, ManagedBy, LifecycleStatus) — literal string unions rather
 // than importing @cts-dc-opsdesk/shared-types' runtime enums, same
 // CJS/ESM-interop workaround as IncidentsPage.tsx (see its comment).
+//
+// LIFECYCLE_STATUSES previously included "DECOMMISSIONED", which isn't a
+// LifecycleStatus enum value in schema.prisma (only PLANNED/ACTIVE/
+// MAINTENANCE/RETIRED) — that filter option could never match anything.
 const CI_TYPES = ["SERVER", "FIREWALL", "SWITCH", "UPS", "PDU", "STORAGE", "SERVICE", "CIRCUIT", "VM"];
 const CRITICALITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
 const MANAGED_BY = ["JSAN", "CTS", "SHARED", "VENDOR"];
-const LIFECYCLE_STATUSES = ["PLANNED", "ACTIVE", "MAINTENANCE", "DECOMMISSIONED", "RETIRED"];
+const LIFECYCLE_STATUSES = ["PLANNED", "ACTIVE", "MAINTENANCE", "RETIRED"];
+
+// Mirrors CisController's CMDB_WRITE_ROLES (apps/api/src/modules/cmdb/
+// cmdb.controller.ts) — UI-only gate, backend re-checks this regardless.
+const CMDB_WRITE_ROLES = ["SUPER_ADMIN", "DELIVERY_OPS_MANAGER", "INFRASTRUCTURE_LEAD", "SITE_ENGINEER"];
+
+const emptyCiForm = {
+  ciCode: "",
+  siteId: "",
+  ciType: CI_TYPES[0],
+  name: "",
+  manufacturer: "",
+  model: "",
+  serialOrServiceTag: "",
+  managementAddress: "",
+  ownerGroupId: "",
+  managedBy: MANAGED_BY[0],
+  criticality: CRITICALITIES[0],
+  lifecycleStatus: "ACTIVE",
+};
 
 interface ConfigurationItem {
   id: string;
@@ -57,6 +88,31 @@ export function CisPage() {
   const [sitesById, setSitesById] = useState<Record<string, string>>({});
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState(emptyCiForm);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const canWrite = CMDB_WRITE_ROLES.includes(getCurrentUserRole() ?? "");
+
+  const submitCreate = async () => {
+    setCreateError(null);
+    try {
+      await apiPost("/cis", {
+        ...createForm,
+        manufacturer: createForm.manufacturer || undefined,
+        model: createForm.model || undefined,
+        serialOrServiceTag: createForm.serialOrServiceTag || undefined,
+        managementAddress: createForm.managementAddress || undefined,
+        ownerGroupId: createForm.ownerGroupId || undefined,
+      });
+      setCreateOpen(false);
+      setCreateForm(emptyCiForm);
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   const ciType = searchParams.get("ciType") ?? "";
   const criticality = searchParams.get("criticality") ?? "";
@@ -94,13 +150,20 @@ export function CisPage() {
         setTotal(res.total);
       })
       .catch((err: Error) => setError(err.message));
-  }, [ciType, criticality, managedBy, lifecycleStatus, q]);
+  }, [ciType, criticality, managedBy, lifecycleStatus, q, refreshKey]);
 
   return (
     <>
-      <Typography variant="h4" gutterBottom>
-        CMDB — Configuration Items
-      </Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between">
+        <Typography variant="h4" gutterBottom>
+          CMDB — Configuration Items
+        </Typography>
+        {canWrite && (
+          <Button variant="contained" onClick={() => setCreateOpen(true)}>
+            Create CI
+          </Button>
+        )}
+      </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         {total} result{total === 1 ? "" : "s"}
       </Typography>
@@ -197,7 +260,11 @@ export function CisPage() {
           <TableBody>
             {cis.map((item) => (
               <TableRow key={item.id}>
-                <TableCell>{item.ciCode}</TableCell>
+                <TableCell>
+                  <Link component={RouterLink} to={`/cis/${item.id}`}>
+                    {item.ciCode}
+                  </Link>
+                </TableCell>
                 <TableCell>{item.name}</TableCell>
                 <TableCell>{sitesById[item.siteId] ?? item.siteId}</TableCell>
                 <TableCell>{item.ciType}</TableCell>
@@ -209,6 +276,132 @@ export function CisPage() {
           </TableBody>
         </Table>
       </TableContainer>
+
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Create CI</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {createError && <Alert severity="error">{createError}</Alert>}
+            <TextField
+              label="CI code"
+              size="small"
+              value={createForm.ciCode}
+              onChange={(e) => setCreateForm({ ...createForm, ciCode: e.target.value })}
+            />
+            <TextField
+              select
+              label="Site"
+              size="small"
+              value={createForm.siteId}
+              onChange={(e) => setCreateForm({ ...createForm, siteId: e.target.value })}
+            >
+              {Object.entries(sitesById).map(([id, code]) => (
+                <MenuItem key={id} value={id}>
+                  {code}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="Type"
+              size="small"
+              value={createForm.ciType}
+              onChange={(e) => setCreateForm({ ...createForm, ciType: e.target.value })}
+            >
+              {CI_TYPES.map((t) => (
+                <MenuItem key={t} value={t}>
+                  {t}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              label="Name"
+              size="small"
+              value={createForm.name}
+              onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+            />
+            <TextField
+              label="Manufacturer"
+              size="small"
+              value={createForm.manufacturer}
+              onChange={(e) => setCreateForm({ ...createForm, manufacturer: e.target.value })}
+            />
+            <TextField
+              label="Model"
+              size="small"
+              value={createForm.model}
+              onChange={(e) => setCreateForm({ ...createForm, model: e.target.value })}
+            />
+            <TextField
+              label="Serial / service tag"
+              size="small"
+              value={createForm.serialOrServiceTag}
+              onChange={(e) => setCreateForm({ ...createForm, serialOrServiceTag: e.target.value })}
+            />
+            <TextField
+              label="Management address (iDRAC/iLO IP)"
+              size="small"
+              value={createForm.managementAddress}
+              onChange={(e) => setCreateForm({ ...createForm, managementAddress: e.target.value })}
+            />
+            <TextField
+              label="Owner group ID (UUID)"
+              size="small"
+              value={createForm.ownerGroupId}
+              onChange={(e) => setCreateForm({ ...createForm, ownerGroupId: e.target.value })}
+            />
+            <TextField
+              select
+              label="Managed by"
+              size="small"
+              value={createForm.managedBy}
+              onChange={(e) => setCreateForm({ ...createForm, managedBy: e.target.value })}
+            >
+              {MANAGED_BY.map((m) => (
+                <MenuItem key={m} value={m}>
+                  {m}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="Criticality"
+              size="small"
+              value={createForm.criticality}
+              onChange={(e) => setCreateForm({ ...createForm, criticality: e.target.value })}
+            >
+              {CRITICALITIES.map((c) => (
+                <MenuItem key={c} value={c}>
+                  {c}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              label="Lifecycle status"
+              size="small"
+              value={createForm.lifecycleStatus}
+              onChange={(e) => setCreateForm({ ...createForm, lifecycleStatus: e.target.value })}
+            >
+              {LIFECYCLE_STATUSES.map((l) => (
+                <MenuItem key={l} value={l}>
+                  {l}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={!createForm.ciCode || !createForm.siteId || !createForm.name}
+            onClick={submitCreate}
+          >
+            Create
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }
