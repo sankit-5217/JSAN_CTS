@@ -30,12 +30,14 @@ export interface MgmtHttpOptions {
 
 export class MgmtHttp {
   private readonly baseUrl: string;
+  private readonly origin: string;
   private readonly authHeader: string;
   private readonly fetchImpl: MgmtFetch;
   private readonly dispatcher: unknown;
 
   constructor(baseUrl: string, credential: Credential, opts: MgmtHttpOptions = {}) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.origin = new URL(this.baseUrl).origin;
     this.authHeader = `Basic ${Buffer.from(`${credential.username}:${credential.password}`).toString("base64")}`;
     this.dispatcher = opts.dispatcher;
     this.fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as MgmtFetch);
@@ -44,9 +46,26 @@ export class MgmtHttp {
     }
   }
 
+  /**
+   * Resolve a request path against `baseUrl` and refuse anything that leaves
+   * the endpoint's origin. Redfish/OME responses are HATEOAS — the fetchers
+   * follow `@odata.id` links straight from the device's JSON — so a spoofed or
+   * compromised BMC could return an absolute URL and harvest the Basic-auth
+   * credential (or use the collector as an SSRF pivot on the management LAN).
+   */
+  private resolve(path: string): string {
+    const url = path.startsWith("http") ? path : `${this.baseUrl}${path}`;
+    if (new URL(url).origin !== this.origin) {
+      throw new Error(
+        `MgmtHttp refuses cross-origin URL "${url}" (endpoint origin ${this.origin})`,
+      );
+    }
+    return url;
+  }
+
   /** GET `path`, parse JSON. Throws {@link MgmtHttpError} on a non-2xx response. */
   async get<T = unknown>(path: string): Promise<T> {
-    const url = path.startsWith("http") ? path : `${this.baseUrl}${path}`;
+    const url = this.resolve(path);
     const res = await this.fetchImpl(url, {
       method: "GET",
       headers: { accept: "application/json", authorization: this.authHeader },

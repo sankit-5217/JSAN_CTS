@@ -52,4 +52,22 @@ describe("MgmtHttp", () => {
     await expect(http.tryGet("/missing")).resolves.toBeUndefined();
     await expect(http.tryGet("/boom")).rejects.toBeInstanceOf(MgmtHttpError);
   });
+
+  it("follows a same-origin absolute URL (Redfish @odata.id on the same host)", async () => {
+    const { fetchImpl, calls } = fake(() => ({ ok: true, status: 200, text: "{}" }));
+    const http = new MgmtHttp("https://10.20.1.40", CRED, { fetchImpl });
+
+    await http.get("https://10.20.1.40/redfish/v1/Systems/1");
+
+    expect(calls[0].url).toBe("https://10.20.1.40/redfish/v1/Systems/1");
+  });
+
+  it("refuses a cross-origin URL without making the request (no credential leak / SSRF)", async () => {
+    const { fetchImpl, calls } = fake(() => ({ ok: true, status: 200, text: "{}" }));
+    const http = new MgmtHttp("https://10.20.1.40", CRED, { fetchImpl });
+
+    await expect(http.get("https://attacker.example/collect")).rejects.toThrow(/cross-origin/);
+    await expect(http.get("http://10.20.1.40/x")).rejects.toThrow(/cross-origin/); // scheme differs
+    expect(calls).toHaveLength(0);
+  });
 });
