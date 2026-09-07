@@ -1,6 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { AuditEvent, Prisma } from "@prisma/client";
+import { Paginated } from "../../common/types/paginated.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { ListAuditEventsQueryDto } from "./dto/list-audit-events-query.dto";
 
 export interface RecordAuditEventInput {
   actorId?: string | null;
@@ -40,5 +42,42 @@ export class AuditService {
         correlationId: input.correlationId ?? undefined,
       },
     });
+  }
+
+  /**
+   * Authorized audit search (spec §14.1) — reconstructs an entity's or
+   * actor's timeline. Role-gated in AuditController, not here (same split
+   * as CmdbService/CisController's managementAddress redaction: this
+   * service is the plain data-access layer).
+   */
+  async findAll(query: ListAuditEventsQueryDto): Promise<Paginated<AuditEvent>> {
+    const limit = query.limit ?? 50;
+    const offset = query.offset ?? 0;
+
+    const where: Prisma.AuditEventWhereInput = {
+      entityType: query.entityType,
+      entityId: query.entityId,
+      actorId: query.actorId,
+      action: query.action,
+      createdAt:
+        query.from || query.to
+          ? {
+              gte: query.from ? new Date(query.from) : undefined,
+              lte: query.to ? new Date(query.to) : undefined,
+            }
+          : undefined,
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.auditEvent.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+      }),
+      this.prisma.auditEvent.count({ where }),
+    ]);
+
+    return { items, total, limit, offset };
   }
 }

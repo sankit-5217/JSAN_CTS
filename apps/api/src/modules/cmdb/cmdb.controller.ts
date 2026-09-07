@@ -31,6 +31,22 @@ const CMDB_WRITE_ROLES = [
   UserRole.SITE_ENGINEER,
 ] as const;
 
+// managementAddress is spec-restricted ("never expose to customer viewer",
+// §9.1). CTS_MANAGER_VIEWER can already read every GET route here (no
+// @Roles restriction on reads, by design), so redact it at the HTTP
+// boundary rather than in CmdbService — the service stays the single
+// source of truth other code (e.g. update()'s audit before/after
+// snapshot) can rely on for the real value.
+function redactManagementAddress<T extends { managementAddress?: string | null }>(
+  ci: T,
+  role: UserRole,
+): T {
+  if (role !== UserRole.CTS_MANAGER_VIEWER) {
+    return ci;
+  }
+  return { ...ci, managementAddress: undefined };
+}
+
 @ApiTags("cmdb")
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -44,12 +60,17 @@ export class CisController {
   @Get()
   async findAll(@Query() query: ListCisQueryDto, @CurrentUser() user: AuthenticatedUser) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
-    return this.cmdbService.findAll(query, accessibleSiteIds);
+    const result = await this.cmdbService.findAll(query, accessibleSiteIds);
+    return {
+      ...result,
+      items: result.items.map((ci) => redactManagementAddress(ci, user.role)),
+    };
   }
 
   @Get(":id")
-  findOne(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.cmdbService.findOneScoped(id, user);
+  async findOne(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    const ci = await this.cmdbService.findOneScoped(id, user);
+    return redactManagementAddress(ci, user.role);
   }
 
   @Post()

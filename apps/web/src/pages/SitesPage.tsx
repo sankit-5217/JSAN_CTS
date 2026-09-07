@@ -33,6 +33,13 @@ interface Site {
   status: string;
 }
 
+interface Paginated<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 // Mirrors SitesController's site-creation rule: SUPER_ADMIN only (site
 // master data is foundational platform config), narrower than contacts/
 // calendars' SITE_MASTER_WRITE_ROLES on SiteDetailPage.tsx.
@@ -67,8 +74,11 @@ export function SitesPage() {
   };
 
   useEffect(() => {
-    apiGet<Site[]>("/sites")
-      .then(setSites)
+    // limit=200: this page has no pagination UI yet (few sites per
+    // deployment) -- fetch everything the backend's max page size allows
+    // rather than defaulting to its first 50.
+    apiGet<Paginated<Site>>("/sites?limit=200")
+      .then((res) => setSites(res.items))
       .catch((err: Error) => setError(err.message));
   }, [refreshKey]);
 

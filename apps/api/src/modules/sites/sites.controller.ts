@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
@@ -12,6 +12,7 @@ import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { CreateSiteContactDto } from "./dto/create-site-contact.dto";
 import { CreateSiteDto } from "./dto/create-site.dto";
 import { CreateSupportCalendarDto } from "./dto/create-support-calendar.dto";
+import { ListSitesQueryDto } from "./dto/list-sites-query.dto";
 import { SitesService } from "./sites.service";
 
 // RBAC + site scope enforced server-side on every route, per the spec's
@@ -40,9 +41,9 @@ export class SitesController {
   ) {}
 
   @Get()
-  async findAll(@CurrentUser() user: AuthenticatedUser) {
+  async findAll(@Query() query: ListSitesQueryDto, @CurrentUser() user: AuthenticatedUser) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
-    return this.sitesService.findAll(accessibleSiteIds);
+    return this.sitesService.findAll(query, accessibleSiteIds);
   }
 
   @Get(":id")
