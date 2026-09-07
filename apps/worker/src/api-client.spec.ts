@@ -59,7 +59,9 @@ describe("WorkerApiClient", () => {
       });
       const client = new WorkerApiClient({ baseUrl: "https://api.example", token: "t", fetchImpl });
 
-      const result = await client.post<{ checked: number; updated: number }>("/vendors/warranty-sync");
+      const result = await client.post<{ checked: number; updated: number }>(
+        "/vendors/warranty-sync",
+      );
 
       expect(result).toEqual({ checked: 3, updated: 1 });
     });
