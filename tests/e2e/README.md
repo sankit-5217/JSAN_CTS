@@ -27,7 +27,15 @@ Override the target with `E2E_SCHEMA=<name>` or `E2E_DATABASE_URL=<url>`.
 Each spec `TRUNCATE`s the schema and re-seeds a minimal fixture
 (`test/fixture.ts`: four role-holders, a site, a CI) in `beforeAll`.
 
-- `test/dev-b-authz.e2e-spec.ts` — Dev B request path: guards reject (401/403),
-  reads are open, `dev-login` mints a usable token, the global `ValidationPipe`
-  rejects at the edge (unknown field, oversized batch), and module happy paths
-  (problem numbering, idempotent alert ingest).
+- `dev-b-authz` — guards reject (401/403), reads open, `dev-login`, the global
+  `ValidationPipe` rejects at the edge (unknown field, oversized batch), problem
+  numbering, idempotent alert ingest.
+- `vendors` — case open, duplicate `vendorCaseNo` -> 409, RMA dispatch lifecycle,
+  out-of-order transition -> 400.
+- `changes` — approval gates the active-maintenance feed; double approve -> 409.
+- `problems` — action items, links (dup -> 409), transition matrix + root-cause
+  gate, unlink.
+- `knowledge` — draft -> approve -> edit bumps version + reverts to DRAFT ->
+  re-approve -> unpublish; owner cannot self-approve; past review date rejected.
+- `risks-bcp` — derived score/severity, status only via `/status`, BCP covers a
+  site XOR a service, readiness `UNTESTED -> READY` after a logged test.
