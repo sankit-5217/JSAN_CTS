@@ -12,7 +12,9 @@ import {
   IsOptional,
   IsString,
   Length,
+  Max,
   MaxLength,
+  Min,
   ValidateNested,
 } from "class-validator";
 
@@ -44,16 +46,20 @@ export class SnmpV1Dto {
   @ApiPropertyOptional({ example: "1.3.6.1.4.1.318" })
   @IsOptional()
   @IsString()
+  @Length(1, 300)
   enterprise?: string;
 
   @ApiPropertyOptional({ minimum: 0, maximum: 6 })
   @IsOptional()
   @IsInt()
+  @Min(0)
+  @Max(6)
   genericTrap?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsInt()
+  @Min(0)
   specificTrap?: number;
 }
 
@@ -118,6 +124,7 @@ export class SnmpTrapDto implements SnmpTrap {
   @ApiPropertyOptional({ type: [SnmpTrapVarbindDto] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(256)
   @ValidateNested({ each: true })
   @Type(() => SnmpTrapVarbindDto)
   varbinds?: SnmpTrapVarbindDto[];
