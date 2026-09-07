@@ -44,6 +44,13 @@ RUN pnpm --filter @cts-dc-opsdesk/api... build
 
 FROM base AS runtime
 ENV NODE_ENV=production
+# node:20-alpine ships with the Alpine OS's libssl3/libcrypto3 and a full
+# bundled npm CLI (pacote, sigstore, tar, minimatch, etc) baked in — this
+# image only ever runs `node dist/main.js`, never npm/npx/corepack. Patch
+# the OS packages and drop the unused npm install so Trivy's HIGH/CRITICAL
+# scan isn't failing the build over tooling this container never executes.
+RUN apk update && apk upgrade --no-cache \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 WORKDIR /repo/apps/api
 COPY --from=build /repo/apps/api/dist ./dist
 COPY --from=build /repo/apps/api/node_modules ./node_modules
