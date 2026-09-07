@@ -22,6 +22,12 @@ RUN pnpm --filter @cts-dc-opsdesk/worker... build
 
 FROM base AS runtime
 ENV NODE_ENV=production
+# See api.Dockerfile's identical comment: patch the inherited Alpine OS
+# packages and drop node:20-alpine's bundled npm/npx/corepack, which this
+# image never invokes (it only ever runs `node dist/index.js`) but which
+# Trivy still flags as HIGH/CRITICAL if left in the final image.
+RUN apk update && apk upgrade --no-cache \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 WORKDIR /repo/apps/worker
 COPY --from=build /repo/apps/worker/dist ./dist
 COPY --from=build /repo/apps/worker/node_modules ./node_modules

@@ -19,5 +19,9 @@ RUN pnpm --filter @cts-dc-opsdesk/shared-types build
 RUN pnpm --filter @cts-dc-opsdesk/web build
 
 FROM nginx:alpine AS runtime
+# Same reasoning as api.Dockerfile/worker.Dockerfile: patch the inherited
+# Alpine OS packages so Trivy's HIGH/CRITICAL scan doesn't fail on stale
+# libssl3/libcrypto3 etc pulled in by the nginx:alpine base.
+RUN apk update && apk upgrade --no-cache
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
 EXPOSE 5173
