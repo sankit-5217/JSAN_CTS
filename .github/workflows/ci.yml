@@ -86,6 +86,17 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # 6b. HTTP end-to-end: boots the real AppModule + supertest against the
+      # Postgres service, in an isolated `e2e` schema so it never collides with
+      # the `public` schema the migration-validation step above deployed.
+      - name: Deploy migrations into the e2e schema
+        run: pnpm --filter @cts-dc-opsdesk/api prisma:deploy
+        env:
+          DATABASE_URL: postgresql://opsdesk:opsdesk@localhost:5432/opsdesk?schema=e2e
+
+      - name: E2E tests
+        run: pnpm --filter @cts-dc-opsdesk/api test:e2e
+
       # 7. Dependency scan (spec §20.1). Informational, not build-blocking:
       # `pnpm audit --audit-level=high` currently reports 11 pre-existing
       # high-severity advisories in transitive deps (js-yaml via
