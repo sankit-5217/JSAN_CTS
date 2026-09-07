@@ -19,7 +19,7 @@
     "@cts-dc-opsdesk/shared-types": "workspace:*",
     "@cts-dc-opsdesk/snmp-adapter": "workspace:*",
     "net-snmp": "^3.26.3",
-    "undici": "^8.10.1"
+    "undici": "^6.28.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.13",

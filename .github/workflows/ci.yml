@@ -48,9 +48,13 @@ jobs:
       # ERR_PNPM_BAD_PM_VERSION ("multiple versions of pnpm specified").
       - uses: pnpm/action-setup@v4
 
+      # Node 20 is deprecated on GitHub-hosted runners (forced onto Node 24
+      # with a warning regardless of what's requested here) — pinned to 24
+      # explicitly so this is an intentional, visible choice instead of a
+      # silent runner-level substitution.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
 
       # 1. Install dependencies with lockfile (spec §20.1)
