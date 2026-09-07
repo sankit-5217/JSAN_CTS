@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { Alert, Card, CardActionArea, CardContent, Grid, Typography } from "@mui/material";
+import { BarChart } from "@mui/x-charts/BarChart";
+import { PieChart } from "@mui/x-charts/PieChart";
 import { apiGet } from "../api/client";
 
 type HealthLevel = "HEALTHY" | "WARNING" | "CRITICAL" | "UNKNOWN";
@@ -166,6 +168,58 @@ export function CommandCenterPage() {
             </Grid>
           </Grid>
 
+          {/* Visual complement to the counters above -- not a replacement for
+              the clickable tiles (spec §10.1's drill-down requirement stays
+              satisfied by those), just a proportion-at-a-glance view. */}
+          <Card sx={{ mb: 3 }}>
+            <CardContent>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Sites by health
+              </Typography>
+              <PieChart
+                series={[
+                  {
+                    data: [
+                      {
+                        id: "healthy",
+                        label: "Healthy",
+                        value: summary.counters.sitesHealthy,
+                        color: HEALTH_COLOR.HEALTHY,
+                      },
+                      {
+                        id: "warning",
+                        label: "Warning",
+                        value: summary.counters.sitesWarning,
+                        color: HEALTH_COLOR.WARNING,
+                      },
+                      {
+                        id: "critical",
+                        label: "Critical",
+                        value: summary.counters.sitesCritical,
+                        color: HEALTH_COLOR.CRITICAL,
+                      },
+                      {
+                        id: "unknown",
+                        label: "Unknown",
+                        value: Math.max(
+                          0,
+                          summary.siteCards.length -
+                            summary.counters.sitesHealthy -
+                            summary.counters.sitesWarning -
+                            summary.counters.sitesCritical,
+                        ),
+                        color: HEALTH_COLOR.UNKNOWN,
+                      },
+                    ].filter((slice) => slice.value > 0),
+                    innerRadius: 40,
+                    paddingAngle: 2,
+                  },
+                ]}
+                height={220}
+              />
+            </CardContent>
+          </Card>
+
           <Typography variant="h6" sx={{ mb: 1 }}>
             Operational queues
           </Typography>
@@ -206,6 +260,41 @@ export function CommandCenterPage() {
               />
             </Grid>
           </Grid>
+
+          <Card sx={{ mb: 3 }}>
+            <CardContent>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Queue sizes
+              </Typography>
+              <BarChart
+                xAxis={[
+                  {
+                    scaleType: "band",
+                    data: [
+                      "Unassigned",
+                      "Awaiting ack",
+                      "SLA breach risk",
+                      "Vendor waiting",
+                      "Reopened",
+                    ],
+                  },
+                ]}
+                series={[
+                  {
+                    data: [
+                      summary.queues.unassigned,
+                      summary.queues.awaitingAck,
+                      summary.queues.slaBreachRisk,
+                      summary.queues.vendorWaiting,
+                      summary.queues.reopened,
+                    ],
+                    color: "#1976d2",
+                  },
+                ]}
+                height={220}
+              />
+            </CardContent>
+          </Card>
 
           <Typography variant="h6" sx={{ mb: 1 }}>
             Sites
