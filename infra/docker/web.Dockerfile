@@ -7,7 +7,12 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared-types/package.json packages/shared-types/package.json
-RUN pnpm install --frozen-lockfile --filter @cts-dc-opsdesk/web...
+# --ignore-scripts: see api.Dockerfile's identical comment — shared-types'
+# own "prepare" script (`tsc -p tsconfig.json`) would otherwise run right
+# here, before tsconfig.json/src are copied in (only package.json exists
+# at this point), and fail every time with "path does not exist:
+# tsconfig.json". Built explicitly below in the `build` stage instead.
+RUN pnpm install --frozen-lockfile --filter @cts-dc-opsdesk/web... --ignore-scripts
 
 FROM deps AS build
 COPY apps/web apps/web
