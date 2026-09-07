@@ -23,10 +23,10 @@ import { buildApiDispatcher, buildEndpointDispatcher } from "./tls";
  * unreachable. No inbound ports.
  *
  * Wires config + the outbound client + the delivery buffer + the loops:
- *  - health poll: for each endpoint, fetch via MgmtHttp -> redfish/hpe-ilo
- *    adapter -> buffer -> POST /monitoring/health-snapshots (OME fetcher pending);
+ *  - health poll: for each endpoint, fetch via MgmtHttp -> redfish / hpe-ilo /
+ *    dell-ome adapter -> buffer -> POST /monitoring/health-snapshots;
  *  - SNMP trap path: decoded PDU -> SnmpTrap -> buffer -> POST /alerts/sources/snmp
- *    (a real net-snmp-backed listener replaces NoopTrapListener next).
+ *    (NetSnmpTrapListener when SNMP sources are configured, else a no-op).
  */
 
 function readConfig(): CollectorConfig {
