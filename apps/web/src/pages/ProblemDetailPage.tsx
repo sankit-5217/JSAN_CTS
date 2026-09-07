@@ -275,7 +275,9 @@ export function ProblemDetailPage() {
                             correctiveAction: edit.correctiveAction || undefined,
                             preventiveAction: edit.preventiveAction || undefined,
                             ownerUserId: edit.ownerUserId || undefined,
-                            dueDate: edit.dueDate ? new Date(edit.dueDate).toISOString() : undefined,
+                            dueDate: edit.dueDate
+                              ? new Date(edit.dueDate).toISOString()
+                              : undefined,
                           }),
                         () => setEdit(null),
                       )

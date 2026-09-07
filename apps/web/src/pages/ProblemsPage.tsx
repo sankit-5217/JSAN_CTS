@@ -239,7 +239,11 @@ export function ProblemsPage() {
                     <TableCell>{p.title}</TableCell>
                     <TableCell>{p.priority ?? "—"}</TableCell>
                     <TableCell>
-                      <Chip size="small" label={p.status} color={STATUS_COLOR[p.status] ?? "default"} />
+                      <Chip
+                        size="small"
+                        label={p.status}
+                        color={STATUS_COLOR[p.status] ?? "default"}
+                      />
                     </TableCell>
                     <TableCell>
                       {p.dueDate ? new Date(p.dueDate).toLocaleDateString() : "—"}
