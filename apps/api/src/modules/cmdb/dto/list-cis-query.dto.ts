@@ -6,10 +6,9 @@ import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, Min } from "class-val
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
-// Pagination on every list endpoint is a hard rule (spec §14.1) — this is
-// the first CMDB list, built with it from the start. `sites.findAll`
-// predates this and still lacks it; that's a known gap, not a pattern to
-// copy (see TODO on SitesService.findAll).
+// Pagination on every list endpoint is a hard rule (spec §14.1) — this was
+// the first list built with it; ListSitesQueryDto now follows the same
+// shape.
 export class ListCisQueryDto {
   @ApiProperty({ required: false })
   @IsOptional()
