@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { ConfigurationItem, Prisma } from "@prisma/client";
 import { ActorContext } from "../../common/types/actor-context.type";
+import { Paginated } from "../../common/types/paginated.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
@@ -16,13 +17,6 @@ import { CreateCiRelationDto } from "./dto/create-ci-relation.dto";
 import { CreateRackDto } from "./dto/create-rack.dto";
 import { ListCisQueryDto } from "./dto/list-cis-query.dto";
 import { UpdateCiDto } from "./dto/update-ci.dto";
-
-export interface Paginated<T> {
-  items: T[];
-  total: number;
-  limit: number;
-  offset: number;
-}
 
 /**
  * Owns: Configuration Items, components, relationships, lifecycle (spec §9, §12).
@@ -35,10 +29,10 @@ export interface Paginated<T> {
  * siteId, check it. List endpoints still filter via
  * AuthzService.getAccessibleSiteIds() exactly like SitesService.
  *
- * TODO: managementAddress is spec-restricted ("never expose to customer
- * viewer", §9.1) but this module doesn't yet redact it per-role in read
- * responses — no customer-facing viewer role consumes this API yet, so
- * deferred rather than half-built.
+ * managementAddress is spec-restricted from CTS_MANAGER_VIEWER ("never
+ * expose to customer viewer", §9.1) — redacted in CisController, not
+ * here, so this service keeps returning the real value for internal
+ * callers (e.g. update()'s audit before/after snapshot).
  */
 @Injectable()
 export class CmdbService {
