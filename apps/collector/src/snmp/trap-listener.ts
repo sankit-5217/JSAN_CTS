@@ -39,11 +39,15 @@ export function makePduSink(
   };
 }
 
-/** Does nothing — placeholder until the net-snmp-backed listener lands. */
+/**
+ * No-op listener used when the site has no SNMP sources configured — the
+ * collector runs without binding a UDP socket. `NetSnmpTrapListener` is the
+ * real receiver, wired in `index.ts` whenever `snmpSources` is non-empty.
+ */
 export class NoopTrapListener implements TrapListener {
   async start(): Promise<void> {
     // eslint-disable-next-line no-console
-    console.warn("[collector] SNMP trap listener not implemented — traps will not be received");
+    console.warn("[collector] no SNMP sources configured — trap listener disabled");
   }
   async stop(): Promise<void> {}
 }

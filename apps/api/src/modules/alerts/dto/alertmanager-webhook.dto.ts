@@ -2,6 +2,8 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import type { AlertmanagerAlert, AlertmanagerWebhook } from "@cts-dc-opsdesk/prometheus-adapter";
 import { Type } from "class-transformer";
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsIn,
   IsInt,
@@ -59,6 +61,8 @@ export class AlertmanagerWebhookDto implements AlertmanagerWebhook {
 
   @ApiProperty({ type: [AlertmanagerAlertDto] })
   @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
   @ValidateNested({ each: true })
   @Type(() => AlertmanagerAlertDto)
   alerts!: AlertmanagerAlertDto[];
