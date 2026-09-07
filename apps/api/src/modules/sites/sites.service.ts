@@ -1,11 +1,14 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { Site } from "@prisma/client";
 import { ActorContext } from "../../common/types/actor-context.type";
+import { Paginated } from "../../common/types/paginated.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { CreateSiteContactDto } from "./dto/create-site-contact.dto";
 import { CreateSiteDto } from "./dto/create-site.dto";
 import { CreateSupportCalendarDto } from "./dto/create-support-calendar.dto";
 import { CreateSupportGroupDto } from "./dto/create-support-group.dto";
+import { ListSitesQueryDto } from "./dto/list-sites-query.dto";
 
 /**
  * Owns: sites, timezone, contacts, support calendars (spec §12).
@@ -23,17 +26,21 @@ export class SitesService {
    * "all sites" role, see AuthzService); an array = filter to exactly
    * those sites. List endpoints filter rather than 403 — a scoped user
    * asking for "all sites" should just see their sites, not get rejected.
-   *
-   * TODO: no pagination yet, unlike CmdbService's list endpoint (spec
-   * §14.1 requires it on every list endpoint). Low risk today — the
-   * number of sites in a deployment is small — but retrofit this before
-   * it isn't.
    */
-  findAll(accessibleSiteIds?: string[] | null) {
-    return this.prisma.site.findMany({
-      where: accessibleSiteIds ? { id: { in: accessibleSiteIds } } : undefined,
-      orderBy: { code: "asc" },
-    });
+  async findAll(
+    query: ListSitesQueryDto,
+    accessibleSiteIds?: string[] | null,
+  ): Promise<Paginated<Site>> {
+    const limit = query.limit ?? 50;
+    const offset = query.offset ?? 0;
+    const where = accessibleSiteIds ? { id: { in: accessibleSiteIds } } : undefined;
+
+    const [items, total] = await Promise.all([
+      this.prisma.site.findMany({ where, orderBy: { code: "asc" }, take: limit, skip: offset }),
+      this.prisma.site.count({ where }),
+    ]);
+
+    return { items, total, limit, offset };
   }
 
   async findOne(id: string) {

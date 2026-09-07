@@ -146,8 +146,9 @@ export function CisPage() {
   };
 
   useEffect(() => {
-    apiGet<Site[]>("/sites")
-      .then((sites) => setSitesById(Object.fromEntries(sites.map((s) => [s.id, s.code]))))
+    // limit=200: just building an id -> code lookup, not a paginated view.
+    apiGet<Paginated<Site>>("/sites?limit=200")
+      .then((res) => setSitesById(Object.fromEntries(res.items.map((s) => [s.id, s.code]))))
       .catch(() => undefined);
   }, []);
 

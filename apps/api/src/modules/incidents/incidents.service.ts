@@ -16,6 +16,7 @@ import {
 } from "@prisma/client";
 import { StorageService } from "../../common/storage/storage.service";
 import { ActorContext } from "../../common/types/actor-context.type";
+import { Paginated } from "../../common/types/paginated.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
@@ -38,13 +39,6 @@ export interface UploadedAttachmentFile {
   mimetype: string;
   size: number;
   buffer: Buffer;
-}
-
-export interface Paginated<T> {
-  items: T[];
-  total: number;
-  limit: number;
-  offset: number;
 }
 
 /**
