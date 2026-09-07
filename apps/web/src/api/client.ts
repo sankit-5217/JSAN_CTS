@@ -54,6 +54,10 @@ export function apiPatch<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
 }
 
+export function apiDelete<T>(path: string): Promise<T> {
+  return request<T>(path, { method: "DELETE" });
+}
+
 /** Field name must match `FileInterceptor("file")` server-side. */
 export function apiUpload<T>(path: string, file: File): Promise<T> {
   const formData = new FormData();
