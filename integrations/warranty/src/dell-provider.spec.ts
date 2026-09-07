@@ -93,7 +93,10 @@ describe("DellWarrantyProvider", () => {
   });
 
   it("throws WarrantyProviderError carrying the status on a non-2xx response", async () => {
-    const p = new DellWarrantyProvider({ apiKey: "k", fetchImpl: fakeFetch(429, "slow down").impl });
+    const p = new DellWarrantyProvider({
+      apiKey: "k",
+      fetchImpl: fakeFetch(429, "slow down").impl,
+    });
     await expect(p.lookup({ vendor: "DELL", serialOrServiceTag: "T" })).rejects.toMatchObject({
       name: "WarrantyProviderError",
       provider: "dell-techdirect",

@@ -71,8 +71,12 @@ function makeScanner(
     },
   } as unknown as PrismaService;
 
-  const auditService = { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuditService;
-  const publisher = { enqueue: jest.fn().mockResolvedValue(undefined) } as unknown as SlaTimersPublisher;
+  const auditService = {
+    record: jest.fn().mockResolvedValue(undefined),
+  } as unknown as AuditService;
+  const publisher = {
+    enqueue: jest.fn().mockResolvedValue(undefined),
+  } as unknown as SlaTimersPublisher;
 
   return {
     scanner: new SlaEscalationScanner(prisma, auditService, publisher),
@@ -142,9 +146,11 @@ describe("SlaEscalationScanner.scan", () => {
   it("does not re-fire a milestone already in firedMilestones", async () => {
     jest.useFakeTimers().setSystemTime(NOW);
     const { scanner, tx, publisher } = makeScanner({
-      findMany: jest
-        .fn()
-        .mockResolvedValue([baseInstance({ firedMilestones: ["RESOLVE_50", "RESOLVE_75", "RESOLVE_90", "RESOLVE_BREACH"] })]),
+      findMany: jest.fn().mockResolvedValue([
+        baseInstance({
+          firedMilestones: ["RESOLVE_50", "RESOLVE_75", "RESOLVE_90", "RESOLVE_BREACH"],
+        }),
+      ]),
     });
 
     await scanner.scan();

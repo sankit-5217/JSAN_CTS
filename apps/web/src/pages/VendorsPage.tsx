@@ -278,11 +278,7 @@ export function VendorsPage() {
                 }
                 label="RMA required"
               />
-              <Button
-                variant="contained"
-                disabled={!caseNo || !caseVendorId}
-                onClick={openCase}
-              >
+              <Button variant="contained" disabled={!caseNo || !caseVendorId} onClick={openCase}>
                 Open case
               </Button>
             </Stack>

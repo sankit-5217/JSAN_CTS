@@ -52,9 +52,7 @@ export function normalizeDellWarranty(
     status: latestMs >= now.getTime() ? "ACTIVE" : "EXPIRED",
     provider: PROVIDER_NAME,
     expiresAt: new Date(latestMs).toISOString(),
-    ...(latest.serviceLevelDescription
-      ? { coverageLevel: latest.serviceLevelDescription }
-      : {}),
+    ...(latest.serviceLevelDescription ? { coverageLevel: latest.serviceLevelDescription } : {}),
   };
 }
 

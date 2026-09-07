@@ -229,8 +229,10 @@ export class AlertsService {
     // window right now, is expected to be noisy. `autoTicketSuppressed` decides
     // whether that also silences correlation + the NOC page, or just labels it.
     const suppressedByMaintenance =
-      ci?.lifecycleStatus === "MAINTENANCE" || (ci ? await this.isCiUnderMaintenance(ci.id) : false);
-    const autoTicketSuppressed = suppressedByMaintenance && rule.suppressAutoTicketDuringMaintenance;
+      ci?.lifecycleStatus === "MAINTENANCE" ||
+      (ci ? await this.isCiUnderMaintenance(ci.id) : false);
+    const autoTicketSuppressed =
+      suppressedByMaintenance && rule.suppressAutoTicketDuringMaintenance;
 
     if (!deduped && rule.pagingSeverities.includes(dto.severity) && !autoTicketSuppressed) {
       await this.notifyNocOfCriticalAlert(alertId, dto);
@@ -316,9 +318,7 @@ export class AlertsService {
         where: { id: alertId },
         data: { correlatedIncidentId: incident.id },
       });
-      this.logger.log(
-        `alert ${alertId} correlated to open incident ${incident.incidentNo}`,
-      );
+      this.logger.log(`alert ${alertId} correlated to open incident ${incident.incidentNo}`);
       return incident.id;
     } catch (err) {
       this.logger.warn(

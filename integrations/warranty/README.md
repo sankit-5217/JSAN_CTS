@@ -26,11 +26,11 @@ Providers are **read-only** — one outbound lookup, no writes, no side effects
 
 ## Providers
 
-| Provider | Enabled when | Notes |
-| --- | --- | --- |
-| `DellWarrantyProvider` | `DELL_WARRANTY_API_KEY` set | Hits the Dell asset-entitlements endpoint. The OAuth2 client-credentials exchange that mints the token is the caller's responsibility — inject the resulting bearer as `apiKey`. |
-| `HpeWarrantyProvider` | `HPE_WARRANTY_API_KEY` set | Hits the HPE product-warranty lookup. |
-| `StubWarrantyProvider` | `WARRANTY_STUB=1`, or any non-`production` `NODE_ENV` | Deterministic pseudo-data derived from the service tag. **Never** used in production — an un-mapped vendor is reported as `skipped`, not fabricated. |
+| Provider               | Enabled when                                          | Notes                                                                                                                                                                            |
+| ---------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DellWarrantyProvider` | `DELL_WARRANTY_API_KEY` set                           | Hits the Dell asset-entitlements endpoint. The OAuth2 client-credentials exchange that mints the token is the caller's responsibility — inject the resulting bearer as `apiKey`. |
+| `HpeWarrantyProvider`  | `HPE_WARRANTY_API_KEY` set                            | Hits the HPE product-warranty lookup.                                                                                                                                            |
+| `StubWarrantyProvider` | `WARRANTY_STUB=1`, or any non-`production` `NODE_ENV` | Deterministic pseudo-data derived from the service tag. **Never** used in production — an un-mapped vendor is reported as `skipped`, not fabricated.                             |
 
 `createWarrantyProviders(env)` returns the ordered list (real providers first,
 stub last as a catch-all). `resolveWarrantyProvider(list, vendor)` returns the

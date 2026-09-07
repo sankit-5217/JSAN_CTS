@@ -242,11 +242,7 @@ export function ChangesPage() {
                 value={form.affectedCiIds}
                 onChange={(e) => set("affectedCiIds", e.target.value)}
               />
-              <Button
-                variant="contained"
-                disabled={!form.reason || !windowSet}
-                onClick={create}
-              >
+              <Button variant="contained" disabled={!form.reason || !windowSet} onClick={create}>
                 Raise change
               </Button>
             </Stack>

@@ -126,9 +126,7 @@ function snapToWindow(
       }
       // Past today's window — fall through to try tomorrow.
     }
-    cursor = cursor
-      .plus({ days: 1 })
-      .set({ hour: 0, minute: 0, second: 0, millisecond: 0 });
+    cursor = cursor.plus({ days: 1 }).set({ hour: 0, minute: 0, second: 0, millisecond: 0 });
   }
   throw new Error("Could not find a business window within a year — check calendar configuration");
 }

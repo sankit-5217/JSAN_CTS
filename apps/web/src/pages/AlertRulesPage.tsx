@@ -270,7 +270,9 @@ export function AlertRulesPage() {
                     </TableCell>
                     <TableCell>{r.pagingSeverities.join(", ") || "—"}</TableCell>
                     <TableCell>{r.autoCorrelateIncidents ? "yes" : "no"}</TableCell>
-                    <TableCell>{r.suppressAutoTicketDuringMaintenance ? "suppress" : "label"}</TableCell>
+                    <TableCell>
+                      {r.suppressAutoTicketDuringMaintenance ? "suppress" : "label"}
+                    </TableCell>
                     <TableCell>
                       <Chip
                         size="small"

@@ -200,12 +200,9 @@ describe("IncidentsService.update", () => {
         .fn()
         .mockResolvedValue(baseIncident({ siteId: "site-a", priority: Priority.P3 })),
     });
-    await service.update(
-      "incident-1",
-      { priority: Priority.P1 },
-      engineer,
-      { actorId: engineer.id },
-    );
+    await service.update("incident-1", { priority: Priority.P1 }, engineer, {
+      actorId: engineer.id,
+    });
     expect(slaService.onPriorityChanged).toHaveBeenCalledWith(
       tx,
       { id: "incident-1", siteId: "site-a" },
@@ -216,16 +213,11 @@ describe("IncidentsService.update", () => {
 
   it("does not call onPriorityChanged when priority is left unchanged", async () => {
     const { service, slaService } = makeService({
-      incidentFindUnique: jest
-        .fn()
-        .mockResolvedValue(baseIncident({ priority: Priority.P3 })),
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ priority: Priority.P3 })),
     });
-    await service.update(
-      "incident-1",
-      { shortDescription: "Updated text" },
-      engineer,
-      { actorId: engineer.id },
-    );
+    await service.update("incident-1", { shortDescription: "Updated text" }, engineer, {
+      actorId: engineer.id,
+    });
     expect(slaService.onPriorityChanged).not.toHaveBeenCalled();
   });
 });
@@ -286,7 +278,9 @@ describe("IncidentsService.findAll", () => {
       null,
     );
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ status: IncidentStatus.RESOLVED }) }),
+      expect.objectContaining({
+        where: expect.objectContaining({ status: IncidentStatus.RESOLVED }),
+      }),
     );
   });
 });
@@ -504,7 +498,9 @@ describe("IncidentsService.createTransition", () => {
     const { service, tx, slaService } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ status: IncidentStatus.RESOLVED, ownerUserId: engineer.id })),
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.RESOLVED, ownerUserId: engineer.id }),
+        ),
     });
     await service.createTransition(
       "incident-1",
@@ -639,7 +635,11 @@ describe("IncidentsService alert correlation", () => {
     const arg = (prisma.incident.findFirst as jest.Mock).mock.calls[0][0];
     expect(arg.where.ciId).toBe("ci-1");
     expect(arg.where.status.in).toEqual(
-      expect.arrayContaining([IncidentStatus.NEW, IncidentStatus.IN_PROGRESS, IncidentStatus.REOPENED]),
+      expect.arrayContaining([
+        IncidentStatus.NEW,
+        IncidentStatus.IN_PROGRESS,
+        IncidentStatus.REOPENED,
+      ]),
     );
     expect(arg.where.status.in).not.toContain(IncidentStatus.RESOLVED);
     expect(arg.where.status.in).not.toContain(IncidentStatus.CLOSED);

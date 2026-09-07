@@ -189,8 +189,9 @@ export function ChangeDetailPage() {
                   variant="contained"
                   disabled={!approverId}
                   onClick={() =>
-                    call(() => apiPost(`/changes/${id}/approve`, { approverId }), () =>
-                      setApproverId(""),
+                    call(
+                      () => apiPost(`/changes/${id}/approve`, { approverId }),
+                      () => setApproverId(""),
                     )
                   }
                 >
@@ -216,7 +217,10 @@ export function ChangeDetailPage() {
                 variant="contained"
                 disabled={!outcome}
                 onClick={() =>
-                  call(() => apiPatch(`/changes/${id}`, { outcome }), () => setOutcome(""))
+                  call(
+                    () => apiPatch(`/changes/${id}`, { outcome }),
+                    () => setOutcome(""),
+                  )
                 }
               >
                 Record outcome

@@ -39,7 +39,12 @@ function makeService(
 }
 
 function ci(overrides: Partial<CiFixture> = {}): CiFixture {
-  return { siteId: "site-a", ciType: CiType.SERVER, healthSnapshot: { overallHealth: "HEALTHY" }, ...overrides };
+  return {
+    siteId: "site-a",
+    ciType: CiType.SERVER,
+    healthSnapshot: { overallHealth: "HEALTHY" },
+    ...overrides,
+  };
 }
 
 function incident(overrides: Partial<IncidentFixture> = {}): IncidentFixture {
@@ -72,7 +77,9 @@ describe("ReportsService.getCommandCenterSummary — health rollup", () => {
     const result = await service.getCommandCenterSummary(null);
     expect(result.siteCards[0].health).toBe("UNKNOWN");
     // UNKNOWN counts toward none of the three headline buckets.
-    expect(result.counters.sitesHealthy + result.counters.sitesWarning + result.counters.sitesCritical).toBe(0);
+    expect(
+      result.counters.sitesHealthy + result.counters.sitesWarning + result.counters.sitesCritical,
+    ).toBe(0);
   });
 
   it("a site with no CIs at all is UNKNOWN, not silently HEALTHY", async () => {
@@ -185,6 +192,8 @@ describe("ReportsService.getCommandCenterSummary — site scoping", () => {
   it("applies no site filter for an unrestricted (null) caller", async () => {
     const { service, prisma } = makeService();
     await service.getCommandCenterSummary(null);
-    expect(prisma.site.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: undefined }));
+    expect(prisma.site.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: undefined }),
+    );
   });
 });

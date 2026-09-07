@@ -35,9 +35,7 @@ export interface WarrantyProviderEnv {
 export function createWarrantyProviders(env: WarrantyProviderEnv): WarrantyProvider[] {
   const providers: WarrantyProvider[] = [];
   if (env.dellApiKey) {
-    providers.push(
-      new DellWarrantyProvider({ apiKey: env.dellApiKey, baseUrl: env.dellBaseUrl }),
-    );
+    providers.push(new DellWarrantyProvider({ apiKey: env.dellApiKey, baseUrl: env.dellBaseUrl }));
   }
   if (env.hpeApiKey) {
     providers.push(new HpeWarrantyProvider({ apiKey: env.hpeApiKey, baseUrl: env.hpeBaseUrl }));

@@ -31,13 +31,14 @@ async function main() {
     const warrantyQueue = createWarrantySyncQueue();
     const warrantyWorker = createWarrantySyncWorker(client);
     await scheduleWarrantySync(warrantyQueue);
-    closers.push(() => warrantyWorker.close(), () => warrantyQueue.close());
+    closers.push(
+      () => warrantyWorker.close(),
+      () => warrantyQueue.close(),
+    );
     active.push("warranty-sync");
   } else {
     // eslint-disable-next-line no-console
-    console.log(
-      "warranty-sync disabled: set OPSDESK_API_URL and OPSDESK_SERVICE_TOKEN to enable",
-    );
+    console.log("warranty-sync disabled: set OPSDESK_API_URL and OPSDESK_SERVICE_TOKEN to enable");
   }
 
   // eslint-disable-next-line no-console

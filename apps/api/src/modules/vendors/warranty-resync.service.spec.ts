@@ -1,7 +1,4 @@
-import type {
-  WarrantyLookupResult,
-  WarrantyProvider,
-} from "@cts-dc-opsdesk/warranty-adapter";
+import type { WarrantyLookupResult, WarrantyProvider } from "@cts-dc-opsdesk/warranty-adapter";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { WarrantyResyncService } from "./warranty-resync.service";

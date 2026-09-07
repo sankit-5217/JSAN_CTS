@@ -4,9 +4,11 @@ const NOW = new Date("2026-09-04T12:00:00.000Z");
 
 describe("deriveBcpReadiness", () => {
   it("is UNTESTED when there is no test on record", () => {
-    expect(
-      deriveBcpReadiness({ lastTestedAt: null, nextTestDueAt: null }, NOW),
-    ).toEqual({ readiness: "UNTESTED", neverTested: true, testOverdue: false });
+    expect(deriveBcpReadiness({ lastTestedAt: null, nextTestDueAt: null }, NOW)).toEqual({
+      readiness: "UNTESTED",
+      neverTested: true,
+      testOverdue: false,
+    });
   });
 
   it("stays UNTESTED even if a next test date has passed", () => {

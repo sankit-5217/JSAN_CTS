@@ -67,10 +67,7 @@ describe("BcpService", () => {
   beforeEach(() => {
     prisma = createPrismaMock();
     audit = { record: jest.fn() };
-    service = new BcpService(
-      prisma as unknown as PrismaService,
-      audit as unknown as AuditService,
-    );
+    service = new BcpService(prisma as unknown as PrismaService, audit as unknown as AuditService);
   });
 
   describe("create", () => {

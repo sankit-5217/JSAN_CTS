@@ -115,9 +115,14 @@ function humanDuration(ms: number): string {
 }
 
 /** Load-time snapshot, not a live-ticking clock (plan Decision 5). */
-function slaCountdown(dueAt: string | null, stoppedAt: string | null, pausedAt: string | null): string {
+function slaCountdown(
+  dueAt: string | null,
+  stoppedAt: string | null,
+  pausedAt: string | null,
+): string {
   if (!dueAt) return "—";
-  if (stoppedAt) return `stopped (${humanDuration(Date.now() - new Date(stoppedAt).getTime())} ago)`;
+  if (stoppedAt)
+    return `stopped (${humanDuration(Date.now() - new Date(stoppedAt).getTime())} ago)`;
   if (pausedAt) return "paused";
   const diffMs = new Date(dueAt).getTime() - Date.now();
   return diffMs < 0 ? `breached ${humanDuration(diffMs)} ago` : `due in ${humanDuration(diffMs)}`;
@@ -208,7 +213,10 @@ export function IncidentDetailPage() {
     if (!id || !commentBody) return;
     setActionError(null);
     try {
-      await apiPost(`/incidents/${id}/comments`, { body: commentBody, isInternal: commentInternal });
+      await apiPost(`/incidents/${id}/comments`, {
+        body: commentBody,
+        isInternal: commentInternal,
+      });
       setCommentBody("");
       refetch();
     } catch (err) {
@@ -285,7 +293,9 @@ export function IncidentDetailPage() {
 
   if (error) {
     return (
-      <Alert severity="error">Could not load incident {id}: {error}</Alert>
+      <Alert severity="error">
+        Could not load incident {id}: {error}
+      </Alert>
     );
   }
   if (!incident) {
@@ -499,7 +509,11 @@ export function IncidentDetailPage() {
                         value={editReason}
                         onChange={(e) => setEditReason(e.target.value)}
                       />
-                      <Button size="small" disabled={!editReason} onClick={() => submitCorrection(w.id)}>
+                      <Button
+                        size="small"
+                        disabled={!editReason}
+                        onClick={() => submitCorrection(w.id)}
+                      >
                         Save
                       </Button>
                       <Button size="small" onClick={() => setCorrectingId(null)}>
@@ -557,7 +571,9 @@ export function IncidentDetailPage() {
                 onChange={(e) => setWorklogNotes(e.target.value)}
               />
               <FormControlLabel
-                control={<Checkbox checked={billable} onChange={(e) => setBillable(e.target.checked)} />}
+                control={
+                  <Checkbox checked={billable} onChange={(e) => setBillable(e.target.checked)} />
+                }
                 label="Billable"
               />
               <Button variant="contained" disabled={!startedAt} onClick={submitWorklog}>

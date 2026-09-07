@@ -79,7 +79,9 @@ export class UpdateBcpPlanDto {
   @IsBoolean()
   isActive?: boolean;
 
-  @ApiPropertyOptional({ description: "ISO-8601 UTC; adjust the next test date without logging a test." })
+  @ApiPropertyOptional({
+    description: "ISO-8601 UTC; adjust the next test date without logging a test.",
+  })
   @IsOptional()
   @IsISO8601()
   nextTestDueAt?: string;
