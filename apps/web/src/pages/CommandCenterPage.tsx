@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import { Alert, Card, CardActionArea, CardContent, Grid, Typography } from "@mui/material";
+import {
+  Alert,
+  Box,
+  Card,
+  CardActionArea,
+  CardContent,
+  Grid,
+  Stack,
+  Typography,
+} from "@mui/material";
+import SensorsOutlinedIcon from "@mui/icons-material/SensorsOutlined";
+import HubOutlinedIcon from "@mui/icons-material/HubOutlined";
+import AssignmentTurnedInOutlinedIcon from "@mui/icons-material/AssignmentTurnedInOutlined";
+import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
 import { BarChart } from "@mui/x-charts/BarChart";
 import { PieChart } from "@mui/x-charts/PieChart";
 import { apiGet } from "../api/client";
@@ -45,6 +58,202 @@ const HEALTH_COLOR: Record<HealthLevel, string> = {
   CRITICAL: "#d32f2f",
   UNKNOWN: "#757575",
 };
+
+const FLOW_STEPS = [
+  {
+    label: "Observe",
+    eyebrow: "01 / SITE EDGE",
+    title: "See the estate without exposing it",
+    description:
+      "Site collectors read Redfish, SNMP and monitoring platforms, then send normalized health signals outbound over TLS.",
+    outputs: ["CMDB health state", "Normalized alerts", "Evidence links"],
+    color: "#2f8f83",
+    icon: SensorsOutlinedIcon,
+  },
+  {
+    label: "Correlate",
+    eyebrow: "02 / SIGNAL CONTROL",
+    title: "Turn noisy signals into one operational truth",
+    description:
+      "Fingerprinting and correlation deduplicate repeated events and connect an alert to the affected site, CI and component.",
+    outputs: ["Alert fingerprint", "Impact context", "Incident candidate"],
+    color: "#d28b35",
+    icon: HubOutlinedIcon,
+  },
+  {
+    label: "Respond",
+    eyebrow: "03 / SERVICE DESK",
+    title: "Route work through governed state changes",
+    description:
+      "The incident service validates transitions, ownership, required fields and SLA effects before anything changes state.",
+    outputs: ["Assigned owner", "SLA timer", "Audit event"],
+    color: "#c9574c",
+    icon: AssignmentTurnedInOutlinedIcon,
+  },
+  {
+    label: "Learn",
+    eyebrow: "04 / CONTROL ROOM",
+    title: "Close the loop with durable evidence",
+    description:
+      "Worklogs, vendor updates, changes and append-only audit records become the source for reports, risk and problem management.",
+    outputs: ["Operational report", "Problem signal", "Knowledge candidate"],
+    color: "#536da7",
+    icon: InsightsOutlinedIcon,
+  },
+] as const;
+
+function OperationsFlow() {
+  const [activeStep, setActiveStep] = useState(0);
+  const step = FLOW_STEPS[activeStep];
+
+  return (
+    <Card
+      sx={{
+        mb: 4,
+        overflow: "hidden",
+        border: "1px solid rgba(15, 61, 99, 0.12)",
+        background: "linear-gradient(120deg, #102f4a 0%, #174f68 58%, #236b6b 100%)",
+        color: "#f8fbfa",
+      }}
+    >
+      <CardContent sx={{ p: { xs: 2.5, md: 4 }, "&:last-child": { pb: { xs: 2.5, md: 4 } } }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={3} justifyContent="space-between">
+          <Box sx={{ maxWidth: 520 }}>
+            <Typography
+              variant="overline"
+              sx={{ color: "#9bd6c9", letterSpacing: "0.14em", fontWeight: 700 }}
+            >
+              THE OPSDESK LOOP
+            </Typography>
+            <Typography variant="h4" sx={{ mt: 0.5, mb: 1, fontWeight: 700 }}>
+              From signal to decision
+            </Typography>
+            <Typography sx={{ color: "rgba(248,251,250,0.76)", maxWidth: 470 }}>
+              One governed path for the data-center operation: observe the estate, correlate impact,
+              resolve service, and preserve what the team learned.
+            </Typography>
+          </Box>
+          <Box sx={{ minWidth: { md: 280 }, alignSelf: { md: "flex-end" } }}>
+            <Typography variant="caption" sx={{ color: "rgba(248,251,250,0.62)" }}>
+              CURRENT STAGE
+            </Typography>
+            <Typography variant="h6" sx={{ color: "#f4c979", mt: 0.25 }}>
+              {step.label} / {step.title}
+            </Typography>
+          </Box>
+        </Stack>
+
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", sm: "repeat(4, 1fr)" },
+            gap: { xs: 1, sm: 0 },
+            mt: 4,
+            mb: 3,
+          }}
+        >
+          {FLOW_STEPS.map((flowStep, index) => {
+            const Icon = flowStep.icon;
+            const isActive = index === activeStep;
+            return (
+              <Box key={flowStep.label} sx={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <Box
+                  component="button"
+                  type="button"
+                  onClick={() => setActiveStep(index)}
+                  aria-label={`Show ${flowStep.label} stage`}
+                  sx={{
+                    position: "relative",
+                    zIndex: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 1.25,
+                    width: "100%",
+                    border: 0,
+                    borderRadius: 1,
+                    p: 1,
+                    color: "inherit",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    backgroundColor: isActive ? "rgba(255,255,255,0.14)" : "transparent",
+                    transition: "background-color 160ms ease, transform 160ms ease",
+                    "&:hover": { backgroundColor: "rgba(255,255,255,0.1)", transform: "translateY(-2px)" },
+                  }}
+                >
+                  <Box
+                    sx={{
+                      display: "grid",
+                      placeItems: "center",
+                      width: 38,
+                      height: 38,
+                      borderRadius: "50%",
+                      flexShrink: 0,
+                      color: flowStep.color,
+                      backgroundColor: "#f8fbfa",
+                    }}
+                  >
+                    <Icon fontSize="small" />
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" sx={{ display: "block", color: "rgba(248,251,250,0.58)" }}>
+                      0{index + 1}
+                    </Typography>
+                    <Typography sx={{ fontWeight: 700 }}>{flowStep.label}</Typography>
+                  </Box>
+                </Box>
+                {index < FLOW_STEPS.length - 1 && (
+                  <Box
+                    sx={{
+                      display: { xs: "none", sm: "block" },
+                      position: "absolute",
+                      left: "calc(50% + 26px)",
+                      right: "-50%",
+                      top: 29,
+                      height: 1,
+                      backgroundColor: "rgba(248,251,250,0.22)",
+                    }}
+                  />
+                )}
+              </Box>
+            );
+          })}
+        </Box>
+
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", md: "1.25fr 1fr" },
+            gap: 3,
+            p: { xs: 2, md: 2.5 },
+            borderRadius: 1,
+            backgroundColor: "rgba(5, 25, 39, 0.28)",
+          }}
+        >
+          <Box>
+            <Typography variant="overline" sx={{ color: step.color, fontWeight: 700, letterSpacing: "0.12em" }}>
+              {step.eyebrow}
+            </Typography>
+            <Typography variant="h6" sx={{ mb: 0.75 }}>{step.title}</Typography>
+            <Typography sx={{ color: "rgba(248,251,250,0.72)" }}>{step.description}</Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" sx={{ color: "rgba(248,251,250,0.58)" }}>
+              WHAT MOVES FORWARD
+            </Typography>
+            <Stack spacing={1} sx={{ mt: 1 }}>
+              {step.outputs.map((output) => (
+                <Box key={output} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Box sx={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: step.color }} />
+                  <Typography variant="body2">{output}</Typography>
+                </Box>
+              ))}
+            </Stack>
+          </Box>
+        </Box>
+      </CardContent>
+    </Card>
+  );
+}
 
 /** A plain info tile (not clickable — see the module doc comment below for
  * which counters don't have a clean filtered drill-down yet). */
@@ -116,9 +325,8 @@ export function CommandCenterPage() {
 
   return (
     <>
-      <Typography variant="h4" gutterBottom>
-        Command Center
-      </Typography>
+      <Typography variant="h4" gutterBottom>Command Center</Typography>
+      <OperationsFlow />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
