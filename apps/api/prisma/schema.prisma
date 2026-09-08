@@ -156,11 +156,12 @@ model User {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  incidentsOwned  Incident[]      @relation("IncidentOwner")
-  worklogs        Worklog[]
-  auditEvents     AuditEvent[]
-  siteAccess      UserSiteAccess[]
-  attachments     Attachment[]
+  incidentsOwned     Incident[]      @relation("IncidentOwner")
+  worklogs           Worklog[]
+  auditEvents        AuditEvent[]
+  siteAccess         UserSiteAccess[]
+  attachments        Attachment[]
+  deletedAttachments Attachment[]    @relation("AttachmentDeletedBy")
 
   @@map("users")
 }
@@ -392,7 +393,7 @@ model Incident {
 model IncidentEvent {
   id         String   @id @default(uuid())
   incidentId String   @map("incident_id")
-  eventType  String   @map("event_type") // STATUS_CHANGE / OWNER_CHANGE / SLA_EVENT / COMMENT / WORKLOG / VENDOR_UPDATE / ATTACHMENT
+  eventType  String   @map("event_type") // STATUS_CHANGE / OWNER_CHANGE / SLA_EVENT / COMMENT / WORKLOG / VENDOR_UPDATE / ATTACHMENT / ATTACHMENT_REMOVED
   actorId    String?  @map("actor_id")
   payload    Json
   createdAt  DateTime @default(now()) @map("created_at")
@@ -769,17 +770,24 @@ model AuditEvent {
 }
 
 model Attachment {
-  id          String   @id @default(uuid())
-  entityType  String   @map("entity_type") // INCIDENT / VENDOR_CASE / CHANGE / ...
-  entityId    String   @map("entity_id")
-  objectKey   String   @map("object_key") // S3/MinIO key
-  contentType String   @map("content_type")
-  sizeBytes   Int      @map("size_bytes")
-  sha256      String
-  uploadedById String? @map("uploaded_by_id")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id           String    @id @default(uuid())
+  entityType   String    @map("entity_type") // INCIDENT / VENDOR_CASE / CHANGE / ...
+  entityId     String    @map("entity_id")
+  objectKey    String    @map("object_key") // S3/MinIO key
+  contentType  String    @map("content_type")
+  sizeBytes    Int       @map("size_bytes")
+  sha256       String
+  uploadedById String?   @map("uploaded_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  // Soft delete only (spec's audit-everything rule) -- the row and the S3
+  // object both stay; a removed attachment just stops appearing in the list
+  // and can no longer be downloaded, same as this codebase's other
+  // append-only records (worklogs correct, they don't get edited in place).
+  deletedAt    DateTime? @map("deleted_at")
+  deletedById  String?   @map("deleted_by_id")
 
   uploadedBy User? @relation(fields: [uploadedById], references: [id])
+  deletedBy  User? @relation("AttachmentDeletedBy", fields: [deletedById], references: [id])
 
   @@index([entityType, entityId])
   @@map("attachments")

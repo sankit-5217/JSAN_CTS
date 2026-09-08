@@ -624,7 +624,7 @@ export class IncidentsService {
   async listAttachments(incidentId: string, user: AuthenticatedUser): Promise<Attachment[]> {
     await this.findOneScoped(incidentId, user);
     return this.prisma.attachment.findMany({
-      where: { entityType: "INCIDENT", entityId: incidentId },
+      where: { entityType: "INCIDENT", entityId: incidentId, deletedAt: null },
       orderBy: { createdAt: "asc" },
     });
   }
@@ -636,11 +636,69 @@ export class IncidentsService {
     user: AuthenticatedUser,
   ): Promise<{ url: string }> {
     await this.findOneScoped(incidentId, user);
-    const attachment = await this.prisma.attachment.findUnique({ where: { id: attachmentId } });
-    if (!attachment || attachment.entityType !== "INCIDENT" || attachment.entityId !== incidentId) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found on this incident`);
-    }
+    const attachment = await this.findLiveAttachment(incidentId, attachmentId);
     const url = await this.storageService.getSignedDownloadUrl(attachment.objectKey);
     return { url };
+  }
+
+  private async findLiveAttachment(incidentId: string, attachmentId: string): Promise<Attachment> {
+    const attachment = await this.prisma.attachment.findUnique({ where: { id: attachmentId } });
+    if (
+      !attachment ||
+      attachment.entityType !== "INCIDENT" ||
+      attachment.entityId !== incidentId ||
+      attachment.deletedAt !== null
+    ) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found on this incident`);
+    }
+    return attachment;
+  }
+
+  /**
+   * Soft delete only -- the row and the S3 object both stay (spec's
+   * audit-everything rule: a removed attachment must still be
+   * reconstructable, not gone without a trace). Just stops appearing in
+   * listAttachments and becomes undownloadable.
+   */
+  async deleteAttachment(
+    incidentId: string,
+    attachmentId: string,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ): Promise<void> {
+    await this.findOneScoped(incidentId, user);
+    const before = await this.findLiveAttachment(incidentId, attachmentId);
+
+    await this.prisma.$transaction(async (tx) => {
+      const after = await tx.attachment.update({
+        where: { id: attachmentId },
+        data: { deletedAt: new Date(), deletedById: actor.actorId },
+      });
+
+      await tx.incidentEvent.create({
+        data: {
+          incidentId,
+          eventType: "ATTACHMENT_REMOVED",
+          actorId: actor.actorId,
+          payload: {
+            attachmentId,
+            contentType: before.contentType,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Attachment",
+          entityId: attachmentId,
+          action: "DELETE",
+          before,
+          after,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+    });
   }
 }

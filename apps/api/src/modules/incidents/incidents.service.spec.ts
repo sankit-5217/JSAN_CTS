@@ -103,6 +103,9 @@ function makeService(
       create: jest
         .fn()
         .mockImplementation(({ data }) => Promise.resolve({ id: "attachment-1", ...data })),
+      update: jest
+        .fn()
+        .mockImplementation(({ where, data }) => Promise.resolve({ id: where.id, ...data })),
     },
     $queryRaw: jest.fn().mockResolvedValue([{ nextval: BigInt(1) }]),
   };
@@ -609,10 +612,88 @@ describe("IncidentsService attachments", () => {
       entityType: "INCIDENT",
       entityId: "incident-1",
       objectKey: "incidents/incident-1/foo.txt",
+      deletedAt: null,
     });
 
     const result = await service.getAttachmentDownloadUrl("incident-1", "attachment-1", engineer);
     expect(result).toEqual({ url: "https://signed.example/download" });
+  });
+
+  it("deleteAttachment soft-deletes, writes the timeline event + audit record, and never touches storage", async () => {
+    const { service, prisma, tx, auditService, storageService } = makeService();
+    (prisma.attachment.findUnique as jest.Mock).mockResolvedValue({
+      id: "attachment-1",
+      entityType: "INCIDENT",
+      entityId: "incident-1",
+      objectKey: "incidents/incident-1/foo.txt",
+      contentType: "text/plain",
+      deletedAt: null,
+    });
+
+    await service.deleteAttachment("incident-1", "attachment-1", { actorId: "user-1" }, engineer);
+
+    expect(tx.attachment.update).toHaveBeenCalledWith({
+      where: { id: "attachment-1" },
+      data: { deletedAt: expect.any(Date), deletedById: "user-1" },
+    });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          incidentId: "incident-1",
+          eventType: "ATTACHMENT_REMOVED",
+        }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityType: "Attachment",
+        entityId: "attachment-1",
+        action: "DELETE",
+      }),
+      tx,
+    );
+    expect(storageService.putObject).not.toHaveBeenCalled();
+  });
+
+  it("deleteAttachment 404s an already-deleted attachment (can't remove it twice)", async () => {
+    const { service, prisma } = makeService();
+    (prisma.attachment.findUnique as jest.Mock).mockResolvedValue({
+      id: "attachment-1",
+      entityType: "INCIDENT",
+      entityId: "incident-1",
+      objectKey: "incidents/incident-1/foo.txt",
+      deletedAt: new Date("2026-09-01T00:00:00Z"),
+    });
+
+    await expect(
+      service.deleteAttachment("incident-1", "attachment-1", { actorId: "user-1" }, engineer),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("getAttachmentDownloadUrl 404s a soft-deleted attachment", async () => {
+    const { service, prisma } = makeService();
+    (prisma.attachment.findUnique as jest.Mock).mockResolvedValue({
+      id: "attachment-1",
+      entityType: "INCIDENT",
+      entityId: "incident-1",
+      objectKey: "incidents/incident-1/foo.txt",
+      deletedAt: new Date("2026-09-01T00:00:00Z"),
+    });
+
+    await expect(
+      service.getAttachmentDownloadUrl("incident-1", "attachment-1", engineer),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("listAttachments excludes soft-deleted rows", async () => {
+    const { service, prisma } = makeService();
+    await service.listAttachments("incident-1", engineer);
+
+    expect(prisma.attachment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { entityType: "INCIDENT", entityId: "incident-1", deletedAt: null },
+      }),
+    );
   });
 });
 
