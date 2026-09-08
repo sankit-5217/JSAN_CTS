@@ -1,5 +1,18 @@
 import { Navigate, Outlet, Route, Routes, Link, useLocation } from "react-router-dom";
-import { AppBar, Box, Toolbar, Typography, Button } from "@mui/material";
+import {
+  AppBar,
+  Box,
+  Button,
+  Chip,
+  Divider,
+  Drawer,
+  List,
+  ListItemButton,
+  ListItemText,
+  ListSubheader,
+  Toolbar,
+  Typography,
+} from "@mui/material";
 import { clearStoredToken, getStoredToken } from "./api/client";
 import { decodeJwtPayload } from "./api/jwt";
 import { AlertDetailPage } from "./pages/AlertDetailPage";
@@ -27,57 +40,112 @@ import { SlaPoliciesPage } from "./pages/SlaPoliciesPage";
 import { VendorCaseDetailPage } from "./pages/VendorCaseDetailPage";
 import { VendorsPage } from "./pages/VendorsPage";
 
-function TopNav() {
+const DRAWER_WIDTH = 232;
+
+// Grouped by module ownership (CLAUDE.md's Dev A/Dev B split) so a user
+// finds a page where the system's own mental model puts it, not in one
+// long undifferentiated list — the "Command Grid" layout direction.
+const NAV_GROUPS: { label: string; items: { label: string; to: string }[] }[] = [
+  {
+    label: "Ticketing core",
+    items: [
+      { label: "Command Center", to: "/" },
+      { label: "Incidents", to: "/incidents" },
+      { label: "CMDB", to: "/cis" },
+      { label: "Sites", to: "/sites" },
+      { label: "SLA policies", to: "/sla-policies" },
+    ],
+  },
+  {
+    label: "Monitoring",
+    items: [
+      { label: "Alerts", to: "/alerts" },
+      { label: "Alert rules", to: "/alert-rules" },
+    ],
+  },
+  {
+    label: "Governance",
+    items: [
+      { label: "Changes", to: "/changes" },
+      { label: "Problems", to: "/problems" },
+      { label: "Vendors", to: "/vendors" },
+      { label: "Knowledge", to: "/knowledge" },
+      { label: "Risks", to: "/risks" },
+      { label: "BCP plans", to: "/bcp-plans" },
+    ],
+  },
+];
+
+/** Exact match for "/" (else every route would highlight it too); prefix match otherwise. */
+function isActive(pathname: string, to: string): boolean {
+  return to === "/" ? pathname === "/" : pathname.startsWith(to);
+}
+
+function Sidebar() {
+  const location = useLocation();
+  return (
+    <Drawer
+      variant="permanent"
+      sx={{
+        width: DRAWER_WIDTH,
+        flexShrink: 0,
+        "& .MuiDrawer-paper": { width: DRAWER_WIDTH, boxSizing: "border-box" },
+      }}
+    >
+      <Toolbar>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+          OpsDesk
+        </Typography>
+      </Toolbar>
+      <Divider />
+      {NAV_GROUPS.map((group) => (
+        <List
+          key={group.label}
+          dense
+          subheader={
+            <ListSubheader component="div" sx={{ lineHeight: "32px" }}>
+              {group.label}
+            </ListSubheader>
+          }
+        >
+          {group.items.map((item) => (
+            <ListItemButton
+              key={item.to}
+              component={Link}
+              to={item.to}
+              selected={isActive(location.pathname, item.to)}
+            >
+              <ListItemText primary={item.label} />
+            </ListItemButton>
+          ))}
+        </List>
+      ))}
+    </Drawer>
+  );
+}
+
+/** Slim top bar: identity + logout only — page navigation now lives in the sidebar. */
+function TopBar() {
   const token = getStoredToken();
   const user = token ? decodeJwtPayload(token) : null;
 
   return (
-    <AppBar position="static">
-      <Toolbar>
-        <Typography variant="h6" sx={{ flexGrow: 1 }}>
-          JSAN CTS Data Center OpsDesk
-        </Typography>
-        <Button color="inherit" component={Link} to="/">
-          Command Center
-        </Button>
-        <Button color="inherit" component={Link} to="/sites">
-          Sites
-        </Button>
-        <Button color="inherit" component={Link} to="/cis">
-          CMDB
-        </Button>
-        <Button color="inherit" component={Link} to="/incidents">
-          Incidents
-        </Button>
-        <Button color="inherit" component={Link} to="/sla-policies">
-          SLA Policies
-        </Button>
-        <Button color="inherit" component={Link} to="/alerts">
-          Alerts
-        </Button>
-        <Button color="inherit" component={Link} to="/changes">
-          Changes
-        </Button>
-        <Button color="inherit" component={Link} to="/vendors">
-          Vendors
-        </Button>
-        <Button color="inherit" component={Link} to="/problems">
-          Problems
-        </Button>
-        <Button color="inherit" component={Link} to="/knowledge">
-          Knowledge
-        </Button>
-        <Button color="inherit" component={Link} to="/risks">
-          Risks
-        </Button>
+    <AppBar
+      position="static"
+      color="default"
+      elevation={0}
+      sx={{ borderBottom: 1, borderColor: "divider" }}
+    >
+      <Toolbar sx={{ justifyContent: "flex-end", gap: 1.5 }}>
+        {user && <Chip size="small" label={user.role} variant="outlined" />}
         {user && (
-          <Typography variant="body2" sx={{ mx: 2, opacity: 0.85 }}>
-            {user.email} ({user.role})
+          <Typography variant="body2" color="text.secondary">
+            {user.email}
           </Typography>
         )}
         {token && (
           <Button
-            color="inherit"
+            size="small"
             onClick={() => {
               clearStoredToken();
               window.location.assign("/login");
@@ -99,10 +167,13 @@ function AuthenticatedLayout() {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
-      <TopNav />
-      <Box component="main" sx={{ flex: 1, p: 3 }}>
-        <Outlet />
+    <Box sx={{ display: "flex", minHeight: "100vh" }}>
+      <Sidebar />
+      <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <TopBar />
+        <Box component="main" sx={{ flex: 1, p: 3 }}>
+          <Outlet />
+        </Box>
       </Box>
     </Box>
   );
