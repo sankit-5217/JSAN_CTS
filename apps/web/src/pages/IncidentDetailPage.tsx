@@ -17,7 +17,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { apiGet, apiPatch, apiPost, apiUpload } from "../api/client";
+import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "../api/client";
 
 // Literal string unions mirroring the Prisma enums (same CJS/ESM-interop
 // workaround as IncidentsPage.tsx/CisPage.tsx — see IncidentsPage's comment).
@@ -291,6 +291,18 @@ export function IncidentDetailPage() {
     }
   };
 
+  const removeAttachment = async (attachmentId: string) => {
+    if (!id) return;
+    if (!window.confirm("Remove this attachment? It won't be downloadable anymore.")) return;
+    setActionError(null);
+    try {
+      await apiDelete(`/incidents/${id}/attachments/${attachmentId}`);
+      refetch();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   if (error) {
     return (
       <Alert severity="error">
@@ -453,6 +465,9 @@ export function IncidentDetailPage() {
                   </Typography>
                   <Button size="small" onClick={() => downloadAttachment(a.id)}>
                     Download
+                  </Button>
+                  <Button size="small" color="error" onClick={() => removeAttachment(a.id)}>
+                    Remove
                   </Button>
                 </Stack>
               ))}
