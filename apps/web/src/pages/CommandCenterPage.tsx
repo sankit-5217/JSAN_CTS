@@ -156,7 +156,10 @@ function OperationsFlow() {
             const Icon = flowStep.icon;
             const isActive = index === activeStep;
             return (
-              <Box key={flowStep.label} sx={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <Box
+                key={flowStep.label}
+                sx={{ position: "relative", display: "flex", alignItems: "center" }}
+              >
                 <Box
                   component="button"
                   type="button"
@@ -177,7 +180,10 @@ function OperationsFlow() {
                     cursor: "pointer",
                     backgroundColor: isActive ? "rgba(255,255,255,0.14)" : "transparent",
                     transition: "background-color 160ms ease, transform 160ms ease",
-                    "&:hover": { backgroundColor: "rgba(255,255,255,0.1)", transform: "translateY(-2px)" },
+                    "&:hover": {
+                      backgroundColor: "rgba(255,255,255,0.1)",
+                      transform: "translateY(-2px)",
+                    },
                   }}
                 >
                   <Box
@@ -195,7 +201,10 @@ function OperationsFlow() {
                     <Icon fontSize="small" />
                   </Box>
                   <Box>
-                    <Typography variant="caption" sx={{ display: "block", color: "rgba(248,251,250,0.58)" }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ display: "block", color: "rgba(248,251,250,0.58)" }}
+                    >
                       0{index + 1}
                     </Typography>
                     <Typography sx={{ fontWeight: 700 }}>{flowStep.label}</Typography>
@@ -230,10 +239,15 @@ function OperationsFlow() {
           }}
         >
           <Box>
-            <Typography variant="overline" sx={{ color: step.color, fontWeight: 700, letterSpacing: "0.12em" }}>
+            <Typography
+              variant="overline"
+              sx={{ color: step.color, fontWeight: 700, letterSpacing: "0.12em" }}
+            >
               {step.eyebrow}
             </Typography>
-            <Typography variant="h6" sx={{ mb: 0.75 }}>{step.title}</Typography>
+            <Typography variant="h6" sx={{ mb: 0.75 }}>
+              {step.title}
+            </Typography>
             <Typography sx={{ color: "rgba(248,251,250,0.72)" }}>{step.description}</Typography>
           </Box>
           <Box>
@@ -243,7 +257,9 @@ function OperationsFlow() {
             <Stack spacing={1} sx={{ mt: 1 }}>
               {step.outputs.map((output) => (
                 <Box key={output} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <Box sx={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: step.color }} />
+                  <Box
+                    sx={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: step.color }}
+                  />
                   <Typography variant="body2">{output}</Typography>
                 </Box>
               ))}
@@ -325,7 +341,9 @@ export function CommandCenterPage() {
 
   return (
     <>
-      <Typography variant="h4" gutterBottom>Command Center</Typography>
+      <Typography variant="h4" gutterBottom>
+        Command Center
+      </Typography>
       <OperationsFlow />
 
       {error && (
