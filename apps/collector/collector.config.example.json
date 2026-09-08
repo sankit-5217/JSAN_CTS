@@ -1,0 +1,21 @@
+{
+  "siteCode": "SITE01",
+  "apiBaseUrl": "https://localhost:8443/api/v1",
+  "apiToken": "REPLACE_WITH_A_DEV_LOGIN_TOKEN",
+  "pollIntervalSeconds": 60,
+  "heartbeatIntervalSeconds": 30,
+  "bufferMaxItems": 1000,
+  "bufferFile": "./.buffer/collector-buffer.json",
+  "endpointTlsInsecure": true,
+  "endpoints": [
+    {
+      "ciCode": "SITE01-R01-SRV-001",
+      "kind": "REDFISH",
+      "address": "https://10.20.1.40",
+      "credentialRef": "site01-bmc-default"
+    }
+  ],
+  "snmpTrapPort": 1162,
+  "snmpCommunity": "public",
+  "snmpSources": []
+}
