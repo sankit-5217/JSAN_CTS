@@ -143,13 +143,21 @@ function OperationsFlow() {
           </Box>
         </Stack>
 
+        {/* flex-wrap (not a breakpoint-keyed grid) so this reflows against the
+            actual content width -- with a permanent sidebar now taking real
+            estate, the viewport can be "sm and up" while this card's own
+            column is much narrower, which broke the old grid's fixed
+            4-across-until-sm-breakpoint layout. Borders between items (not
+            absolutely-positioned connector lines) so wrapping to a second
+            row never leaves a line floating over the wrong row. */}
         <Box
           sx={{
-            display: "grid",
-            gridTemplateColumns: { xs: "1fr", sm: "repeat(4, 1fr)" },
-            gap: { xs: 1, sm: 0 },
+            display: "flex",
+            flexWrap: "wrap",
             mt: 4,
             mb: 3,
+            borderRadius: 1,
+            overflow: "hidden",
           }}
         >
           {FLOW_STEPS.map((flowStep, index) => {
@@ -158,71 +166,54 @@ function OperationsFlow() {
             return (
               <Box
                 key={flowStep.label}
-                sx={{ position: "relative", display: "flex", alignItems: "center" }}
+                component="button"
+                type="button"
+                onClick={() => setActiveStep(index)}
+                aria-label={`Show ${flowStep.label} stage`}
+                sx={{
+                  flex: "1 1 190px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1.25,
+                  minWidth: 0,
+                  border: 0,
+                  borderRight:
+                    index < FLOW_STEPS.length - 1 ? "1px solid rgba(248,251,250,0.2)" : "none",
+                  p: 1.25,
+                  color: "inherit",
+                  font: "inherit",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  backgroundColor: isActive ? "rgba(255,255,255,0.14)" : "transparent",
+                  transition: "background-color 160ms ease",
+                  "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
+                }}
               >
                 <Box
-                  component="button"
-                  type="button"
-                  onClick={() => setActiveStep(index)}
-                  aria-label={`Show ${flowStep.label} stage`}
                   sx={{
-                    position: "relative",
-                    zIndex: 1,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 1.25,
-                    width: "100%",
-                    border: 0,
-                    borderRadius: 1,
-                    p: 1,
-                    color: "inherit",
-                    textAlign: "left",
-                    cursor: "pointer",
-                    backgroundColor: isActive ? "rgba(255,255,255,0.14)" : "transparent",
-                    transition: "background-color 160ms ease, transform 160ms ease",
-                    "&:hover": {
-                      backgroundColor: "rgba(255,255,255,0.1)",
-                      transform: "translateY(-2px)",
-                    },
+                    display: "grid",
+                    placeItems: "center",
+                    width: 38,
+                    height: 38,
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    color: flowStep.color,
+                    backgroundColor: "#f8fbfa",
                   }}
                 >
-                  <Box
-                    sx={{
-                      display: "grid",
-                      placeItems: "center",
-                      width: 38,
-                      height: 38,
-                      borderRadius: "50%",
-                      flexShrink: 0,
-                      color: flowStep.color,
-                      backgroundColor: "#f8fbfa",
-                    }}
-                  >
-                    <Icon fontSize="small" />
-                  </Box>
-                  <Box>
-                    <Typography
-                      variant="caption"
-                      sx={{ display: "block", color: "rgba(248,251,250,0.58)" }}
-                    >
-                      0{index + 1}
-                    </Typography>
-                    <Typography sx={{ fontWeight: 700 }}>{flowStep.label}</Typography>
-                  </Box>
+                  <Icon fontSize="small" />
                 </Box>
-                {index < FLOW_STEPS.length - 1 && (
-                  <Box
-                    sx={{
-                      display: { xs: "none", sm: "block" },
-                      position: "absolute",
-                      left: "calc(50% + 26px)",
-                      right: "-50%",
-                      top: 29,
-                      height: 1,
-                      backgroundColor: "rgba(248,251,250,0.22)",
-                    }}
-                  />
-                )}
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography
+                    variant="caption"
+                    sx={{ display: "block", color: "rgba(248,251,250,0.58)" }}
+                  >
+                    0{index + 1}
+                  </Typography>
+                  <Typography sx={{ fontWeight: 700 }} noWrap>
+                    {flowStep.label}
+                  </Typography>
+                </Box>
               </Box>
             );
           })}
