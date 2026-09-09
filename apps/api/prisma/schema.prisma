@@ -695,11 +695,18 @@ model KnowledgeArticle {
   body         String
   version      Int      @default(1)
   ownerId      String?  @map("owner_id")
+  // Scope & linkage (spec §10.14). siteId null = global runbook; set = a
+  // site-specific SOP. incidentCategory / ciType tie the article to the kind
+  // of incident and hardware it applies to.
+  siteId       String?  @map("site_id")
+  incidentCategory String? @map("incident_category")
+  ciType       CiType?  @map("ci_type")
   approvalState String  @default("DRAFT") @map("approval_state") // DRAFT / APPROVED
   reviewDueAt  DateTime? @map("review_due_at")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  @@index([siteId])
   @@map("knowledge_articles")
 }
 
