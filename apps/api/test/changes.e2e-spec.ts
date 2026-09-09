@@ -23,6 +23,7 @@ describe("Changes API (e2e)", () => {
       changeType: "NORMAL",
       reason: "Firmware upgrade on E2E server",
       implementationPlan: "Drain, flash, verify POST",
+      validationPlan: "Confirm POST clean and iDRAC health OK before closing the window",
       rollbackPlan: "Reflash previous image from USB",
       risk: "Low - N+1 retained",
       windowStart,
@@ -38,6 +39,7 @@ describe("Changes API (e2e)", () => {
     const created = await raise(start, end, [fx.ci.id]).expect(201);
     const id = created.body.id;
     expect(created.body.approverId ?? null).toBeNull();
+    expect(created.body.validationPlan).toContain("Confirm POST clean");
 
     // not yet on the feed — needs approval first
     const before = await t

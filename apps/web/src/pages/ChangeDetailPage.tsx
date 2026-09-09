@@ -22,6 +22,7 @@ interface Change {
   changeType: string;
   reason: string;
   implementationPlan: string;
+  validationPlan: string;
   rollbackPlan: string;
   risk: string;
   windowStart: string;
@@ -79,6 +80,7 @@ export function ChangeDetailPage() {
   const [edit, setEdit] = useState<null | {
     reason: string;
     implementationPlan: string;
+    validationPlan: string;
     rollbackPlan: string;
     risk: string;
     windowStart: string;
@@ -112,6 +114,7 @@ export function ChangeDetailPage() {
     setEdit({
       reason: change.reason,
       implementationPlan: change.implementationPlan,
+      validationPlan: change.validationPlan,
       rollbackPlan: change.rollbackPlan,
       risk: change.risk,
       windowStart: toLocalInput(change.windowStart),
@@ -145,6 +148,9 @@ export function ChangeDetailPage() {
           </Typography>
           <Typography variant="body2" sx={{ mt: 1 }}>
             <strong>Implementation:</strong> {change.implementationPlan}
+          </Typography>
+          <Typography variant="body2">
+            <strong>Validation:</strong> {change.validationPlan}
           </Typography>
           <Typography variant="body2">
             <strong>Rollback:</strong> {change.rollbackPlan}
@@ -262,6 +268,13 @@ export function ChangeDetailPage() {
                 <TextField
                   size="small"
                   multiline
+                  label="Validation plan"
+                  value={edit.validationPlan}
+                  onChange={(e) => setEdit({ ...edit, validationPlan: e.target.value })}
+                />
+                <TextField
+                  size="small"
+                  multiline
                   label="Rollback plan"
                   value={edit.rollbackPlan}
                   onChange={(e) => setEdit({ ...edit, rollbackPlan: e.target.value })}
@@ -305,6 +318,7 @@ export function ChangeDetailPage() {
                           apiPatch(`/changes/${id}`, {
                             reason: edit.reason,
                             implementationPlan: edit.implementationPlan,
+                            validationPlan: edit.validationPlan,
                             rollbackPlan: edit.rollbackPlan,
                             risk: edit.risk,
                             windowStart: new Date(edit.windowStart).toISOString(),

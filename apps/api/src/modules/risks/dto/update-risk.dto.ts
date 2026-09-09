@@ -33,6 +33,12 @@ export class UpdateRiskDto {
   @Length(3, 4000)
   mitigation?: string;
 
+  @ApiPropertyOptional({ description: "Evidence backing the assessment." })
+  @IsOptional()
+  @IsString()
+  @Length(3, 4000)
+  evidence?: string;
+
   @ApiPropertyOptional({ format: "uuid" })
   @IsOptional()
   @IsUUID()
