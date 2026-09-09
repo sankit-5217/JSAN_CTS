@@ -103,6 +103,7 @@ export function ChangesPage() {
     changeType: "NORMAL",
     reason: "",
     implementationPlan: "",
+    validationPlan: "",
     rollbackPlan: "",
     risk: "",
     windowStart: "",
@@ -119,6 +120,7 @@ export function ChangesPage() {
         changeType: form.changeType,
         reason: form.reason,
         implementationPlan: form.implementationPlan,
+        validationPlan: form.validationPlan,
         rollbackPlan: form.rollbackPlan,
         risk: form.risk,
         windowStart: new Date(form.windowStart).toISOString(),
@@ -129,6 +131,7 @@ export function ChangesPage() {
         ...f,
         reason: "",
         implementationPlan: "",
+        validationPlan: "",
         rollbackPlan: "",
         risk: "",
         windowStart: "",
@@ -205,6 +208,13 @@ export function ChangesPage() {
                 label="Implementation plan"
                 value={form.implementationPlan}
                 onChange={(e) => set("implementationPlan", e.target.value)}
+              />
+              <TextField
+                size="small"
+                multiline
+                label="Validation plan"
+                value={form.validationPlan}
+                onChange={(e) => set("validationPlan", e.target.value)}
               />
               <TextField
                 size="small"

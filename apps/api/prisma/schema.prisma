@@ -673,6 +673,7 @@ model Change {
   changeType       ChangeType @map("change_type")
   reason           String
   implementationPlan String   @map("implementation_plan")
+  validationPlan   String     @map("validation_plan")
   rollbackPlan     String     @map("rollback_plan")
   risk             String
   windowStart      DateTime   @map("window_start")
@@ -710,6 +711,7 @@ model Risk {
   impact      Int
   score       Int
   mitigation  String?
+  evidence    String?
   ownerId     String?  @map("owner_id")
   dueDate     DateTime? @map("due_date")
   status      String   @default("OPEN")
