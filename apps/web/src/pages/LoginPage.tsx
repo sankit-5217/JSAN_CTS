@@ -60,6 +60,12 @@ const SEEDED_USERS = [
     scope: "SITE02",
     note: "Hands-on floor engineering and hardware actions.",
   },
+  {
+    email: "ctsviewer@example.com",
+    role: "CTS_MANAGER_VIEWER",
+    scope: "SITE01",
+    note: "Read-only: no internal comments, no management IPs, nothing editable.",
+  },
 ];
 
 // What the left brand panel advertises — module ownership pulled straight
