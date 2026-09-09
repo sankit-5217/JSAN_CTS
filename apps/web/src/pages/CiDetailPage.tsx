@@ -33,6 +33,57 @@ const LIFECYCLE_STATUSES = ["PLANNED", "ACTIVE", "MAINTENANCE", "RETIRED"];
 const RELATION_TYPES = ["CONTAINS", "DEPENDS_ON", "RUNS_ON", "USES"];
 const DIRECTIONS = ["PARENT", "CHILD"] as const;
 
+// Literal union mirroring HealthState in shared-types/src/health.ts — see
+// IncidentsPage.tsx for why this isn't imported as a runtime value.
+type HealthState = "HEALTHY" | "WARNING" | "CRITICAL" | "UNKNOWN" | "MAINTENANCE";
+
+const HEALTH_COLOR: Record<HealthState, string> = {
+  HEALTHY: "#2e7d32",
+  WARNING: "#ed6c02",
+  CRITICAL: "#d32f2f",
+  UNKNOWN: "#757575",
+  MAINTENANCE: "#0288d1",
+};
+
+interface DegradedComponent {
+  kind: string;
+  name: string;
+  health: HealthState;
+  detail?: string;
+}
+
+interface PredictiveFailure {
+  kind: string;
+  name: string;
+  detail: string;
+}
+
+interface HealthCount {
+  total: number;
+  healthy: number;
+}
+
+// Shape of MonitoringController's `details` JSON column — mirrors
+// HealthSnapshotPayload minus ciCode/observedAt (see monitoring.service.ts).
+interface HealthSnapshotDetails {
+  source?: string;
+  powerState?: "ON" | "OFF" | "UNKNOWN";
+  degraded?: DegradedComponent[];
+  predictiveFailures?: PredictiveFailure[];
+  summary?: {
+    drives: HealthCount & { predictedFailure: number };
+    fans: HealthCount;
+    powerSupplies: HealthCount;
+  };
+  firmware?: { biosVersion?: string };
+}
+
+interface HealthSnapshot {
+  overallHealth: HealthState;
+  details: HealthSnapshotDetails | null;
+  lastHeartbeatAt: string | null;
+}
+
 interface ConfigurationItem {
   id: string;
   ciCode: string;
@@ -73,6 +124,7 @@ export function CiDetailPage() {
   const [ci, setCi] = useState<ConfigurationItem | null>(null);
   const [relations, setRelations] = useState<CiRelation[]>([]);
   const [relatedCis, setRelatedCis] = useState<Record<string, CiOption>>({});
+  const [health, setHealth] = useState<HealthSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const canWrite = CMDB_WRITE_ROLES.includes(getCurrentUserRole() ?? "");
@@ -93,6 +145,10 @@ export function CiDetailPage() {
         Promise.all(otherIds.map((otherId) => apiGet<CiOption>(`/cis/${otherId}`)))
           .then((cis) => setRelatedCis(Object.fromEntries(cis.map((c) => [c.id, c]))))
           .catch(() => undefined); // non-fatal — falls back to showing raw IDs
+
+        apiGet<HealthSnapshot>(`/monitoring/health-snapshots/${ciData.ciCode}`)
+          .then(setHealth)
+          .catch(() => setHealth(null)); // non-fatal — no collector snapshot reported yet
       })
       .catch((err: Error) => setError(err.message));
   }, [id]);
@@ -217,6 +273,102 @@ export function CiDetailPage() {
             <Button sx={{ mt: 2 }} variant="outlined" onClick={startEdit}>
               Edit
             </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            Hardware health
+          </Typography>
+          {!health && (
+            <Typography variant="body2" color="text.secondary">
+              No health snapshot reported yet — the site collector hasn't sent hardware telemetry
+              for this CI.
+            </Typography>
+          )}
+          {health && (
+            <Stack spacing={2}>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                <Chip
+                  label={health.overallHealth}
+                  sx={{
+                    bgcolor: HEALTH_COLOR[health.overallHealth],
+                    color: "#fff",
+                    fontWeight: 600,
+                  }}
+                />
+                {health.details?.powerState && (
+                  <Chip label={`Power: ${health.details.powerState}`} variant="outlined" />
+                )}
+                {health.details?.source && (
+                  <Chip label={health.details.source} variant="outlined" size="small" />
+                )}
+                {health.lastHeartbeatAt && (
+                  <Typography variant="body2" color="text.secondary">
+                    Last reported {new Date(health.lastHeartbeatAt).toLocaleString()}
+                  </Typography>
+                )}
+              </Stack>
+
+              {health.details?.summary && (
+                <Stack direction="row" spacing={3} flexWrap="wrap">
+                  <Typography variant="body2">
+                    Drives: {health.details.summary.drives.healthy}/
+                    {health.details.summary.drives.total} healthy
+                    {health.details.summary.drives.predictedFailure > 0 &&
+                      ` · ${health.details.summary.drives.predictedFailure} predicted failure`}
+                  </Typography>
+                  <Typography variant="body2">
+                    Fans: {health.details.summary.fans.healthy}/{health.details.summary.fans.total}{" "}
+                    healthy
+                  </Typography>
+                  <Typography variant="body2">
+                    Power supplies: {health.details.summary.powerSupplies.healthy}/
+                    {health.details.summary.powerSupplies.total} healthy
+                  </Typography>
+                </Stack>
+              )}
+
+              {!!health.details?.degraded?.length && (
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Degraded components
+                  </Typography>
+                  <Stack spacing={1}>
+                    {health.details.degraded.map((c, i) => (
+                      <Stack key={i} direction="row" spacing={1} alignItems="center">
+                        <Chip
+                          size="small"
+                          label={c.health}
+                          sx={{ bgcolor: HEALTH_COLOR[c.health], color: "#fff" }}
+                        />
+                        <Typography variant="body2">
+                          {c.kind} — {c.name}
+                          {c.detail ? `: ${c.detail}` : ""}
+                        </Typography>
+                      </Stack>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+
+              {!!health.details?.predictiveFailures?.length && (
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Predictive failures
+                  </Typography>
+                  <Stack spacing={1}>
+                    {health.details.predictiveFailures.map((p, i) => (
+                      <Typography key={i} variant="body2" color="warning.main">
+                        {p.kind} — {p.name}: {p.detail}
+                      </Typography>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
+            </Stack>
           )}
         </CardContent>
       </Card>

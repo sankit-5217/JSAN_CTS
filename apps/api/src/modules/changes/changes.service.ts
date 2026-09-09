@@ -69,6 +69,7 @@ export class ChangesService {
           changeType: dto.changeType,
           reason: dto.reason,
           implementationPlan: dto.implementationPlan,
+          validationPlan: dto.validationPlan,
           rollbackPlan: dto.rollbackPlan,
           risk: dto.risk,
           windowStart,
@@ -204,6 +205,7 @@ export class ChangesService {
     const editsPlan =
       dto.reason !== undefined ||
       dto.implementationPlan !== undefined ||
+      dto.validationPlan !== undefined ||
       dto.rollbackPlan !== undefined ||
       dto.risk !== undefined ||
       dto.windowStart !== undefined ||
@@ -234,6 +236,7 @@ export class ChangesService {
           ...(dto.implementationPlan !== undefined
             ? { implementationPlan: dto.implementationPlan }
             : {}),
+          ...(dto.validationPlan !== undefined ? { validationPlan: dto.validationPlan } : {}),
           ...(dto.rollbackPlan !== undefined ? { rollbackPlan: dto.rollbackPlan } : {}),
           ...(dto.risk !== undefined ? { risk: dto.risk } : {}),
           ...(dto.windowStart ? { windowStart } : {}),

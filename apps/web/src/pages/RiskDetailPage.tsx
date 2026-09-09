@@ -27,6 +27,7 @@ interface Risk {
   impact: number;
   score: number;
   mitigation: string | null;
+  evidence: string | null;
   ownerId: string | null;
   dueDate: string | null;
   status: string;
@@ -90,6 +91,7 @@ export function RiskDetailPage() {
       likelihood: String(risk.likelihood),
       impact: String(risk.impact),
       mitigation: risk.mitigation ?? "",
+      evidence: risk.evidence ?? "",
       ownerId: risk.ownerId ?? "",
       dueDate: risk.dueDate ? risk.dueDate.slice(0, 10) : "",
     });
@@ -118,6 +120,9 @@ export function RiskDetailPage() {
           </Typography>
           <Typography variant="body2" sx={{ mt: 1 }}>
             <strong>Mitigation:</strong> {risk.mitigation ?? "none recorded"}
+          </Typography>
+          <Typography variant="body2">
+            <strong>Evidence:</strong> {risk.evidence ?? "none recorded"}
           </Typography>
         </CardContent>
       </Card>
@@ -173,6 +178,13 @@ export function RiskDetailPage() {
                 />
                 <TextField
                   size="small"
+                  multiline
+                  label="Evidence"
+                  value={edit.evidence}
+                  onChange={(e) => setEdit({ ...edit, evidence: e.target.value })}
+                />
+                <TextField
+                  size="small"
                   label="Owner user id"
                   value={edit.ownerId}
                   onChange={(e) => setEdit({ ...edit, ownerId: e.target.value })}
@@ -196,6 +208,7 @@ export function RiskDetailPage() {
                             likelihood: Number(edit.likelihood),
                             impact: Number(edit.impact),
                             mitigation: edit.mitigation || undefined,
+                            evidence: edit.evidence || undefined,
                             ownerId: edit.ownerId || undefined,
                             dueDate: edit.dueDate
                               ? new Date(edit.dueDate).toISOString()

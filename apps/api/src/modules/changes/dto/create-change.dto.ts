@@ -28,6 +28,14 @@ export class CreateChangeDto {
   implementationPlan!: string;
 
   @ApiProperty({
+    example:
+      "Confirm PSU2 redundancy LED green and both feeds drawing load before closing the window",
+  })
+  @IsString()
+  @Length(3, 4000)
+  validationPlan!: string;
+
+  @ApiProperty({
     example: "Re-seat original PSU2; if unit dead, run on PSU1 only until next window",
   })
   @IsString()

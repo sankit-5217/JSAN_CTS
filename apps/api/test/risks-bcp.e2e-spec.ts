@@ -25,11 +25,17 @@ describe("Risks + BCP API (e2e)", () => {
       .http()
       .post("/api/v1/risks")
       .set(bearer())
-      .send({ description: "Single PDU circuit per rack - no A/B feed", likelihood: 3, impact: 4 })
+      .send({
+        description: "Single PDU circuit per rack - no A/B feed",
+        likelihood: 3,
+        impact: 4,
+        evidence: "Power distribution audit 2026-08, section 4.2",
+      })
       .expect(201);
     expect(created.body.score).toBe(12);
     expect(created.body.severity).toBe("HIGH");
     expect(created.body.status).toBe("OPEN");
+    expect(created.body.evidence).toBe("Power distribution audit 2026-08, section 4.2");
 
     // PATCH cannot set status
     await t
