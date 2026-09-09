@@ -20,6 +20,7 @@ import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsAc
 import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import { apiPost, storeToken } from "../api/client";
+import { decodeJwtPayload } from "../api/jwt";
 import { theme } from "../theme/theme";
 
 interface DevLoginResponse {
@@ -134,7 +135,8 @@ export function LoginPage() {
     try {
       const { accessToken } = await apiPost<DevLoginResponse>("/auth/dev-login", { email });
       storeToken(accessToken);
-      navigate("/");
+      const role = decodeJwtPayload(accessToken)?.role;
+      navigate(role === "CTS_MANAGER_VIEWER" ? "/client/report" : "/");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

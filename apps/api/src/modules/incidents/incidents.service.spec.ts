@@ -196,6 +196,62 @@ describe("IncidentsService.create", () => {
   });
 });
 
+describe("IncidentsService.createFromCustomer", () => {
+  const customerDto = {
+    siteId: "site-a",
+    category: "HARDWARE_FAILURE" as const,
+    shortDescription: "Server showing a red fault light",
+  };
+
+  it("defaults impact/urgency/priority to MEDIUM/MEDIUM/P3 rather than letting the customer set them", async () => {
+    const { service, tx } = makeService();
+    const result = await service.createFromCustomer(
+      customerDto,
+      { actorId: ctsViewer.id },
+      ctsViewer,
+    );
+
+    expect(result).toMatchObject({ impact: "MEDIUM", urgency: "MEDIUM", priority: Priority.P3 });
+    expect(tx.incident.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          impact: "MEDIUM",
+          urgency: "MEDIUM",
+          priority: Priority.P3,
+        }),
+      }),
+    );
+  });
+
+  it("rejects a site the caller can't access before ever creating anything", async () => {
+    const { service, tx } = makeService({ canAccessSite: jest.fn().mockResolvedValue(false) });
+    await expect(
+      service.createFromCustomer(customerDto, { actorId: ctsViewer.id }, ctsViewer),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.incident.create).not.toHaveBeenCalled();
+  });
+
+  it("posts `details` as a customer-visible (non-internal) first comment when provided", async () => {
+    const { service, tx } = makeService();
+    await service.createFromCustomer(
+      { ...customerDto, details: "Started around 2pm." },
+      { actorId: ctsViewer.id },
+      ctsViewer,
+    );
+    expect(tx.incidentComment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ body: "Started around 2pm.", isInternal: false }),
+      }),
+    );
+  });
+
+  it("creates no comment when `details` is omitted", async () => {
+    const { service, tx } = makeService();
+    await service.createFromCustomer(customerDto, { actorId: ctsViewer.id }, ctsViewer);
+    expect(tx.incidentComment.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("IncidentsService.update", () => {
   it("calls SlaService.onPriorityChanged when priority actually changes", async () => {
     const { service, tx, slaService } = makeService({
@@ -540,6 +596,29 @@ describe("IncidentsService comment visibility", () => {
 
     const result = await service.listComments("incident-1", engineer);
     expect(result).toEqual(comments);
+  });
+});
+
+describe("IncidentsService.createComment isInternal enforcement", () => {
+  it("forces isInternal false for CTS_MANAGER_VIEWER even if the request asked for true", async () => {
+    const { service, tx } = makeService();
+    await service.createComment(
+      "incident-1",
+      { body: "Any update?", isInternal: true },
+      { actorId: ctsViewer.id },
+      ctsViewer,
+    );
+    expect(tx.incidentComment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ isInternal: false }) }),
+    );
+  });
+
+  it("still defaults to internal (true) for an internal role when omitted", async () => {
+    const { service, tx } = makeService();
+    await service.createComment("incident-1", { body: "note" }, { actorId: engineer.id }, engineer);
+    expect(tx.incidentComment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ isInternal: true }) }),
+    );
   });
 });
 

@@ -12,6 +12,7 @@ import {
   IncidentEvent,
   IncidentStatus,
   Prisma,
+  Priority,
   UserRole,
 } from "@prisma/client";
 import { StorageService } from "../../common/storage/storage.service";
@@ -26,6 +27,7 @@ import {
   ALLOWED_ATTACHMENT_CONTENT_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
 } from "./attachment.constants";
+import { CreateIncidentAsCustomerDto } from "./dto/create-incident-as-customer.dto";
 import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
@@ -187,6 +189,40 @@ export class IncidentsService {
       );
       return incident;
     });
+  }
+
+  /**
+   * Self-service intake for a site POC (CTS_MANAGER_VIEWER). Deliberately
+   * thin over `create()`: a customer never sets priority/impact/urgency or
+   * picks a CI — those are triage decisions Service Desk makes afterward
+   * via the normal PATCH /incidents/:id path (which already re-fires the
+   * SLA clock on a priority change, so a P3 default here is a real starting
+   * point, not a placeholder that needs special-casing later).
+   */
+  async createFromCustomer(
+    dto: CreateIncidentAsCustomerDto,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ): Promise<Incident> {
+    await this.assertSiteAccess(user, dto.siteId);
+
+    const incident = await this.create(
+      {
+        siteId: dto.siteId,
+        category: dto.category,
+        impact: "MEDIUM",
+        urgency: "MEDIUM",
+        priority: Priority.P3,
+        shortDescription: dto.shortDescription,
+      },
+      actor,
+    );
+
+    if (dto.details) {
+      await this.createComment(incident.id, { body: dto.details, isInternal: false }, actor, user);
+    }
+
+    return incident;
   }
 
   async update(id: string, dto: UpdateIncidentDto, user: AuthenticatedUser, actor: ActorContext) {
@@ -474,6 +510,10 @@ export class IncidentsService {
     user: AuthenticatedUser,
   ): Promise<IncidentComment> {
     await this.findOneScoped(incidentId, user);
+    // A customer can never post an internal note, regardless of what the
+    // request body says — the frontend doesn't offer the toggle, but the
+    // backend is the actual guarantee (CLAUDE.md: never trust the client).
+    const isInternal = user.role === UserRole.CTS_MANAGER_VIEWER ? false : (dto.isInternal ?? true);
 
     return this.prisma.$transaction(async (tx) => {
       const comment = await tx.incidentComment.create({
@@ -481,7 +521,7 @@ export class IncidentsService {
           incidentId,
           authorId: actor.actorId,
           body: dto.body,
-          isInternal: dto.isInternal ?? true,
+          isInternal,
         },
       });
 

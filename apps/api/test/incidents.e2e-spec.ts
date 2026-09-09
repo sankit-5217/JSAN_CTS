@@ -108,4 +108,93 @@ describe("Incidents API (e2e)", () => {
       .set("authorization", `Bearer ${viewer}`)
       .expect(403);
   });
+
+  it("a customer self-reports an issue, it lands as P3/MEDIUM/MEDIUM pending triage, and Service Desk can see + reply on it", async () => {
+    const viewer = await t.tokenFor(fx.users.ctsViewer.email);
+    const noc = await t.tokenFor(fx.users.serviceDesk.email);
+
+    // rejected: a site the customer has no access to
+    await t
+      .http()
+      .post("/api/v1/incidents/customer-report")
+      .set("authorization", `Bearer ${viewer}`)
+      .send({
+        siteId: fx.siteB.id,
+        category: "HARDWARE_FAILURE",
+        shortDescription: "Should be rejected",
+      })
+      .expect(403);
+
+    const created = await t
+      .http()
+      .post("/api/v1/incidents/customer-report")
+      .set("authorization", `Bearer ${viewer}`)
+      .send({
+        siteId: fx.site.id,
+        category: "HARDWARE_FAILURE",
+        shortDescription: "Server in Rack 3 showing a red fault light",
+        details: "Started around 2pm, other equipment in the rack seems fine.",
+      })
+      .expect(201);
+    expect(created.body).toMatchObject({
+      status: "NEW",
+      priority: "P3",
+      impact: "MEDIUM",
+      urgency: "MEDIUM",
+    });
+
+    // an internal role in INCIDENT_WRITE_ROLES, not the customer role, must
+    // still gate the plain create route (customer-report is additive, not
+    // a bypass)
+    await t
+      .http()
+      .post("/api/v1/incidents")
+      .set("authorization", `Bearer ${viewer}`)
+      .send({
+        siteId: fx.site.id,
+        category: "HARDWARE_FAILURE",
+        impact: "HIGH",
+        urgency: "HIGH",
+        priority: "P1",
+        shortDescription: "Should be rejected on the internal-only route",
+      })
+      .expect(403);
+
+    // the "details" text landed as a customer-visible comment
+    const comments = await t
+      .http()
+      .get(`/api/v1/incidents/${created.body.id}/comments`)
+      .set("authorization", `Bearer ${viewer}`)
+      .expect(200);
+    expect(comments.body).toHaveLength(1);
+    expect(comments.body[0]).toMatchObject({
+      isInternal: false,
+      body: expect.stringContaining("2pm"),
+    });
+
+    // Service Desk sees it and replies; the reply defaults to internal=true
+    // unless marked otherwise, but the customer's own comment write always
+    // forces isInternal=false regardless of what's sent
+    await t
+      .http()
+      .post(`/api/v1/incidents/${created.body.id}/comments`)
+      .set("authorization", `Bearer ${noc}`)
+      .send({ body: "Can you confirm the server's asset tag?", isInternal: false })
+      .expect(201);
+
+    const attemptInternal = await t
+      .http()
+      .post(`/api/v1/incidents/${created.body.id}/comments`)
+      .set("authorization", `Bearer ${viewer}`)
+      .send({ body: "It's on the front panel.", isInternal: true })
+      .expect(201);
+    expect(attemptInternal.body.isInternal).toBe(false);
+
+    const finalComments = await t
+      .http()
+      .get(`/api/v1/incidents/${created.body.id}/comments`)
+      .set("authorization", `Bearer ${viewer}`)
+      .expect(200);
+    expect(finalComments.body).toHaveLength(3);
+  });
 });

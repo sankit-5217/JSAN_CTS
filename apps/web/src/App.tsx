@@ -33,8 +33,12 @@ import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
 import { clearStoredToken, getStoredToken } from "./api/client";
-import { decodeJwtPayload } from "./api/jwt";
+import { decodeJwtPayload, getCurrentUserRole } from "./api/jwt";
 import { theme } from "./theme/theme";
+import { ClientLayout } from "./pages/client/ClientLayout";
+import { MyTicketsPage } from "./pages/client/MyTicketsPage";
+import { ReportIssuePage } from "./pages/client/ReportIssuePage";
+import { TicketDetailPage } from "./pages/client/TicketDetailPage";
 import { AlertDetailPage } from "./pages/AlertDetailPage";
 import { AlertRulesPage } from "./pages/AlertRulesPage";
 import { AlertsPage } from "./pages/AlertsPage";
@@ -342,6 +346,11 @@ function AuthenticatedLayout() {
   if (!getStoredToken()) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
+  // The client role gets a purpose-built portal (ClientLayout), not the
+  // internal ops console — none of the fourteen modules below are theirs.
+  if (getCurrentUserRole() === "CTS_MANAGER_VIEWER") {
+    return <Navigate to="/client/report" replace />;
+  }
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
       <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
@@ -359,6 +368,11 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route element={<ClientLayout />}>
+        <Route path="/client/report" element={<ReportIssuePage />} />
+        <Route path="/client/tickets" element={<MyTicketsPage />} />
+        <Route path="/client/tickets/:id" element={<TicketDetailPage />} />
+      </Route>
       <Route element={<AuthenticatedLayout />}>
         <Route path="/" element={<CommandCenterPage />} />
         <Route path="/sites" element={<SitesPage />} />

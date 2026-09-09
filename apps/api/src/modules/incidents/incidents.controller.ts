@@ -23,6 +23,7 @@ import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { CreateIncidentAsCustomerDto } from "./dto/create-incident-as-customer.dto";
 import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
@@ -40,6 +41,13 @@ export const INCIDENT_WRITE_ROLES = [
   UserRole.SITE_ENGINEER,
   UserRole.SERVICE_DESK_NOC,
 ] as const;
+
+// Comments are the one write a customer gets: replying to Service Desk on
+// their own ticket. Every other write (create, update, transition,
+// attachments) stays on INCIDENT_WRITE_ROLES only — this constant is
+// deliberately scoped to just the comment route, not merged into the list
+// above.
+const INCIDENT_COMMENT_ROLES = [...INCIDENT_WRITE_ROLES, UserRole.CTS_MANAGER_VIEWER] as const;
 
 @ApiTags("incidents")
 @ApiBearerAuth()
@@ -70,6 +78,16 @@ export class IncidentsController {
     @CorrelationId() correlationId?: string,
   ) {
     return this.incidentsService.create(dto, { actorId: user.id, correlationId });
+  }
+
+  @Post("customer-report")
+  @Roles(UserRole.CTS_MANAGER_VIEWER)
+  createAsCustomer(
+    @Body() dto: CreateIncidentAsCustomerDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.incidentsService.createFromCustomer(dto, { actorId: user.id, correlationId }, user);
   }
 
   @Patch(":id")
@@ -105,7 +123,7 @@ export class IncidentsController {
   }
 
   @Post(":id/comments")
-  @Roles(...INCIDENT_WRITE_ROLES)
+  @Roles(...INCIDENT_COMMENT_ROLES)
   createComment(
     @Param("id") id: string,
     @Body() dto: CreateIncidentCommentDto,
