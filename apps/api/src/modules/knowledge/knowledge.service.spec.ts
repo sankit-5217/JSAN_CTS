@@ -40,6 +40,9 @@ function storedArticle(overrides: Record<string, unknown> = {}) {
     body: "1. pre-checks\n2. swap",
     version: 1,
     ownerId: null,
+    siteId: null as string | null,
+    incidentCategory: null as string | null,
+    ciType: null as string | null,
     approvalState: "DRAFT",
     reviewDueAt: null as Date | null,
     createdAt: new Date(),
@@ -79,6 +82,25 @@ describe("KnowledgeService", () => {
       expect(result.approvalState).toBe("DRAFT");
       expect(result.authoritative).toBe(false);
     });
+
+    it("persists site scope and CI / category links (spec §10.14)", async () => {
+      prisma.knowledgeArticle.create.mockResolvedValue(storedArticle());
+      await service.create(
+        {
+          title: "T",
+          body: "B",
+          siteId: "11111111-1111-1111-1111-111111111111",
+          incidentCategory: "HARDWARE",
+          ciType: "SERVER" as never,
+        },
+        ACTOR,
+      );
+      expect(prisma.knowledgeArticle.create.mock.calls[0][0].data).toMatchObject({
+        siteId: "11111111-1111-1111-1111-111111111111",
+        incidentCategory: "HARDWARE",
+        ciType: "SERVER",
+      });
+    });
   });
 
   describe("list", () => {
@@ -99,6 +121,19 @@ describe("KnowledgeService", () => {
       await service.list({ q: "psu", view: "authoritative" });
       const where = prisma.knowledgeArticle.findMany.mock.calls[0][0].where;
       expect(where.AND).toHaveLength(2);
+    });
+
+    it("filters by site, incident category and CI type (spec §10.14)", async () => {
+      prisma.knowledgeArticle.findMany.mockResolvedValue([]);
+      await service.list({
+        siteId: "site-9",
+        incidentCategory: "NETWORK",
+        ciType: "SWITCH" as never,
+      });
+      const where = prisma.knowledgeArticle.findMany.mock.calls[0][0].where;
+      expect(where.AND).toContainEqual({ siteId: "site-9" });
+      expect(where.AND).toContainEqual({ incidentCategory: "NETWORK" });
+      expect(where.AND).toContainEqual({ ciType: "SWITCH" });
     });
 
     it("view=authoritative filters to APPROVED with an unexpired review date", async () => {
