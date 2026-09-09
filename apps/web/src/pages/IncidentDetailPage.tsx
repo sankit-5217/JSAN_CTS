@@ -19,21 +19,18 @@ import {
 } from "@mui/material";
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "../api/client";
 
-// Literal string unions mirroring the Prisma enums (same CJS/ESM-interop
-// workaround as IncidentsPage.tsx/CisPage.tsx — see IncidentsPage's comment).
-const INCIDENT_STATUSES = [
-  "NEW",
-  "ASSIGNED",
-  "ACKNOWLEDGED",
-  "IN_PROGRESS",
-  "PENDING_VENDOR",
-  "PENDING_CUSTOMER",
-  "RESOLVED",
-  "CLOSED",
-  "REOPENED",
-  "CANCELLED",
-];
 const WORKLOG_ACTIVITY_TYPES = ["REMOTE_WORK", "ONSITE", "TRAVEL", "VENDOR_CALL"];
+
+// A field name as it appears in TransitionRule.requiredFields on the
+// backend (apps/api/src/modules/incidents/incident-transitions.ts).
+type TransitionField = "reason" | "resolutionCategory" | "rootCauseSummary";
+
+interface AvailableTransition {
+  toStatus: string;
+  requiredFields: TransitionField[];
+  allowed: boolean;
+  blockedReason?: string;
+}
 
 interface Incident {
   id: string;
@@ -133,8 +130,11 @@ function slaCountdown(
  * countdown snapshot, status transition, comments, worklogs (add +
  * correct), attachments (upload + download), and a merged timeline.
  * Every write submits straight to its existing, already-authorized/
- * audited backend endpoint and refetches on success — no client-side
- * transition-rule mirroring (plan Decision 2) or optimistic local state.
+ * audited backend endpoint and refetches on success — no optimistic
+ * local state. The transition dropdown doesn't mirror the rule table
+ * client-side either (plan Decision 2) — it renders whatever
+ * GET /incidents/:id/transitions computes from the one rule table the
+ * transition endpoint itself enforces.
  */
 export function IncidentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -144,6 +144,7 @@ export function IncidentDetailPage() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [worklogs, setWorklogs] = useState<Worklog[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [availableTransitions, setAvailableTransitions] = useState<AvailableTransition[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -157,14 +158,16 @@ export function IncidentDetailPage() {
       apiGet<Comment[]>(`/incidents/${id}/comments`),
       apiGet<Worklog[]>(`/incidents/${id}/worklogs`),
       apiGet<Attachment[]>(`/incidents/${id}/attachments`),
+      apiGet<AvailableTransition[]>(`/incidents/${id}/transitions`),
     ])
-      .then(([inc, slaState, evts, cmts, wls, atts]) => {
+      .then(([inc, slaState, evts, cmts, wls, atts, transitions]) => {
         setIncident(inc);
         setSla(slaState);
         setEvents(evts);
         setComments(cmts);
         setWorklogs(wls);
         setAttachments(atts);
+        setAvailableTransitions(transitions);
       })
       .catch((err: Error) => setError(err.message));
   }, [id]);
@@ -180,6 +183,8 @@ export function IncidentDetailPage() {
   const [rootCauseSummary, setRootCauseSummary] = useState("");
   const [ownerUserId, setOwnerUserId] = useState("");
   const [ownerGroupId, setOwnerGroupId] = useState("");
+  const selectedTransition = availableTransitions.find((t) => t.toStatus === toStatus);
+  const requiredFields = selectedTransition?.requiredFields ?? [];
 
   const submitTransition = async () => {
     if (!id || !toStatus) return;
@@ -357,55 +362,87 @@ export function IncidentDetailPage() {
             <Typography variant="h6" gutterBottom>
               Change status
             </Typography>
-            <Stack spacing={2}>
-              <TextField
-                select
-                label="New status"
-                size="small"
-                value={toStatus}
-                onChange={(e) => setToStatus(e.target.value)}
-              >
-                {INCIDENT_STATUSES.map((s) => (
-                  <MenuItem key={s} value={s}>
-                    {s}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                label="Reason"
-                size="small"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-              <TextField
-                label="Resolution category (RESOLVED only)"
-                size="small"
-                value={resolutionCategory}
-                onChange={(e) => setResolutionCategory(e.target.value)}
-              />
-              <TextField
-                label="Root cause summary (RESOLVED only)"
-                size="small"
-                multiline
-                value={rootCauseSummary}
-                onChange={(e) => setRootCauseSummary(e.target.value)}
-              />
-              <TextField
-                label="Owner user ID (UUID)"
-                size="small"
-                value={ownerUserId}
-                onChange={(e) => setOwnerUserId(e.target.value)}
-              />
-              <TextField
-                label="Owner group ID (UUID)"
-                size="small"
-                value={ownerGroupId}
-                onChange={(e) => setOwnerGroupId(e.target.value)}
-              />
-              <Button variant="contained" disabled={!toStatus} onClick={submitTransition}>
-                Submit transition
-              </Button>
-            </Stack>
+            {availableTransitions.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No status changes are available to you for this ticket right now — either its
+                current status ({incident.status}) has no further moves, or none of them are your
+                role's to make.
+              </Typography>
+            ) : (
+              <Stack spacing={2}>
+                <TextField
+                  select
+                  label="New status"
+                  size="small"
+                  value={toStatus}
+                  onChange={(e) => setToStatus(e.target.value)}
+                  helperText={
+                    selectedTransition && !selectedTransition.allowed
+                      ? selectedTransition.blockedReason
+                      : undefined
+                  }
+                  error={selectedTransition ? !selectedTransition.allowed : false}
+                >
+                  {availableTransitions.map((t) => (
+                    <MenuItem key={t.toStatus} value={t.toStatus} disabled={!t.allowed}>
+                      {t.toStatus}
+                      {!t.allowed && " (blocked)"}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                <TextField
+                  label="Reason"
+                  size="small"
+                  required={requiredFields.includes("reason")}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                />
+                <TextField
+                  label="Resolution category"
+                  size="small"
+                  required={requiredFields.includes("resolutionCategory")}
+                  value={resolutionCategory}
+                  onChange={(e) => setResolutionCategory(e.target.value)}
+                />
+                <TextField
+                  label="Root cause summary"
+                  size="small"
+                  multiline
+                  required={requiredFields.includes("rootCauseSummary")}
+                  value={rootCauseSummary}
+                  onChange={(e) => setRootCauseSummary(e.target.value)}
+                />
+                <TextField
+                  label="Owner user ID (UUID)"
+                  size="small"
+                  value={ownerUserId}
+                  onChange={(e) => setOwnerUserId(e.target.value)}
+                />
+                <TextField
+                  label="Owner group ID (UUID)"
+                  size="small"
+                  value={ownerGroupId}
+                  onChange={(e) => setOwnerGroupId(e.target.value)}
+                />
+                <Button
+                  variant="contained"
+                  disabled={
+                    !toStatus ||
+                    selectedTransition?.allowed === false ||
+                    requiredFields.some((f) =>
+                      f === "reason"
+                        ? !reason
+                        : f === "resolutionCategory"
+                          ? !resolutionCategory
+                          : !rootCauseSummary,
+                    )
+                  }
+                  onClick={submitTransition}
+                >
+                  Submit transition
+                </Button>
+              </Stack>
+            )}
           </Paper>
 
           <Paper sx={{ p: 2, mb: 3 }}>

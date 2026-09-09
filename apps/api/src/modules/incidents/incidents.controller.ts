@@ -101,6 +101,11 @@ export class IncidentsController {
     return this.incidentsService.update(id, dto, user, { actorId: user.id, correlationId });
   }
 
+  @Get(":id/transitions")
+  listAvailableTransitions(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.incidentsService.getAvailableTransitions(id, user);
+  }
+
   @Post(":id/transition")
   @Roles(...INCIDENT_WRITE_ROLES)
   transition(

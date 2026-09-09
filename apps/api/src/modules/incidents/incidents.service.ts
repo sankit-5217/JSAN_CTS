@@ -33,7 +33,23 @@ import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
 import { TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
-import { findTransitionRule, isOwnerOrElevated, OPEN_STATUSES } from "./incident-transitions";
+import {
+  findTransitionRule,
+  isOwnerOrElevated,
+  OPEN_STATUSES,
+  TRANSITION_RULES,
+} from "./incident-transitions";
+import type { TransitionDto } from "./incident-transitions";
+
+export interface AvailableTransition {
+  toStatus: IncidentStatus;
+  /** Fields the transition endpoint will require in the request body. */
+  requiredFields: (keyof TransitionDto)[];
+  /** False when the role check passed but the owner-or-elevated gate didn't. */
+  allowed: boolean;
+  /** Human explanation for why `allowed` is false — undefined when true. */
+  blockedReason?: string;
+}
 
 /** Minimal shape of what NestJS's FileInterceptor hands us (multer.File). */
 export interface UploadedAttachmentFile {
@@ -403,6 +419,38 @@ export class IncidentsService {
       }
 
       return after;
+    });
+  }
+
+  /**
+   * What the caller could actually submit to `createTransition` right now,
+   * computed from the same TRANSITION_RULES table that endpoint enforces —
+   * not a second copy of the rules (the frontend deliberately doesn't mirror
+   * them, see IncidentDetailPage.tsx's own comment). A rule the caller's
+   * role can never perform is omitted entirely; one blocked only by the
+   * owner-or-elevated gate is still returned (allowed: false) so the UI can
+   * show *why*, e.g. a NOC agent seeing the ticket is theirs to resume once
+   * the assigned engineer isn't around.
+   */
+  async getAvailableTransitions(
+    id: string,
+    user: AuthenticatedUser,
+  ): Promise<AvailableTransition[]> {
+    const incident = await this.findOneScoped(id, user);
+
+    return TRANSITION_RULES.filter(
+      (rule) => rule.from.includes(incident.status) && rule.allowedRoles.includes(user.role),
+    ).map((rule) => {
+      const allowed =
+        !rule.requiresOwnerOrElevated || isOwnerOrElevated(user.id, user.role, incident);
+      return {
+        toStatus: rule.to,
+        requiredFields: rule.requiredFields ?? [],
+        allowed,
+        blockedReason: allowed
+          ? undefined
+          : "Only the assigned owner or an elevated role can perform this transition",
+      };
     });
   }
 

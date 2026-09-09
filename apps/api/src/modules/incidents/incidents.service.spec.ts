@@ -573,6 +573,69 @@ describe("IncidentsService.createTransition", () => {
   });
 });
 
+describe("IncidentsService.getAvailableTransitions", () => {
+  it("omits a transition the caller's role can never perform", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+    });
+    // NEW -> ASSIGNED's allowedRoles doesn't include CTS_MANAGER_VIEWER.
+    const result = await service.getAvailableTransitions("incident-1", ctsViewer);
+    expect(result).toEqual([]);
+  });
+
+  it("marks a role-eligible transition blocked when the owner-or-elevated gate fails", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.PENDING_CUSTOMER, ownerUserId: otherEngineer.id }),
+        ),
+    });
+    // serviceDesk's role is allowed for PENDING_CUSTOMER -> IN_PROGRESS, but
+    // they're neither the owner (otherEngineer is) nor elevated.
+    const result = await service.getAvailableTransitions("incident-1", serviceDesk);
+    expect(result).toEqual([
+      {
+        toStatus: IncidentStatus.IN_PROGRESS,
+        requiredFields: [],
+        allowed: false,
+        blockedReason: expect.stringContaining("owner"),
+      },
+    ]);
+  });
+
+  it("returns allowed: true with no blockedReason when every gate passes", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.IN_PROGRESS })),
+    });
+    // IN_PROGRESS -> PENDING_CUSTOMER has no requiresOwnerOrElevated gate.
+    const result = await service.getAvailableTransitions("incident-1", serviceDesk);
+    expect(result).toEqual([
+      {
+        toStatus: IncidentStatus.PENDING_CUSTOMER,
+        requiredFields: ["reason"],
+        allowed: true,
+        blockedReason: undefined,
+      },
+    ]);
+  });
+
+  it("lists every candidate when multiple rules share the same (from, role)", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.RESOLVED })),
+    });
+    // RESOLVED -> CLOSED and RESOLVED -> REOPENED both allow SERVICE_DESK_NOC.
+    const result = await service.getAvailableTransitions("incident-1", serviceDesk);
+    expect(result.map((r) => r.toStatus).sort()).toEqual(
+      [IncidentStatus.CLOSED, IncidentStatus.REOPENED].sort(),
+    );
+  });
+});
+
 describe("IncidentsService comment visibility", () => {
   it("excludes internal comments for CTS_MANAGER_VIEWER", async () => {
     const comments = [

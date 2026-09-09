@@ -78,6 +78,61 @@ describe("Incidents API (e2e)", () => {
       .expect(400);
   });
 
+  it("GET /transitions reflects the caller's actual role-eligible next moves, not a fixed list", async () => {
+    const noc = await t.tokenFor(fx.users.serviceDesk.email);
+    const viewer = await t.tokenFor(fx.users.ctsViewer.email);
+    const created = await createIncident(noc, fx.site.id).expect(201); // NEW
+
+    // NEW -> ASSIGNED is SERVICE_DESK_NOC's to make, no owner gate on this rule
+    const nocView = await t
+      .http()
+      .get(`/api/v1/incidents/${created.body.id}/transitions`)
+      .set("authorization", `Bearer ${noc}`)
+      .expect(200);
+    expect(nocView.body).toEqual([{ toStatus: "ASSIGNED", requiredFields: [], allowed: true }]);
+
+    // CTS_MANAGER_VIEWER is never in any incident transition's allowedRoles
+    const viewerView = await t
+      .http()
+      .get(`/api/v1/incidents/${created.body.id}/transitions`)
+      .set("authorization", `Bearer ${viewer}`)
+      .expect(200);
+    expect(viewerView.body).toEqual([]);
+
+    // move it to IN_PROGRESS, then check requiredFields surfaces for
+    // IN_PROGRESS -> PENDING_CUSTOMER (needs "reason")
+    await t
+      .http()
+      .post(`/api/v1/incidents/${created.body.id}/transition`)
+      .set("authorization", `Bearer ${noc}`)
+      .send({ toStatus: "ASSIGNED", ownerUserId: fx.users.serviceDesk.id })
+      .expect(201);
+    // fx.siteEngineer isn't scoped to fx.site (see the file-level comment on
+    // Fixture), so use an elevated role to walk it forward instead.
+    const admin = await t.tokenFor(fx.users.superAdmin.email);
+    await t
+      .http()
+      .post(`/api/v1/incidents/${created.body.id}/transition`)
+      .set("authorization", `Bearer ${admin}`)
+      .send({ toStatus: "ACKNOWLEDGED" })
+      .expect(201);
+    await t
+      .http()
+      .post(`/api/v1/incidents/${created.body.id}/transition`)
+      .set("authorization", `Bearer ${admin}`)
+      .send({ toStatus: "IN_PROGRESS" })
+      .expect(201);
+
+    const afterInProgress = await t
+      .http()
+      .get(`/api/v1/incidents/${created.body.id}/transitions`)
+      .set("authorization", `Bearer ${noc}`)
+      .expect(200);
+    expect(afterInProgress.body).toEqual([
+      { toStatus: "PENDING_CUSTOMER", requiredFields: ["reason"], allowed: true },
+    ]);
+  });
+
   it("creates and lists comments on an incident", async () => {
     const admin = await t.tokenFor(fx.users.superAdmin.email);
     const created = await createIncident(admin, fx.site.id).expect(201);
