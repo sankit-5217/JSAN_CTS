@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link as RouterLink, useParams } from "react-router-dom";
 import {
   Alert,
   Autocomplete,
@@ -12,6 +12,7 @@ import {
   Divider,
   FormControlLabel,
   Grid,
+  Link,
   MenuItem,
   Paper,
   Stack,
@@ -111,6 +112,15 @@ interface CiOption {
   name: string;
 }
 
+interface VendorCase {
+  id: string;
+  vendorCaseNo: string;
+  vendorId: string;
+  dispatchStatus: string | null;
+  rmaRequired: boolean;
+  closedAt: string | null;
+}
+
 const PRIORITY_COLOR: Record<string, "error" | "warning" | "info" | "default"> = {
   P1: "error",
   P2: "warning",
@@ -159,6 +169,7 @@ export function IncidentDetailPage() {
   const [worklogs, setWorklogs] = useState<Worklog[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [availableTransitions, setAvailableTransitions] = useState<AvailableTransition[]>([]);
+  const [vendorCases, setVendorCases] = useState<VendorCase[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -173,8 +184,9 @@ export function IncidentDetailPage() {
       apiGet<Worklog[]>(`/incidents/${id}/worklogs`),
       apiGet<Attachment[]>(`/incidents/${id}/attachments`),
       apiGet<AvailableTransition[]>(`/incidents/${id}/transitions`),
+      apiGet<VendorCase[]>(`/vendor-cases?linkedIncidentId=${id}`),
     ])
-      .then(([inc, slaState, evts, cmts, wls, atts, transitions]) => {
+      .then(([inc, slaState, evts, cmts, wls, atts, transitions, vCases]) => {
         setIncident(inc);
         setSla(slaState);
         setEvents(evts);
@@ -182,6 +194,7 @@ export function IncidentDetailPage() {
         setWorklogs(wls);
         setAttachments(atts);
         setAvailableTransitions(transitions);
+        setVendorCases(vCases);
       })
       .catch((err: Error) => setError(err.message));
   }, [id]);
@@ -765,6 +778,45 @@ export function IncidentDetailPage() {
                 }}
               />
             </Button>
+          </Paper>
+
+          <Paper sx={{ p: 2, mt: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Vendor cases
+            </Typography>
+            <Stack spacing={1}>
+              {vendorCases.map((vc) => (
+                <Stack
+                  key={vc.id}
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  divider={<Divider orientation="vertical" flexItem />}
+                >
+                  <Link component={RouterLink} to={`/vendor-cases/${vc.id}`}>
+                    {vc.vendorCaseNo}
+                  </Link>
+                  <Typography variant="body2" color="text.secondary">
+                    {vc.dispatchStatus ?? "no dispatch yet"}
+                  </Typography>
+                  {vc.rmaRequired && <Chip size="small" label="RMA" />}
+                  <Chip
+                    size="small"
+                    label={vc.closedAt ? "closed" : "open"}
+                    color={vc.closedAt ? "default" : "warning"}
+                  />
+                </Stack>
+              ))}
+              {vendorCases.length === 0 && (
+                <Typography variant="body2" color="text.secondary">
+                  No vendor cases linked to this ticket. Open one from the{" "}
+                  <Link component={RouterLink} to="/vendors">
+                    Vendors
+                  </Link>{" "}
+                  page and link this incident's ID.
+                </Typography>
+              )}
+            </Stack>
           </Paper>
         </Grid>
 
