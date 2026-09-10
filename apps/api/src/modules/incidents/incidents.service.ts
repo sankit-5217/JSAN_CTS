@@ -49,6 +49,15 @@ export interface AvailableTransition {
   allowed: boolean;
   /** Human explanation for why `allowed` is false — undefined when true. */
   blockedReason?: string;
+  /**
+   * What `rule.validate()` would currently say if this transition were
+   * submitted with no extra fields filled in — e.g. NEW -> ASSIGNED needs
+   * an owner resolved, but that's a custom validate() check (either
+   * ownerGroupId or ownerUserId), not a simple "field present" entry in
+   * requiredFields. Undefined when the rule has no validate(), or the
+   * incident already satisfies it as-is.
+   */
+  hint?: string;
 }
 
 /** Minimal shape of what NestJS's FileInterceptor hands us (multer.File). */
@@ -450,6 +459,7 @@ export class IncidentsService {
         blockedReason: allowed
           ? undefined
           : "Only the assigned owner or an elevated role can perform this transition",
+        hint: rule.validate?.(incident, { toStatus: rule.to }),
       };
     });
   }

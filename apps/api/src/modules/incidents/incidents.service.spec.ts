@@ -622,6 +622,43 @@ describe("IncidentsService.getAvailableTransitions", () => {
     ]);
   });
 
+  it("surfaces a hint from the rule's validate() when it's neither a requiredFields entry nor an ownership block", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+    });
+    // NEW -> ASSIGNED has no requiresOwnerOrElevated gate and no
+    // requiredFields entry for it, but its validate() still needs an owner
+    // resolved — that's what `hint` is for.
+    const result = await service.getAvailableTransitions("incident-1", serviceDesk);
+    expect(result).toEqual([
+      {
+        toStatus: IncidentStatus.ASSIGNED,
+        requiredFields: [],
+        allowed: true,
+        blockedReason: undefined,
+        hint: expect.stringContaining("resolved"),
+      },
+    ]);
+  });
+
+  it("omits the hint once the incident already satisfies the rule's validate()", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.NEW, ownerUserId: "engineer-1" })),
+    });
+    const result = await service.getAvailableTransitions("incident-1", serviceDesk);
+    expect(result).toEqual([
+      {
+        toStatus: IncidentStatus.ASSIGNED,
+        requiredFields: [],
+        allowed: true,
+        blockedReason: undefined,
+        hint: undefined,
+      },
+    ]);
+  });
+
   it("lists every candidate when multiple rules share the same (from, role)", async () => {
     const { service } = makeService({
       incidentFindUnique: jest

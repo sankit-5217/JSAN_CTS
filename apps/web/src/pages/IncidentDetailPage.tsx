@@ -32,6 +32,10 @@ interface AvailableTransition {
   requiredFields: TransitionField[];
   allowed: boolean;
   blockedReason?: string;
+  /** E.g. NEW -> ASSIGNED needs an owner resolved — not a requiredFields
+   * entry (that's reason/resolutionCategory/rootCauseSummary only), so the
+   * backend surfaces it here instead. */
+  hint?: string;
 }
 
 interface Incident {
@@ -562,6 +566,9 @@ export function IncidentDetailPage() {
                     </MenuItem>
                   ))}
                 </TextField>
+                {selectedTransition?.hint && (
+                  <Alert severity="info">{selectedTransition.hint}</Alert>
+                )}
                 <TextField
                   label="Reason"
                   size="small"

@@ -83,13 +83,23 @@ describe("Incidents API (e2e)", () => {
     const viewer = await t.tokenFor(fx.users.ctsViewer.email);
     const created = await createIncident(noc, fx.site.id).expect(201); // NEW
 
-    // NEW -> ASSIGNED is SERVICE_DESK_NOC's to make, no owner gate on this rule
+    // NEW -> ASSIGNED is SERVICE_DESK_NOC's to make, no owner gate on this
+    // rule — but it does have a custom validate() requiring an owner to be
+    // resolved, surfaced here as `hint` since it's neither a requiredFields
+    // entry nor a role/ownership block.
     const nocView = await t
       .http()
       .get(`/api/v1/incidents/${created.body.id}/transitions`)
       .set("authorization", `Bearer ${noc}`)
       .expect(200);
-    expect(nocView.body).toEqual([{ toStatus: "ASSIGNED", requiredFields: [], allowed: true }]);
+    expect(nocView.body).toEqual([
+      {
+        toStatus: "ASSIGNED",
+        requiredFields: [],
+        allowed: true,
+        hint: expect.stringContaining("resolved"),
+      },
+    ]);
 
     // CTS_MANAGER_VIEWER is never in any incident transition's allowedRoles
     const viewerView = await t
