@@ -20,6 +20,8 @@ import {
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "../api/client";
 
 const WORKLOG_ACTIVITY_TYPES = ["REMOTE_WORK", "ONSITE", "TRAVEL", "VENDOR_CALL"];
+const IMPACT_URGENCY_VALUES = ["HIGH", "MEDIUM", "LOW"];
+const PRIORITY_VALUES = ["P1", "P2", "P3", "P4"];
 
 // A field name as it appears in TransitionRule.requiredFields on the
 // backend (apps/api/src/modules/incidents/incident-transitions.ts).
@@ -175,6 +177,55 @@ export function IncidentDetailPage() {
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  // --- Edit incident form --------------------------------------------------
+  // Seeded from the incident once per incident id, not on every refetch, so
+  // a mid-edit refetch (e.g. someone else posts a comment) doesn't clobber
+  // what's being typed.
+  const [editShortDescription, setEditShortDescription] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editImpact, setEditImpact] = useState("");
+  const [editUrgency, setEditUrgency] = useState("");
+  const [editPriority, setEditPriority] = useState("");
+  const [editPriorityChangeReason, setEditPriorityChangeReason] = useState("");
+  const [editOwnerUserId, setEditOwnerUserId] = useState("");
+  const [editOwnerGroupId, setEditOwnerGroupId] = useState("");
+
+  useEffect(() => {
+    if (!incident) return;
+    setEditShortDescription(incident.shortDescription);
+    setEditCategory(incident.category);
+    setEditImpact(incident.impact);
+    setEditUrgency(incident.urgency);
+    setEditPriority(incident.priority);
+    setEditPriorityChangeReason("");
+    setEditOwnerUserId(incident.ownerUserId ?? "");
+    setEditOwnerGroupId(incident.ownerGroupId ?? "");
+    // Only re-seed when a different incident loads, not on every refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incident?.id]);
+
+  const priorityChanged = incident !== null && editPriority !== incident.priority;
+
+  const submitEdit = async () => {
+    if (!id) return;
+    setActionError(null);
+    try {
+      await apiPatch(`/incidents/${id}`, {
+        shortDescription: editShortDescription,
+        category: editCategory,
+        impact: editImpact,
+        urgency: editUrgency,
+        priority: editPriority,
+        priorityChangeReason: priorityChanged ? editPriorityChangeReason : undefined,
+        ownerUserId: editOwnerUserId || undefined,
+        ownerGroupId: editOwnerGroupId || undefined,
+      });
+      refetch();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   // --- Transition form ---------------------------------------------------
   const [toStatus, setToStatus] = useState("");
@@ -355,6 +406,123 @@ export function IncidentDetailPage() {
           {actionError}
         </Alert>
       )}
+
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Edit incident
+        </Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={6}>
+            <TextField
+              label="Short description"
+              size="small"
+              fullWidth
+              value={editShortDescription}
+              onChange={(e) => setEditShortDescription(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <TextField
+              label="Category"
+              size="small"
+              fullWidth
+              value={editCategory}
+              onChange={(e) => setEditCategory(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <TextField
+              select
+              label="Impact"
+              size="small"
+              fullWidth
+              value={editImpact}
+              onChange={(e) => setEditImpact(e.target.value)}
+            >
+              {IMPACT_URGENCY_VALUES.map((v) => (
+                <MenuItem key={v} value={v}>
+                  {v}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <TextField
+              select
+              label="Urgency"
+              size="small"
+              fullWidth
+              value={editUrgency}
+              onChange={(e) => setEditUrgency(e.target.value)}
+            >
+              {IMPACT_URGENCY_VALUES.map((v) => (
+                <MenuItem key={v} value={v}>
+                  {v}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <TextField
+              select
+              label="Priority"
+              size="small"
+              fullWidth
+              value={editPriority}
+              onChange={(e) => setEditPriority(e.target.value)}
+            >
+              {PRIORITY_VALUES.map((v) => (
+                <MenuItem key={v} value={v}>
+                  {v}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+          {priorityChanged && (
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="Reason for priority change"
+                size="small"
+                fullWidth
+                required
+                value={editPriorityChangeReason}
+                onChange={(e) => setEditPriorityChangeReason(e.target.value)}
+              />
+            </Grid>
+          )}
+          <Grid item xs={12} sm={6}>
+            <TextField
+              label="Owner user ID (UUID)"
+              size="small"
+              fullWidth
+              value={editOwnerUserId}
+              onChange={(e) => setEditOwnerUserId(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <TextField
+              label="Owner group ID (UUID)"
+              size="small"
+              fullWidth
+              value={editOwnerGroupId}
+              onChange={(e) => setEditOwnerGroupId(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={12}>
+            <Button
+              variant="contained"
+              disabled={
+                !editShortDescription ||
+                !editCategory ||
+                (priorityChanged && !editPriorityChangeReason)
+              }
+              onClick={submitEdit}
+            >
+              Save changes
+            </Button>
+          </Grid>
+        </Grid>
+      </Paper>
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>

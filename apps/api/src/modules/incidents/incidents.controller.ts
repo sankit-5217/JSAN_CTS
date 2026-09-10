@@ -42,12 +42,20 @@ export const INCIDENT_WRITE_ROLES = [
   UserRole.SERVICE_DESK_NOC,
 ] as const;
 
-// Comments are the one write a customer gets: replying to Service Desk on
-// their own ticket. Every other write (create, update, transition,
-// attachments) stays on INCIDENT_WRITE_ROLES only — this constant is
-// deliberately scoped to just the comment route, not merged into the list
-// above.
+// Comments are one of two writes a customer gets: replying to Service Desk
+// on their own ticket. Every other write (create, update, transition) stays
+// on INCIDENT_WRITE_ROLES only — this constant is deliberately scoped to
+// just the comment route, not merged into the list above.
 const INCIDENT_COMMENT_ROLES = [...INCIDENT_WRITE_ROLES, UserRole.CTS_MANAGER_VIEWER] as const;
+
+// The second customer write: attaching evidence (a photo of a fault light,
+// a screenshot) to their own report. Upload only — deleting an attachment
+// stays internal-only (INCIDENT_WRITE_ROLES), same reasoning as comments
+// never letting the customer mark something internal.
+const INCIDENT_ATTACHMENT_UPLOAD_ROLES = [
+  ...INCIDENT_WRITE_ROLES,
+  UserRole.CTS_MANAGER_VIEWER,
+] as const;
 
 @ApiTags("incidents")
 @ApiBearerAuth()
@@ -149,7 +157,7 @@ export class IncidentsController {
   }
 
   @Post(":id/attachments")
-  @Roles(...INCIDENT_WRITE_ROLES)
+  @Roles(...INCIDENT_ATTACHMENT_UPLOAD_ROLES)
   @ApiConsumes("multipart/form-data")
   @UseInterceptors(FileInterceptor("file"))
   uploadAttachment(

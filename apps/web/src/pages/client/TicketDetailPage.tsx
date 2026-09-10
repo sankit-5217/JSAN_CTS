@@ -13,7 +13,7 @@ import {
   Typography,
 } from "@mui/material";
 import type { IncidentStatus, Priority } from "@cts-dc-opsdesk/shared-types";
-import { apiGet, apiPost, getStoredToken } from "../../api/client";
+import { apiGet, apiPost, apiUpload, getStoredToken } from "../../api/client";
 import { decodeJwtPayload } from "../../api/jwt";
 
 interface Incident {
@@ -30,6 +30,13 @@ interface Comment {
   id: string;
   authorId: string;
   body: string;
+  createdAt: string;
+}
+
+interface Attachment {
+  id: string;
+  objectKey: string;
+  sizeBytes: number;
   createdAt: string;
 }
 
@@ -76,9 +83,11 @@ export function TicketDetailPage() {
 
   const [incident, setIncident] = useState<Incident | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const refetch = useCallback(() => {
     if (!id) return;
@@ -86,10 +95,12 @@ export function TicketDetailPage() {
     Promise.all([
       apiGet<Incident>(`/incidents/${id}`),
       apiGet<Comment[]>(`/incidents/${id}/comments`),
+      apiGet<Attachment[]>(`/incidents/${id}/attachments`),
     ])
-      .then(([inc, comm]) => {
+      .then(([inc, comm, atts]) => {
         setIncident(inc);
         setComments(comm);
+        setAttachments(atts);
       })
       .catch((err: Error) => setError(err.message));
   }, [id]);
@@ -110,6 +121,32 @@ export function TicketDetailPage() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSending(false);
+    }
+  };
+
+  const uploadFile = async (file: File) => {
+    if (!id) return;
+    setError(null);
+    setUploading(true);
+    try {
+      await apiUpload(`/incidents/${id}/attachments`, file);
+      refetch();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const downloadAttachment = async (attachmentId: string) => {
+    setError(null);
+    try {
+      const { url } = await apiGet<{ url: string }>(
+        `/incidents/${id}/attachments/${attachmentId}/download`,
+      );
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -193,6 +230,45 @@ export function TicketDetailPage() {
             </Box>
           );
         })}
+      </Stack>
+
+      <Divider sx={{ mb: 2 }} />
+      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
+        Attachments
+      </Typography>
+      <Stack spacing={1} sx={{ mb: 3 }}>
+        {attachments.length === 0 && (
+          <Typography color="text.secondary">
+            No attachments yet — add a photo or file if it helps explain the issue.
+          </Typography>
+        )}
+        {attachments.map((a) => (
+          <Stack key={a.id} direction="row" spacing={2} alignItems="center">
+            <Typography variant="body2" sx={{ flex: 1 }}>
+              {a.objectKey.split("/").pop()} ({(a.sizeBytes / 1024).toFixed(1)} KB)
+            </Typography>
+            <Button size="small" onClick={() => downloadAttachment(a.id)}>
+              Download
+            </Button>
+          </Stack>
+        ))}
+        <Button
+          component="label"
+          variant="outlined"
+          disabled={uploading}
+          sx={{ alignSelf: "flex-start" }}
+        >
+          {uploading ? "Uploading..." : "Add attachment"}
+          <input
+            type="file"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) uploadFile(file);
+              e.target.value = "";
+            }}
+          />
+        </Button>
       </Stack>
 
       <Divider sx={{ mb: 2 }} />
