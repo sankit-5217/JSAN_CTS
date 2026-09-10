@@ -117,6 +117,23 @@ describe("renderNotification", () => {
     expect(mail.text).toContain("Mitigation / rationale: Residual accepted by the infra lead");
   });
 
+  it("renders a comment-added notification with the author and body", () => {
+    const mail = renderNotification(
+      {
+        kind: "INCIDENT_COMMENT_ADDED",
+        entity: incident(),
+        author: JANE,
+        body: "Can you confirm the server's asset tag?",
+      },
+      { to: [LEAD] },
+    );
+
+    expect(mail.subject).toBe("[SITE01] INC-1042 — new comment from Jane Doe");
+    expect(mail.headers["X-OpsDesk-Event"]).toBe("INCIDENT_COMMENT_ADDED");
+    expect(mail.text).toContain("Jane Doe <jane@corp.example> commented on INC-1042:");
+    expect(mail.text).toContain("Can you confirm the server's asset tag?");
+  });
+
   it("throws EmailRenderError when there are no recipients or no entity key", () => {
     const event: NotificationEvent = {
       kind: "INCIDENT_ASSIGNED",

@@ -157,6 +157,7 @@ model User {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   incidentsOwned     Incident[]      @relation("IncidentOwner")
+  incidentsReported  Incident[]      @relation("IncidentReportedBy")
   worklogs           Worklog[]
   auditEvents        AuditEvent[]
   siteAccess         UserSiteAccess[]
@@ -365,6 +366,10 @@ model Incident {
   shortDescription String     @map("short_description")
   ownerGroupId String?        @map("owner_group_id")
   ownerUserId  String?        @map("owner_user_id")
+  // Set only when this incident came in via POST /incidents/customer-report —
+  // null for internally-created incidents (spec §10.3: who to notify back on
+  // status/comment updates for a self-service ticket).
+  reportedByUserId String?    @map("reported_by_user_id")
   acknowledgedAt DateTime?    @map("acknowledged_at")
   resolutionCategory String?  @map("resolution_category")
   rootCauseSummary   String?  @map("root_cause_summary")
@@ -377,6 +382,7 @@ model Incident {
   ci         ConfigurationItem? @relation(fields: [ciId], references: [id])
   owner      User?              @relation("IncidentOwner", fields: [ownerUserId], references: [id])
   ownerGroup SupportGroup?      @relation(fields: [ownerGroupId], references: [id])
+  reportedBy User?              @relation("IncidentReportedBy", fields: [reportedByUserId], references: [id])
 
   events    IncidentEvent[]
   comments  IncidentComment[]

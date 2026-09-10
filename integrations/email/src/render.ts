@@ -77,6 +77,11 @@ function renderBody(event: NotificationEvent): Rendered {
           event.comment ? `Comment: ${event.comment}` : "",
         ],
       };
+    case "INCIDENT_COMMENT_ADDED":
+      return {
+        phrase: `new comment from ${event.author.name ?? event.author.email}`,
+        lines: [`${addr(event.author)} commented on ${event.entity.key}:`, event.body],
+      };
     case "SLA_WARNING":
       return {
         phrase: `${event.slaKind} SLA due in ${minutesPhrase(event.minutesRemaining)}`,
