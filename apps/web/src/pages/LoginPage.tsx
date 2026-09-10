@@ -94,25 +94,18 @@ const CAPABILITIES = [
   },
 ];
 
-function BrandMark({ size = 34 }: { size?: number }) {
+/** `on="dark"` (the brand panel) gets the white logo lockup; `on="light"`
+ *  (the mobile compact header, on the page's light background) gets the
+ *  full-color one — same two PNGs the internal sidebar and client portal
+ *  header use, so the mark is identical everywhere it appears. */
+function BrandMark({ height = 24, on = "dark" }: { height?: number; on?: "dark" | "light" }) {
   return (
     <Box
-      sx={{
-        width: size,
-        height: size,
-        borderRadius: "10px",
-        bgcolor: ACCENT,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontWeight: 800,
-        fontSize: size * 0.4,
-        color: PANEL_BG,
-        flexShrink: 0,
-      }}
-    >
-      OD
-    </Box>
+      component="img"
+      src={on === "dark" ? "/jsan-logo-white.png" : "/jsan-logo.png"}
+      alt="JSAN"
+      sx={{ height, width: "auto", display: "block" }}
+    />
   );
 }
 
@@ -160,16 +153,13 @@ export function LoginPage() {
           color: "#fff",
         }}
       >
-        <Stack direction="row" spacing={1.5} alignItems="center">
-          <BrandMark />
-          <Box>
-            <Typography sx={{ fontWeight: 700, fontSize: 16, lineHeight: 1.2 }}>OpsDesk</Typography>
-            <Typography
-              sx={{ color: alpha("#ffffff", 0.5), fontSize: 10.5, letterSpacing: "0.06em" }}
-            >
-              DATA CENTER OPS
-            </Typography>
-          </Box>
+        <Stack spacing={0.75}>
+          <BrandMark height={28} />
+          <Typography
+            sx={{ color: alpha("#ffffff", 0.5), fontSize: 10.5, letterSpacing: "0.06em" }}
+          >
+            CTS DATA CENTER OPSDESK
+          </Typography>
         </Stack>
 
         <Box>
@@ -227,19 +217,11 @@ export function LoginPage() {
         }}
       >
         <Box sx={{ width: "100%", maxWidth: 420 }}>
-          <Stack
-            direction="row"
-            spacing={1.5}
-            alignItems="center"
-            sx={{ mb: 3, display: { xs: "flex", md: "none" } }}
-          >
-            <BrandMark size={40} />
-            <Box>
-              <Typography sx={{ fontWeight: 700, fontSize: 17 }}>OpsDesk</Typography>
-              <Typography sx={{ color: "text.secondary", fontSize: 11, letterSpacing: "0.06em" }}>
-                DATA CENTER OPS
-              </Typography>
-            </Box>
+          <Stack spacing={0.75} sx={{ mb: 3, display: { xs: "flex", md: "none" } }}>
+            <BrandMark height={32} on="light" />
+            <Typography sx={{ color: "text.secondary", fontSize: 11, letterSpacing: "0.06em" }}>
+              CTS DATA CENTER OPSDESK
+            </Typography>
           </Stack>
 
           <Card
@@ -264,7 +246,7 @@ export function LoginPage() {
                 OPS PLATFORM
               </Typography>
               <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
-                Sign in to OpsDesk
+                Sign in to JSAN CTS OpsDesk
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 Dev-mode sign-in — pick a seeded user, no password. Disabled server-side outside

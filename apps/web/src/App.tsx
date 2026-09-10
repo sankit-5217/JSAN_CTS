@@ -146,32 +146,16 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <Toolbar sx={{ px: 2.5, minHeight: "64px !important" }}>
-        <Stack direction="row" spacing={1.5} alignItems="center">
+        <Stack spacing={0.6}>
           <Box
-            sx={{
-              width: 34,
-              height: 34,
-              borderRadius: "10px",
-              bgcolor: ACCENT,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 800,
-              fontSize: 14,
-              color: darken(theme.palette.primary.main, 0.45),
-              flexShrink: 0,
-            }}
-          >
-            OD
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography sx={{ color: "#fff", fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>
-              OpsDesk
-            </Typography>
-            <Typography sx={{ color: SIDEBAR_TEXT_MUTED, fontSize: 10.5, letterSpacing: "0.06em" }}>
-              DATA CENTER OPS
-            </Typography>
-          </Box>
+            component="img"
+            src="/jsan-logo-white.png"
+            alt="JSAN"
+            sx={{ height: 24, width: "auto", display: "block" }}
+          />
+          <Typography sx={{ color: SIDEBAR_TEXT_MUTED, fontSize: 10, letterSpacing: "0.06em" }}>
+            CTS DATA CENTER OPSDESK
+          </Typography>
         </Stack>
       </Toolbar>
       <Divider sx={{ borderColor: SIDEBAR_BORDER }} />

@@ -1,36 +1,18 @@
 import { Navigate, Outlet, Link, useLocation } from "react-router-dom";
 import { AppBar, Box, Button, Chip, Stack, Toolbar, Typography } from "@mui/material";
-import { alpha, darken } from "@mui/material/styles";
+import { alpha } from "@mui/material/styles";
 import { clearStoredToken, getStoredToken } from "../../api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "../../api/jwt";
 import { theme } from "../../theme/theme";
 
-// Same primary-derived tokens as the login page / sidebar, applied much more
-// lightly here — a support portal reads as a different *kind* of product
-// from the ops console, not a re-skin of it, but still unmistakably the
-// same brand.
-const ACCENT = theme.palette.secondary.light;
-const BRAND_DARK = darken(theme.palette.primary.main, 0.45);
-
 function BrandMark() {
   return (
     <Box
-      sx={{
-        width: 32,
-        height: 32,
-        borderRadius: "9px",
-        bgcolor: ACCENT,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontWeight: 800,
-        fontSize: 13,
-        color: BRAND_DARK,
-        flexShrink: 0,
-      }}
-    >
-      OD
-    </Box>
+      component="img"
+      src="/jsan-logo.png"
+      alt="JSAN"
+      sx={{ height: 22, width: "auto", display: "block" }}
+    />
   );
 }
 
@@ -71,16 +53,11 @@ export function ClientLayout() {
         sx={{ bgcolor: "#fff", borderBottom: 1, borderColor: "divider" }}
       >
         <Toolbar sx={{ gap: 3, flexWrap: "wrap", py: 1 }}>
-          <Stack direction="row" spacing={1.25} alignItems="center">
+          <Stack spacing={0.4}>
             <BrandMark />
-            <Box>
-              <Typography sx={{ fontWeight: 700, fontSize: 14.5, lineHeight: 1.2 }}>
-                OpsDesk
-              </Typography>
-              <Typography sx={{ color: "text.secondary", fontSize: 10.5, letterSpacing: "0.05em" }}>
-                SUPPORT PORTAL
-              </Typography>
-            </Box>
+            <Typography sx={{ color: "text.secondary", fontSize: 10, letterSpacing: "0.05em" }}>
+              CTS SUPPORT PORTAL
+            </Typography>
           </Stack>
 
           <Stack direction="row" spacing={0.5}>
