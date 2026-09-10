@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Card,
@@ -42,6 +43,7 @@ interface Incident {
   id: string;
   incidentNo: string;
   siteId: string;
+  ciId: string | null;
   status: string;
   priority: string;
   category: string;
@@ -101,6 +103,12 @@ interface Attachment {
   contentType: string;
   sizeBytes: number;
   createdAt: string;
+}
+
+interface CiOption {
+  id: string;
+  ciCode: string;
+  name: string;
 }
 
 const PRIORITY_COLOR: Record<string, "error" | "warning" | "info" | "default"> = {
@@ -194,6 +202,9 @@ export function IncidentDetailPage() {
   const [editPriorityChangeReason, setEditPriorityChangeReason] = useState("");
   const [editOwnerUserId, setEditOwnerUserId] = useState("");
   const [editOwnerGroupId, setEditOwnerGroupId] = useState("");
+  const [ciQuery, setCiQuery] = useState("");
+  const [ciOptions, setCiOptions] = useState<CiOption[]>([]);
+  const [selectedCi, setSelectedCi] = useState<CiOption | null>(null);
 
   useEffect(() => {
     if (!incident) return;
@@ -205,9 +216,31 @@ export function IncidentDetailPage() {
     setEditPriorityChangeReason("");
     setEditOwnerUserId(incident.ownerUserId ?? "");
     setEditOwnerGroupId(incident.ownerGroupId ?? "");
+    // The incident only carries the CI's id, not its code/name — fetch the
+    // one CI so the picker shows something readable instead of a raw UUID.
+    // Not `refetch`'s problem to fold in: this only needs to happen once
+    // per incident, same as everything else in this effect.
+    if (incident.ciId) {
+      apiGet<CiOption>(`/cis/${incident.ciId}`)
+        .then(setSelectedCi)
+        .catch(() => setSelectedCi(null));
+    } else {
+      setSelectedCi(null);
+    }
+    setCiQuery("");
     // Only re-seed when a different incident loads, not on every refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incident?.id]);
+
+  useEffect(() => {
+    if (!incident || !ciQuery) {
+      setCiOptions([]);
+      return;
+    }
+    apiGet<{ items: CiOption[] }>(`/cis?siteId=${incident.siteId}&q=${encodeURIComponent(ciQuery)}`)
+      .then((res) => setCiOptions(res.items))
+      .catch(() => undefined);
+  }, [ciQuery, incident]);
 
   const priorityChanged = incident !== null && editPriority !== incident.priority;
 
@@ -226,6 +259,7 @@ export function IncidentDetailPage() {
         // actually being changed, same as priorityChangeReason itself.
         priority: priorityChanged ? editPriority : undefined,
         priorityChangeReason: priorityChanged ? editPriorityChangeReason : undefined,
+        ciId: selectedCi?.id,
         ownerUserId: editOwnerUserId || undefined,
         ownerGroupId: editOwnerGroupId || undefined,
       });
@@ -498,6 +532,25 @@ export function IncidentDetailPage() {
               />
             </Grid>
           )}
+          <Grid item xs={12}>
+            <Autocomplete
+              options={ciOptions}
+              getOptionLabel={(o) => `${o.ciCode} — ${o.name}`}
+              isOptionEqualToValue={(o, v) => o.id === v.id}
+              value={selectedCi}
+              onChange={(_, value) => setSelectedCi(value)}
+              inputValue={ciQuery}
+              onInputChange={(_, value) => setCiQuery(value)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Affected CI (search by code or name)"
+                  size="small"
+                  helperText="Which server/rack/PDU this ticket is actually about — links it into the CMDB for alert correlation and history."
+                />
+              )}
+            />
+          </Grid>
           <Grid item xs={12} sm={6}>
             <TextField
               label="Owner user ID (UUID)"
