@@ -11,7 +11,7 @@ function BrandMark() {
       component="img"
       src="/jsan-logo.png"
       alt="JSAN"
-      sx={{ height: 22, width: "auto", display: "block" }}
+      sx={{ height: 27, width: "auto", display: "block" }}
     />
   );
 }
@@ -52,11 +52,18 @@ export function ClientLayout() {
         elevation={0}
         sx={{ bgcolor: "#fff", borderBottom: 1, borderColor: "divider" }}
       >
-        <Toolbar sx={{ gap: 3, flexWrap: "wrap", py: 1 }}>
-          <Stack spacing={0.4}>
+        <Toolbar sx={{ gap: 3, flexWrap: "wrap", py: 1.5, minHeight: "76px !important" }}>
+          <Stack spacing={0.75}>
             <BrandMark />
-            <Typography sx={{ color: "text.secondary", fontSize: 10, letterSpacing: "0.05em" }}>
-              CTS SUPPORT PORTAL
+            <Typography
+              sx={{
+                color: "text.secondary",
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: "0.07em",
+              }}
+            >
+              CTS &middot; SUPPORT PORTAL
             </Typography>
           </Stack>
 

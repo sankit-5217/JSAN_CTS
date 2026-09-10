@@ -145,16 +145,23 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
   const location = useLocation();
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <Toolbar sx={{ px: 2.5, minHeight: "64px !important" }}>
-        <Stack spacing={0.6}>
+      <Toolbar sx={{ px: 2.5, py: 2.5, minHeight: "76px !important" }}>
+        <Stack spacing={1}>
           <Box
             component="img"
             src="/jsan-logo-white.png"
             alt="JSAN"
-            sx={{ height: 24, width: "auto", display: "block" }}
+            sx={{ height: 30, width: "auto", display: "block" }}
           />
-          <Typography sx={{ color: SIDEBAR_TEXT_MUTED, fontSize: 10, letterSpacing: "0.06em" }}>
-            CTS DATA CENTER OPSDESK
+          <Typography
+            sx={{
+              color: SIDEBAR_TEXT_MUTED,
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+            }}
+          >
+            CTS &middot; DATA CENTER OPSDESK
           </Typography>
         </Stack>
       </Toolbar>
@@ -286,7 +293,7 @@ function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
       elevation={0}
       sx={{ borderBottom: 1, borderColor: "divider" }}
     >
-      <Toolbar sx={{ gap: 1.5 }}>
+      <Toolbar sx={{ gap: 1.5, minHeight: "76px !important" }}>
         <IconButton
           onClick={onMenuClick}
           edge="start"
