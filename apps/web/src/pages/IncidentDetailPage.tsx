@@ -233,11 +233,16 @@ export function IncidentDetailPage() {
   }, [incident?.id]);
 
   useEffect(() => {
-    if (!incident || !ciQuery) {
+    if (!incident) {
       setCiOptions([]);
       return;
     }
-    apiGet<{ items: CiOption[] }>(`/cis?siteId=${incident.siteId}&q=${encodeURIComponent(ciQuery)}`)
+    // No `q` filter at all when the field's empty — the backend already
+    // treats that as "no filter" (cmdb.service.ts's findAll), so this
+    // lists the site's whole CMDB inventory by default rather than
+    // requiring the engineer to already know a code before anything shows.
+    const qParam = ciQuery ? `&q=${encodeURIComponent(ciQuery)}` : "";
+    apiGet<{ items: CiOption[] }>(`/cis?siteId=${incident.siteId}${qParam}`)
       .then((res) => setCiOptions(res.items))
       .catch(() => undefined);
   }, [ciQuery, incident]);
@@ -541,10 +546,12 @@ export function IncidentDetailPage() {
               onChange={(_, value) => setSelectedCi(value)}
               inputValue={ciQuery}
               onInputChange={(_, value) => setCiQuery(value)}
+              openOnFocus
+              noOptionsText="No CIs found at this site"
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  label="Affected CI (search by code or name)"
+                  label="Affected CI (search by code or name, or click to browse)"
                   size="small"
                   helperText="Which server/rack/PDU this ticket is actually about — links it into the CMDB for alert correlation and history."
                 />
