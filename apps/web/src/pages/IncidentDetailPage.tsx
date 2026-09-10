@@ -216,7 +216,11 @@ export function IncidentDetailPage() {
         category: editCategory,
         impact: editImpact,
         urgency: editUrgency,
-        priority: editPriority,
+        // The backend requires priorityChangeReason whenever `priority` is
+        // present in the body at all (spec §16), not just when it differs
+        // from the current value — so only include the key when it's
+        // actually being changed, same as priorityChangeReason itself.
+        priority: priorityChanged ? editPriority : undefined,
         priorityChangeReason: priorityChanged ? editPriorityChangeReason : undefined,
         ownerUserId: editOwnerUserId || undefined,
         ownerGroupId: editOwnerGroupId || undefined,
