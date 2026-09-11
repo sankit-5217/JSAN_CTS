@@ -112,6 +112,17 @@ interface CiOption {
   name: string;
 }
 
+interface EngineerOption {
+  id: string;
+  displayName: string;
+  email: string;
+}
+
+interface GroupOption {
+  id: string;
+  name: string;
+}
+
 interface VendorCase {
   id: string;
   vendorCaseNo: string;
@@ -150,6 +161,80 @@ function slaCountdown(
 }
 
 /**
+ * Assign-to-engineer picker, used in both the edit panel and the transition
+ * panel — each instance keeps its own query/options so picking a different
+ * engineer while assigning doesn't affect what the edit panel shows. Scoped
+ * to `siteId` server-side (GET /users?role=SITE_ENGINEER&siteId=...), same
+ * "no q at all when empty" pattern as the CI picker so it lists the site's
+ * whole engineer roster by default instead of requiring a name first.
+ */
+function EngineerPicker({
+  siteId,
+  value,
+  onChange,
+  label,
+}: {
+  siteId: string;
+  value: EngineerOption | null;
+  onChange: (value: EngineerOption | null) => void;
+  label: string;
+}) {
+  const [query, setQuery] = useState("");
+  const [options, setOptions] = useState<EngineerOption[]>([]);
+
+  useEffect(() => {
+    const qParam = query ? `&q=${encodeURIComponent(query)}` : "";
+    apiGet<EngineerOption[]>(`/users?role=SITE_ENGINEER&siteId=${siteId}${qParam}`)
+      .then(setOptions)
+      .catch(() => undefined);
+  }, [query, siteId]);
+
+  return (
+    <Autocomplete
+      options={options}
+      getOptionLabel={(o) => `${o.displayName} (${o.email})`}
+      isOptionEqualToValue={(o, v) => o.id === v.id}
+      value={value}
+      onChange={(_, v) => onChange(v)}
+      inputValue={query}
+      onInputChange={(_, v) => setQuery(v)}
+      openOnFocus
+      noOptionsText="No engineers assigned to this site"
+      renderInput={(params) => <TextField {...params} label={label} size="small" />}
+    />
+  );
+}
+
+/** Support groups are a short, site-independent list (GET /support-groups
+ * has no query params at all) — client-side filtering is enough, no search
+ * round-trip needed. `options` is fetched once at the page level and shared
+ * by every instance instead of each picker re-fetching the same list. */
+function GroupPicker({
+  options,
+  value,
+  onChange,
+  label,
+}: {
+  options: GroupOption[];
+  value: GroupOption | null;
+  onChange: (value: GroupOption | null) => void;
+  label: string;
+}) {
+  return (
+    <Autocomplete
+      options={options}
+      getOptionLabel={(o) => o.name}
+      isOptionEqualToValue={(o, v) => o.id === v.id}
+      value={value}
+      onChange={(_, v) => onChange(v)}
+      openOnFocus
+      noOptionsText="No support groups yet"
+      renderInput={(params) => <TextField {...params} label={label} size="small" />}
+    />
+  );
+}
+
+/**
  * Incident workspace (frontend-depth plan, Steps 3-4): header, SLA
  * countdown snapshot, status transition, comments, worklogs (add +
  * correct), attachments (upload + download), and a merged timeline.
@@ -170,8 +255,17 @@ export function IncidentDetailPage() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [availableTransitions, setAvailableTransitions] = useState<AvailableTransition[]>([]);
   const [vendorCases, setVendorCases] = useState<VendorCase[]>([]);
+  const [supportGroups, setSupportGroups] = useState<GroupOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Fetched once, not per-incident — the whole app shares one support-group
+  // register (GET /support-groups isn't site-scoped, see support-groups.controller.ts).
+  useEffect(() => {
+    apiGet<GroupOption[]>("/support-groups")
+      .then(setSupportGroups)
+      .catch(() => undefined);
+  }, []);
 
   const refetch = useCallback(() => {
     if (!id) return;
@@ -213,8 +307,8 @@ export function IncidentDetailPage() {
   const [editUrgency, setEditUrgency] = useState("");
   const [editPriority, setEditPriority] = useState("");
   const [editPriorityChangeReason, setEditPriorityChangeReason] = useState("");
-  const [editOwnerUserId, setEditOwnerUserId] = useState("");
-  const [editOwnerGroupId, setEditOwnerGroupId] = useState("");
+  const [editOwnerUser, setEditOwnerUser] = useState<EngineerOption | null>(null);
+  const [editOwnerGroup, setEditOwnerGroup] = useState<GroupOption | null>(null);
   const [ciQuery, setCiQuery] = useState("");
   const [ciOptions, setCiOptions] = useState<CiOption[]>([]);
   const [selectedCi, setSelectedCi] = useState<CiOption | null>(null);
@@ -227,12 +321,22 @@ export function IncidentDetailPage() {
     setEditUrgency(incident.urgency);
     setEditPriority(incident.priority);
     setEditPriorityChangeReason("");
-    setEditOwnerUserId(incident.ownerUserId ?? "");
-    setEditOwnerGroupId(incident.ownerGroupId ?? "");
-    // The incident only carries the CI's id, not its code/name — fetch the
-    // one CI so the picker shows something readable instead of a raw UUID.
-    // Not `refetch`'s problem to fold in: this only needs to happen once
-    // per incident, same as everything else in this effect.
+    // The incident only carries owner/CI ids, not readable names — resolve
+    // each to show a name instead of a raw UUID. Not `refetch`'s problem to
+    // fold in: this only needs to happen once per incident, same as
+    // everything else in this effect.
+    if (incident.ownerUserId) {
+      apiGet<EngineerOption>(`/users/${incident.ownerUserId}`)
+        .then(setEditOwnerUser)
+        .catch(() => setEditOwnerUser(null));
+    } else {
+      setEditOwnerUser(null);
+    }
+    setEditOwnerGroup(
+      incident.ownerGroupId
+        ? (supportGroups.find((g) => g.id === incident.ownerGroupId) ?? null)
+        : null,
+    );
     if (incident.ciId) {
       apiGet<CiOption>(`/cis/${incident.ciId}`)
         .then(setSelectedCi)
@@ -243,7 +347,7 @@ export function IncidentDetailPage() {
     setCiQuery("");
     // Only re-seed when a different incident loads, not on every refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incident?.id]);
+  }, [incident?.id, supportGroups]);
 
   useEffect(() => {
     if (!incident) {
@@ -278,8 +382,8 @@ export function IncidentDetailPage() {
         priority: priorityChanged ? editPriority : undefined,
         priorityChangeReason: priorityChanged ? editPriorityChangeReason : undefined,
         ciId: selectedCi?.id,
-        ownerUserId: editOwnerUserId || undefined,
-        ownerGroupId: editOwnerGroupId || undefined,
+        ownerUserId: editOwnerUser?.id,
+        ownerGroupId: editOwnerGroup?.id,
       });
       refetch();
     } catch (err) {
@@ -292,8 +396,8 @@ export function IncidentDetailPage() {
   const [reason, setReason] = useState("");
   const [resolutionCategory, setResolutionCategory] = useState("");
   const [rootCauseSummary, setRootCauseSummary] = useState("");
-  const [ownerUserId, setOwnerUserId] = useState("");
-  const [ownerGroupId, setOwnerGroupId] = useState("");
+  const [transitionOwnerUser, setTransitionOwnerUser] = useState<EngineerOption | null>(null);
+  const [transitionOwnerGroup, setTransitionOwnerGroup] = useState<GroupOption | null>(null);
   const selectedTransition = availableTransitions.find((t) => t.toStatus === toStatus);
   const requiredFields = selectedTransition?.requiredFields ?? [];
 
@@ -306,15 +410,15 @@ export function IncidentDetailPage() {
         reason: reason || undefined,
         resolutionCategory: resolutionCategory || undefined,
         rootCauseSummary: rootCauseSummary || undefined,
-        ownerUserId: ownerUserId || undefined,
-        ownerGroupId: ownerGroupId || undefined,
+        ownerUserId: transitionOwnerUser?.id,
+        ownerGroupId: transitionOwnerGroup?.id,
       });
       setToStatus("");
       setReason("");
       setResolutionCategory("");
       setRootCauseSummary("");
-      setOwnerUserId("");
-      setOwnerGroupId("");
+      setTransitionOwnerUser(null);
+      setTransitionOwnerGroup(null);
       refetch();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -446,8 +550,9 @@ export function IncidentDetailPage() {
             {incident.category} · impact {incident.impact} · urgency {incident.urgency}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Owner user: {incident.ownerUserId ?? "unassigned"} · Owner group:{" "}
-            {incident.ownerGroupId ?? "unassigned"}
+            Owner: {editOwnerUser?.displayName ?? (incident.ownerUserId ? "…" : "unassigned")}
+            {" · "}
+            Group: {editOwnerGroup?.name ?? (incident.ownerGroupId ? "…" : "unassigned")}
           </Typography>
           {sla && (
             <Typography variant="body2" sx={{ mt: 1 }}>
@@ -572,21 +677,19 @@ export function IncidentDetailPage() {
             />
           </Grid>
           <Grid item xs={12} sm={6}>
-            <TextField
-              label="Owner user ID (UUID)"
-              size="small"
-              fullWidth
-              value={editOwnerUserId}
-              onChange={(e) => setEditOwnerUserId(e.target.value)}
+            <EngineerPicker
+              siteId={incident.siteId}
+              value={editOwnerUser}
+              onChange={setEditOwnerUser}
+              label="Owner (engineer)"
             />
           </Grid>
           <Grid item xs={12} sm={6}>
-            <TextField
-              label="Owner group ID (UUID)"
-              size="small"
-              fullWidth
-              value={editOwnerGroupId}
-              onChange={(e) => setEditOwnerGroupId(e.target.value)}
+            <GroupPicker
+              options={supportGroups}
+              value={editOwnerGroup}
+              onChange={setEditOwnerGroup}
+              label="Owner group"
             />
           </Grid>
           <Grid item xs={12}>
@@ -664,17 +767,17 @@ export function IncidentDetailPage() {
                   value={rootCauseSummary}
                   onChange={(e) => setRootCauseSummary(e.target.value)}
                 />
-                <TextField
-                  label="Owner user ID (UUID)"
-                  size="small"
-                  value={ownerUserId}
-                  onChange={(e) => setOwnerUserId(e.target.value)}
+                <EngineerPicker
+                  siteId={incident.siteId}
+                  value={transitionOwnerUser}
+                  onChange={setTransitionOwnerUser}
+                  label="Assign to engineer"
                 />
-                <TextField
-                  label="Owner group ID (UUID)"
-                  size="small"
-                  value={ownerGroupId}
-                  onChange={(e) => setOwnerGroupId(e.target.value)}
+                <GroupPicker
+                  options={supportGroups}
+                  value={transitionOwnerGroup}
+                  onChange={setTransitionOwnerGroup}
+                  label="Assign to group"
                 />
                 <Button
                   variant="contained"
