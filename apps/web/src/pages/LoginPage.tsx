@@ -222,17 +222,10 @@ export function LoginPage() {
         }}
       >
         <Box sx={{ width: "100%", maxWidth: 420 }}>
-          <Stack spacing={1} sx={{ mb: 4, display: { xs: "flex", md: "none" } }}>
-            <BrandMark height={34} on="light" />
-            <Typography
-              sx={{
-                color: "text.secondary",
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: "0.08em",
-              }}
-            >
-              CTS &middot; DATA CENTER OPSDESK
+          <Stack spacing={0.75} sx={{ mb: 3, display: { xs: "flex", md: "none" } }}>
+            <BrandMark height={32} on="light" />
+            <Typography sx={{ color: "text.secondary", fontSize: 11, letterSpacing: "0.06em" }}>
+              CTS DATA CENTER OPSDESK
             </Typography>
           </Stack>
 
