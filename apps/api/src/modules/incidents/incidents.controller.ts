@@ -70,7 +70,7 @@ export class IncidentsController {
   @Get()
   async findAll(@Query() query: ListIncidentsQueryDto, @CurrentUser() user: AuthenticatedUser) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
-    return this.incidentsService.findAll(query, accessibleSiteIds);
+    return this.incidentsService.findAll(query, accessibleSiteIds, user);
   }
 
   @Get(":id")

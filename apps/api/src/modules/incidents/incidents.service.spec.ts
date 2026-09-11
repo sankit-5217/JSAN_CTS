@@ -252,7 +252,17 @@ describe("IncidentsService.createFromCustomer", () => {
   });
 
   it("posts `details` as a customer-visible (non-internal) first comment when provided", async () => {
-    const { service, tx } = makeService();
+    // The mocked tx.incident.create isn't visible to the separately-mocked
+    // prisma.incident.findUnique that createComment's findOneScoped reads
+    // back through — in real Postgres they're the same row (same
+    // transaction), so this override just reflects that reality for the
+    // mock: the incident createFromCustomer just made was reported by the
+    // same customer now trying to comment on it.
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+    });
     await service.createFromCustomer(
       { ...customerDto, details: "Started around 2pm." },
       { actorId: ctsViewer.id },
@@ -339,12 +349,54 @@ describe("IncidentsService site-scope enforcement", () => {
       ForbiddenException,
     );
   });
+
+  it("findOneScoped allows staff to see any incident at a site they can access, regardless of who reported it", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: "someone-else" })),
+    });
+    await expect(service.findOneScoped("incident-1", engineer)).resolves.toBeDefined();
+  });
+
+  it("findOneScoped allows a CTS_MANAGER_VIEWER to see an incident they reported", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+    });
+    await expect(service.findOneScoped("incident-1", ctsViewer)).resolves.toBeDefined();
+  });
+
+  it("findOneScoped throws for a CTS_MANAGER_VIEWER on an incident reported by someone else at the same site", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: "someone-else" })),
+    });
+    await expect(service.findOneScoped("incident-1", ctsViewer)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it("findOneScoped throws for a CTS_MANAGER_VIEWER on an incident nobody reported (staff-created)", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ reportedByUserId: null })),
+    });
+    await expect(service.findOneScoped("incident-1", ctsViewer)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
 });
 
 describe("IncidentsService.findAll", () => {
   it("scopes to the caller's accessible sites when an explicit ?siteId isn't in scope", async () => {
     const { service, prisma } = makeService();
-    await service.findAll({ siteId: "site-not-mine", limit: 50, offset: 0 }, ["site-a", "site-b"]);
+    await service.findAll(
+      { siteId: "site-not-mine", limit: 50, offset: 0 },
+      ["site-a", "site-b"],
+      serviceDesk,
+    );
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ siteId: { in: ["site-a", "site-b"] } }),
@@ -354,7 +406,11 @@ describe("IncidentsService.findAll", () => {
 
   it("narrows to just the requested site when it IS in the caller's scope", async () => {
     const { service, prisma } = makeService();
-    await service.findAll({ siteId: "site-a", limit: 50, offset: 0 }, ["site-a", "site-b"]);
+    await service.findAll(
+      { siteId: "site-a", limit: 50, offset: 0 },
+      ["site-a", "site-b"],
+      serviceDesk,
+    );
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ siteId: { in: ["site-a"] } }) }),
     );
@@ -362,7 +418,7 @@ describe("IncidentsService.findAll", () => {
 
   it("applies no site filter for an unrestricted (null) caller", async () => {
     const { service, prisma } = makeService();
-    await service.findAll({ limit: 50, offset: 0 }, null);
+    await service.findAll({ limit: 50, offset: 0 }, null, serviceDesk);
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ siteId: undefined }) }),
     );
@@ -370,7 +426,7 @@ describe("IncidentsService.findAll", () => {
 
   it("slaAtRisk=true filters to open incidents with a fired, non-breached milestone", async () => {
     const { service, prisma } = makeService();
-    await service.findAll({ slaAtRisk: true, limit: 50, offset: 0 }, null);
+    await service.findAll({ slaAtRisk: true, limit: 50, offset: 0 }, null, serviceDesk);
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -386,10 +442,31 @@ describe("IncidentsService.findAll", () => {
     await service.findAll(
       { slaAtRisk: true, status: IncidentStatus.RESOLVED, limit: 50, offset: 0 },
       null,
+      serviceDesk,
     );
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ status: IncidentStatus.RESOLVED }),
+      }),
+    );
+  });
+
+  it("forces reportedByUserId to the caller's own id for CTS_MANAGER_VIEWER, ignoring site scope alone", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll({ limit: 50, offset: 0 }, ["site-a"], ctsViewer);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ reportedByUserId: ctsViewer.id }),
+      }),
+    );
+  });
+
+  it("never filters by reportedByUserId for staff roles", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll({ limit: 50, offset: 0 }, null, serviceDesk);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ reportedByUserId: undefined }),
       }),
     );
   });
@@ -724,7 +801,11 @@ describe("IncidentsService.createTransition", () => {
 describe("IncidentsService.getAvailableTransitions", () => {
   it("omits a transition the caller's role can never perform", async () => {
     const { service } = makeService({
-      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.NEW, reportedByUserId: ctsViewer.id }),
+        ),
     });
     // NEW -> ASSIGNED's allowedRoles doesn't include CTS_MANAGER_VIEWER.
     const result = await service.getAvailableTransitions("incident-1", ctsViewer);
@@ -827,7 +908,11 @@ describe("IncidentsService comment visibility", () => {
       { id: "c1", incidentId: "incident-1", isInternal: true, body: "internal note" },
       { id: "c2", incidentId: "incident-1", isInternal: false, body: "customer-visible" },
     ];
-    const { service, prisma } = makeService();
+    const { service, prisma } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+    });
     (prisma.incidentComment.findMany as jest.Mock).mockResolvedValue(comments);
 
     const result = await service.listComments("incident-1", ctsViewer);
@@ -849,7 +934,11 @@ describe("IncidentsService comment visibility", () => {
 
 describe("IncidentsService.createComment isInternal enforcement", () => {
   it("forces isInternal false for CTS_MANAGER_VIEWER even if the request asked for true", async () => {
-    const { service, tx } = makeService();
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+    });
     await service.createComment(
       "incident-1",
       { body: "Any update?", isInternal: true },
@@ -873,7 +962,11 @@ describe("IncidentsService.createComment isInternal enforcement", () => {
 describe("IncidentsService.createComment notifications", () => {
   it("notifies the assigned owner when the customer comments", async () => {
     const { service, notifications } = makeService({
-      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerUserId: engineer.id })),
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ ownerUserId: engineer.id, reportedByUserId: ctsViewer.id }),
+        ),
       userFindUnique: jest.fn().mockResolvedValue({
         id: engineer.id,
         email: "engineer@example.com",
@@ -896,7 +989,9 @@ describe("IncidentsService.createComment notifications", () => {
 
   it("skips the customer notification when the ticket has no owner yet", async () => {
     const { service, notifications } = makeService({
-      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerUserId: null })),
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ ownerUserId: null, reportedByUserId: ctsViewer.id })),
     });
     await service.createComment(
       "incident-1",

@@ -103,7 +103,8 @@ export class IncidentsService {
 
   async findAll(
     query: ListIncidentsQueryDto,
-    accessibleSiteIds?: string[] | null,
+    accessibleSiteIds: string[] | null | undefined,
+    user: AuthenticatedUser,
   ): Promise<Paginated<Incident>> {
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;
@@ -120,6 +121,11 @@ export class IncidentsService {
 
     const where: Prisma.IncidentWhereInput = {
       siteId: siteFilter ? { in: siteFilter } : undefined,
+      // Same reasoning as findOneScoped: site access is a staff-shaped
+      // grant, not "this is my ticket." Forced, never client-settable —
+      // there's no ?reportedByUserId= query param a customer could spoof
+      // even if they tried; this branches on the caller's own role only.
+      reportedByUserId: user.role === UserRole.CTS_MANAGER_VIEWER ? user.id : undefined,
       // An explicit ?status= wins; slaAtRisk alone still implies "open"
       // (a resolved incident's stale fired-milestone history isn't
       // actionable risk) — matches ReportsService's own queue definition.
@@ -163,6 +169,15 @@ export class IncidentsService {
   async findOneScoped(id: string, user: AuthenticatedUser): Promise<Incident> {
     const incident = await this.findOne(id);
     await this.assertSiteAccess(user, incident.siteId);
+    // Site access alone is staff-shaped scoping — every internal role at a
+    // site can see every incident there. A CTS_MANAGER_VIEWER isn't staff:
+    // the client portal's entire promise is "track your own ticket," not
+    // "see every ticket your site has ever raised" (which would leak other
+    // reporters' incidents, including ones with no connection to this
+    // caller at all — see reportedByUserId, added for exactly this reason).
+    if (user.role === UserRole.CTS_MANAGER_VIEWER && incident.reportedByUserId !== user.id) {
+      throw new ForbiddenException("You do not have access to this incident");
+    }
     return incident;
   }
 

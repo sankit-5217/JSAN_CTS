@@ -81,7 +81,20 @@ describe("Incidents API (e2e)", () => {
   it("GET /transitions reflects the caller's actual role-eligible next moves, not a fixed list", async () => {
     const noc = await t.tokenFor(fx.users.serviceDesk.email);
     const viewer = await t.tokenFor(fx.users.ctsViewer.email);
-    const created = await createIncident(noc, fx.site.id).expect(201); // NEW
+    // Customer-reported, not staff-created — so `viewer`'s own transitions
+    // check below is against a ticket they're actually allowed to see
+    // (reportedByUserId scoping, see the reporter-scoping test at the
+    // bottom of this file), not an unrelated incident at their site.
+    const created = await t
+      .http()
+      .post("/api/v1/incidents/customer-report")
+      .set("authorization", `Bearer ${viewer}`)
+      .send({
+        siteId: fx.site.id,
+        category: "HARDWARE_FAILURE",
+        shortDescription: "E2E server unresponsive after power event",
+      })
+      .expect(201); // NEW
 
     // NEW -> ASSIGNED is SERVICE_DESK_NOC's to make, no owner gate on this
     // rule — but it does have a custom validate() requiring an owner to be
@@ -102,6 +115,7 @@ describe("Incidents API (e2e)", () => {
     ]);
 
     // CTS_MANAGER_VIEWER is never in any incident transition's allowedRoles
+    // — but they can still see their own ticket's (empty) transition list.
     const viewerView = await t
       .http()
       .get(`/api/v1/incidents/${created.body.id}/transitions`)
@@ -261,5 +275,49 @@ describe("Incidents API (e2e)", () => {
       .set("authorization", `Bearer ${viewer}`)
       .expect(200);
     expect(finalComments.body).toHaveLength(3);
+  });
+
+  it("a customer only sees their own reported tickets, never another incident at the same site", async () => {
+    const admin = await t.tokenFor(fx.users.superAdmin.email);
+    const viewer = await t.tokenFor(fx.users.ctsViewer.email);
+
+    // Staff-created — reportedByUserId is null, not the customer's.
+    const staffIncident = await createIncident(admin, fx.site.id).expect(201);
+
+    // Customer-reported — reportedByUserId is the customer's own id.
+    const ownIncident = await t
+      .http()
+      .post("/api/v1/incidents/customer-report")
+      .set("authorization", `Bearer ${viewer}`)
+      .send({
+        siteId: fx.site.id,
+        category: "HARDWARE_FAILURE",
+        shortDescription: "My own ticket",
+      })
+      .expect(201);
+
+    // The list only contains what this customer actually reported.
+    const list = await t
+      .http()
+      .get("/api/v1/incidents")
+      .set("authorization", `Bearer ${viewer}`)
+      .expect(200);
+    const ids = list.body.items.map((i: { id: string }) => i.id);
+    expect(ids).toContain(ownIncident.body.id);
+    expect(ids).not.toContain(staffIncident.body.id);
+
+    // Same-site access alone isn't enough to read another incident's detail.
+    await t
+      .http()
+      .get(`/api/v1/incidents/${staffIncident.body.id}`)
+      .set("authorization", `Bearer ${viewer}`)
+      .expect(403);
+
+    // But their own is readable.
+    await t
+      .http()
+      .get(`/api/v1/incidents/${ownIncident.body.id}`)
+      .set("authorization", `Bearer ${viewer}`)
+      .expect(200);
   });
 });
