@@ -68,6 +68,14 @@ function renderBody(event: NotificationEvent): Rendered {
           event.actor ? `Assigned by ${addr(event.actor)}.` : "",
         ],
       };
+    case "INCIDENT_GROUP_ASSIGNED":
+      return {
+        phrase: `assigned to ${event.group.name}`,
+        lines: [
+          `${event.entity.key} has been assigned to the ${event.group.name} group — no individual owner yet.`,
+          event.actor ? `Assigned by ${addr(event.actor)}.` : "",
+        ],
+      };
     case "INCIDENT_STATUS_CHANGED":
       return {
         phrase: `${event.from} → ${event.to}`,

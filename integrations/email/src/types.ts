@@ -36,6 +36,12 @@ export type SlaKind = "RESPONSE" | "RESOLUTION";
 export type NotificationEvent =
   | { kind: "INCIDENT_ASSIGNED"; entity: EntityRef; assignee: Party; actor?: Party }
   | {
+      kind: "INCIDENT_GROUP_ASSIGNED";
+      entity: EntityRef;
+      group: { name: string };
+      actor?: Party;
+    }
+  | {
       kind: "INCIDENT_STATUS_CHANGED";
       entity: EntityRef;
       from: string;

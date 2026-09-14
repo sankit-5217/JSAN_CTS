@@ -117,6 +117,24 @@ describe("renderNotification", () => {
     expect(mail.text).toContain("Mitigation / rationale: Residual accepted by the infra lead");
   });
 
+  it("renders a group-assignment notification, addressed to every member", () => {
+    const mail = renderNotification(
+      {
+        kind: "INCIDENT_GROUP_ASSIGNED",
+        entity: incident(),
+        group: { name: "Networking" },
+        actor: LEAD,
+      },
+      { to: [JANE, { name: "Pat Roe", email: "pat@corp.example" }] },
+    );
+
+    expect(mail.subject).toBe("[SITE01] INC-1042 — assigned to Networking");
+    expect(mail.to).toEqual(["Jane Doe <jane@corp.example>", "Pat Roe <pat@corp.example>"]);
+    expect(mail.headers["X-OpsDesk-Event"]).toBe("INCIDENT_GROUP_ASSIGNED");
+    expect(mail.text).toContain("assigned to the Networking group — no individual owner yet.");
+    expect(mail.text).toContain("Assigned by Sam Lead <sam@corp.example>.");
+  });
+
   it("renders a comment-added notification with the author and body", () => {
     const mail = renderNotification(
       {
