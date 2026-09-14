@@ -1,4 +1,4 @@
-import { NotFoundException } from "@nestjs/common";
+import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { SitesService } from "./sites.service";
@@ -117,6 +117,19 @@ describe("SitesService support group membership", () => {
       await expect(
         service.addGroupMember(groupId, { userId: "missing" }, { actorId: "actor-1" }),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("rejects a CTS_MANAGER_VIEWER — a customer is never a group member", async () => {
+      const { service, tx } = makeService({
+        supportGroup: { findUnique: jest.fn().mockResolvedValue(group) },
+        user: {
+          findUnique: jest.fn().mockResolvedValue({ ...user, role: "CTS_MANAGER_VIEWER" }),
+        },
+      });
+      await expect(
+        service.addGroupMember(groupId, { userId: user.id }, { actorId: "actor-1" }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.supportGroupMember.upsert).not.toHaveBeenCalled();
     });
 
     it("upserts the membership (idempotent) and audits it", async () => {

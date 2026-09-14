@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { Site } from "@prisma/client";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { Site, UserRole } from "@prisma/client";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { Paginated } from "../../common/types/paginated.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -201,6 +201,13 @@ export class SitesService {
     });
     if (!user) {
       throw new NotFoundException(`User ${dto.userId} not found`);
+    }
+    // A support group's roster is who gets paged for a ticket queue — a
+    // customer was never a candidate, and this rejects it server-side
+    // rather than just hiding the option in the picker (spec §4: a
+    // customer's only writes are their own ticket's comments/attachments).
+    if (user.role === UserRole.CTS_MANAGER_VIEWER) {
+      throw new BadRequestException("Customers cannot be added to a support group");
     }
     return this.prisma.$transaction(async (tx) => {
       // Idempotent by design — clicking "add" twice on the same person is a
