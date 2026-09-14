@@ -157,7 +157,10 @@ export class KnowledgeService {
     if (article.approvalState === "APPROVED") {
       throw new ConflictException(`Knowledge article ${id} is already approved`);
     }
-    if (article.ownerId && article.ownerId === dto.approverId) {
+    // The reviewer is always the authenticated caller, never a
+    // client-suppliable id — otherwise the owner could "approve" their own
+    // article by simply naming someone else in the request body.
+    if (article.ownerId && article.ownerId === actor.actorId) {
       throw new BadRequestException("An article cannot be approved by its owner");
     }
     const reviewDueAt = new Date(dto.reviewDueAt);
@@ -182,7 +185,6 @@ export class KnowledgeService {
             approvalState: u.approvalState,
             version: u.version,
             reviewDueAt,
-            approverId: dto.approverId,
           },
         },
         tx,

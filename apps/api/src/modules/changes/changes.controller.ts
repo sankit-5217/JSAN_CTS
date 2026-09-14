@@ -8,7 +8,6 @@ import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { ChangesService } from "./changes.service";
-import { ApproveChangeDto } from "./dto/approve-change.dto";
 import { CreateChangeDto } from "./dto/create-change.dto";
 import { QueryChangesDto } from "./dto/query-changes.dto";
 import { UpdateChangeDto } from "./dto/update-change.dto";
@@ -66,14 +65,16 @@ export class ChangesController {
 
   @Post(":id/approve")
   @Roles(...CHANGE_APPROVE_ROLES)
-  @ApiOperation({ summary: "Approve a change (idempotency: 409 if already approved)" })
+  @ApiOperation({
+    summary: "Approve a change as the authenticated caller (409 if already approved)",
+    description: "The approver is always the caller — no approverId in the body; see spec §4/§12.",
+  })
   approve(
     @Param("id") id: string,
-    @Body() dto: ApproveChangeDto,
     @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId?: string,
   ) {
-    return this.changesService.approve(id, dto, { actorId: user.id, correlationId });
+    return this.changesService.approve(id, { actorId: user.id, correlationId });
   }
 
   @Patch(":id")

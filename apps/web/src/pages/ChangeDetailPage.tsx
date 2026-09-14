@@ -75,7 +75,6 @@ export function ChangeDetailPage() {
     refetch();
   }, [refetch]);
 
-  const [approverId, setApproverId] = useState("");
   const [outcome, setOutcome] = useState("");
   const [edit, setEdit] = useState<null | {
     reason: string;
@@ -183,24 +182,12 @@ export function ChangeDetailPage() {
                 Approved by {change.approverId}.
               </Typography>
             ) : (
-              <Stack direction="row" spacing={1}>
-                <TextField
-                  size="small"
-                  label="Approver user id"
-                  value={approverId}
-                  onChange={(e) => setApproverId(e.target.value)}
-                  sx={{ flex: 1 }}
-                />
-                <Button
-                  variant="contained"
-                  disabled={!approverId}
-                  onClick={() =>
-                    call(
-                      () => apiPost(`/changes/${id}/approve`, { approverId }),
-                      () => setApproverId(""),
-                    )
-                  }
-                >
+              <Stack spacing={1} alignItems="flex-start">
+                <Typography variant="body2" color="text.secondary">
+                  You'll be recorded as the approver. A change can't be approved by whoever raised
+                  it (separation of duties).
+                </Typography>
+                <Button variant="contained" onClick={() => call(() => apiPost(`/changes/${id}/approve`, {}))}>
                   Approve
                 </Button>
               </Stack>

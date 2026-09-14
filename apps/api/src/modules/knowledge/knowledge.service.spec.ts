@@ -31,7 +31,6 @@ function createPrismaMock(): PrismaMock {
 const FUTURE = "2099-01-01T00:00:00.000Z";
 const PAST = "2020-01-01T00:00:00.000Z";
 const OWNER = "11111111-1111-1111-1111-111111111111";
-const REVIEWER = "22222222-2222-2222-2222-222222222222";
 
 function storedArticle(overrides: Record<string, unknown> = {}) {
   return {
@@ -205,21 +204,36 @@ describe("KnowledgeService", () => {
         storedArticle({ approvalState: "APPROVED" }),
       );
       await expect(
-        service.approve("art-1", { approverId: REVIEWER, reviewDueAt: FUTURE }, ACTOR),
+        service.approve("art-1", { reviewDueAt: FUTURE }, ACTOR),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
-    it("rejects self-approval by the owner", async () => {
-      prisma.knowledgeArticle.findUnique.mockResolvedValue(storedArticle({ ownerId: OWNER }));
+    // The reviewer is always the authenticated caller (ACTOR), never a
+    // client-suppliable id — this is what closes the hole where the owner
+    // could approve their own article by just naming someone else.
+    it("rejects self-approval by the owner (the authenticated caller)", async () => {
+      prisma.knowledgeArticle.findUnique.mockResolvedValue(
+        storedArticle({ ownerId: ACTOR.actorId }),
+      );
       await expect(
-        service.approve("art-1", { approverId: OWNER, reviewDueAt: FUTURE }, ACTOR),
+        service.approve("art-1", { reviewDueAt: FUTURE }, ACTOR),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it("allows approval by someone other than the owner", async () => {
+      prisma.knowledgeArticle.findUnique.mockResolvedValue(storedArticle({ ownerId: OWNER }));
+      prisma.knowledgeArticle.update.mockResolvedValue(
+        storedArticle({ ownerId: OWNER, approvalState: "APPROVED", reviewDueAt: new Date(FUTURE) }),
+      );
+      await expect(
+        service.approve("art-1", { reviewDueAt: FUTURE }, ACTOR),
+      ).resolves.toBeDefined();
     });
 
     it("rejects a review date in the past", async () => {
       prisma.knowledgeArticle.findUnique.mockResolvedValue(storedArticle());
       await expect(
-        service.approve("art-1", { approverId: REVIEWER, reviewDueAt: PAST }, ACTOR),
+        service.approve("art-1", { reviewDueAt: PAST }, ACTOR),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -228,11 +242,7 @@ describe("KnowledgeService", () => {
       prisma.knowledgeArticle.update.mockResolvedValue(
         storedArticle({ approvalState: "APPROVED", reviewDueAt: new Date(FUTURE) }),
       );
-      const result = await service.approve(
-        "art-1",
-        { approverId: REVIEWER, reviewDueAt: FUTURE },
-        ACTOR,
-      );
+      const result = await service.approve("art-1", { reviewDueAt: FUTURE }, ACTOR);
       expect(prisma.knowledgeArticle.update).toHaveBeenCalledWith({
         where: { id: "art-1" },
         data: { approvalState: "APPROVED", reviewDueAt: new Date(FUTURE) },

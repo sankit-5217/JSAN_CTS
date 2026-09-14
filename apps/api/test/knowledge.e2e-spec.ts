@@ -39,7 +39,7 @@ describe("Knowledge API (e2e)", () => {
       .http()
       .post(`/api/v1/knowledge/${id}/approve`)
       .set(bearer())
-      .send({ approverId: fx.users.infraLead.id, reviewDueAt: future })
+      .send({ reviewDueAt: future })
       .expect(201);
     expect(approved.body.approvalState).toBe("APPROVED");
     expect(approved.body.authoritative).toBe(true);
@@ -61,7 +61,7 @@ describe("Knowledge API (e2e)", () => {
       .http()
       .post(`/api/v1/knowledge/${id}/approve`)
       .set(bearer())
-      .send({ approverId: fx.users.infraLead.id, reviewDueAt: future })
+      .send({ reviewDueAt: future })
       .expect(201);
 
     const unpublished = await t
@@ -73,18 +73,21 @@ describe("Knowledge API (e2e)", () => {
     expect(unpublished.body.approvalState).toBe("DRAFT");
   });
 
-  it("refuses approval by the article owner (separation of duties, 400)", async () => {
+  it("refuses approval by the article owner — the authenticated caller, not a client-supplied id (separation of duties, 400)", async () => {
+    // The reviewer is always whoever's token is on the request, never a
+    // field the client can set — owned by the same superAdmin (`token`)
+    // that's about to try approving it.
     const created = await t
       .http()
       .post("/api/v1/knowledge")
       .set(bearer())
-      .send({ title: "Owned runbook", body: "body text here", ownerId: fx.users.infraLead.id })
+      .send({ title: "Owned runbook", body: "body text here", ownerId: fx.users.superAdmin.id })
       .expect(201);
     await t
       .http()
       .post(`/api/v1/knowledge/${created.body.id}/approve`)
       .set(bearer())
-      .send({ approverId: fx.users.infraLead.id, reviewDueAt: future })
+      .send({ reviewDueAt: future })
       .expect(400);
   });
 
@@ -99,7 +102,7 @@ describe("Knowledge API (e2e)", () => {
       .http()
       .post(`/api/v1/knowledge/${created.body.id}/approve`)
       .set(bearer())
-      .send({ approverId: fx.users.superAdmin.id, reviewDueAt: "2000-01-01T00:00:00.000Z" })
+      .send({ reviewDueAt: "2000-01-01T00:00:00.000Z" })
       .expect(400);
   });
 

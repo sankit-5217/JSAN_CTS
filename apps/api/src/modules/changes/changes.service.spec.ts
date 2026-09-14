@@ -59,6 +59,7 @@ function storedChange(overrides: Record<string, unknown> = {}) {
     risk: "low",
     windowStart: new Date(FAR_FUTURE_START),
     windowEnd: new Date(FAR_FUTURE_END),
+    createdBy: null,
     approverId: null,
     outcome: null,
     createdAt: new Date(),
@@ -126,21 +127,23 @@ describe("ChangesService", () => {
         "smoke-test the ingest path",
       );
     });
+
+    it("records who raised it, for the self-approval check", async () => {
+      prisma.change.create.mockResolvedValue(storedChange());
+      await service.create(createDto(), ACTOR);
+      expect(prisma.change.create.mock.calls[0][0].data.createdBy).toBe(ACTOR.actorId);
+    });
   });
 
   describe("approve", () => {
     it("404s an unknown change", async () => {
       prisma.change.findUnique.mockResolvedValue(null);
-      await expect(
-        service.approve("missing", { approverId: "11111111-1111-1111-1111-111111111111" }, ACTOR),
-      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.approve("missing", ACTOR)).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it("409s a change that is already approved", async () => {
       prisma.change.findUnique.mockResolvedValue(storedChange({ approverId: "user-9" }));
-      await expect(
-        service.approve("chg-1", { approverId: "11111111-1111-1111-1111-111111111111" }, ACTOR),
-      ).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.approve("chg-1", ACTOR)).rejects.toBeInstanceOf(ConflictException);
     });
 
     it("rejects approval after the window has ended", async () => {
@@ -150,29 +153,30 @@ describe("ChangesService", () => {
           windowEnd: new Date("2020-01-01T01:00:00.000Z"),
         }),
       );
-      await expect(
-        service.approve("chg-1", { approverId: "11111111-1111-1111-1111-111111111111" }, ACTOR),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.approve("chg-1", ACTOR)).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it("sets the approver and returns SCHEDULED for a future window", async () => {
-      prisma.change.findUnique.mockResolvedValue(storedChange());
-      prisma.change.update.mockResolvedValue(storedChange({ approverId: "user-7" }));
+    // Separation of duties: the approver is always the authenticated caller,
+    // never a client-suppliable value — closes the hole where the approve
+    // form used to let anyone type an arbitrary user id into the body.
+    it("rejects approval by whoever raised the change", async () => {
+      prisma.change.findUnique.mockResolvedValue(storedChange({ createdBy: ACTOR.actorId }));
+      await expect(service.approve("chg-1", ACTOR)).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.change.update).not.toHaveBeenCalled();
+    });
+
+    it("sets the approver to the authenticated caller and returns SCHEDULED for a future window", async () => {
+      prisma.change.findUnique.mockResolvedValue(storedChange({ createdBy: "user-2" }));
+      prisma.change.update.mockResolvedValue(storedChange({ approverId: ACTOR.actorId }));
       prisma.user.findUnique.mockResolvedValue({
-        id: "user-7",
+        id: ACTOR.actorId,
         email: "lead@corp.example",
         displayName: "Sam Lead",
       });
-      const result = await service.approve(
-        "chg-1",
-        {
-          approverId: "11111111-1111-1111-1111-111111111111",
-        },
-        ACTOR,
-      );
+      const result = await service.approve("chg-1", ACTOR);
       expect(prisma.change.update).toHaveBeenCalledWith({
         where: { id: "chg-1" },
-        data: { approverId: "11111111-1111-1111-1111-111111111111" },
+        data: { approverId: ACTOR.actorId },
       });
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: "CHANGE_APPROVED" }),

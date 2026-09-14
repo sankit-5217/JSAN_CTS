@@ -704,6 +704,10 @@ model Change {
   risk               String
   windowStart        DateTime   @map("window_start")
   windowEnd          DateTime   @map("window_end")
+  // Who raised the change — separate from approverId so approve() can refuse
+  // to let the raiser approve their own change (separation of duties).
+  // Nullable only because rows created before this column existed have none.
+  createdBy          String?    @map("created_by")
   approverId         String?    @map("approver_id")
   outcome            String?
   // CIs this change touches. Empty = a site-wide window. Lets the
