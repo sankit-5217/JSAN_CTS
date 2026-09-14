@@ -20,10 +20,22 @@ import {
   Typography,
 } from "@mui/material";
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "../api/client";
+import { getCurrentUserRole } from "../api/jwt";
 
 const WORKLOG_ACTIVITY_TYPES = ["REMOTE_WORK", "ONSITE", "TRAVEL", "VENDOR_CALL"];
 const IMPACT_URGENCY_VALUES = ["HIGH", "MEDIUM", "LOW"];
 const PRIORITY_VALUES = ["P1", "P2", "P3", "P4"];
+
+// Mirrors IncidentsService's INCIDENT_ROUTING_ROLES — UI-only gate so a Site
+// Engineer sees disabled controls instead of a 403 after filling the form.
+// The backend re-checks this regardless (CLAUDE.md: never trust the frontend
+// for authorization).
+const INCIDENT_ROUTING_ROLES = [
+  "SUPER_ADMIN",
+  "DELIVERY_OPS_MANAGER",
+  "INFRASTRUCTURE_LEAD",
+  "SERVICE_DESK_NOC",
+];
 
 // A field name as it appears in TransitionRule.requiredFields on the
 // backend (apps/api/src/modules/incidents/incident-transitions.ts).
@@ -173,11 +185,13 @@ function EngineerPicker({
   value,
   onChange,
   label,
+  disabled,
 }: {
   siteId: string;
   value: EngineerOption | null;
   onChange: (value: EngineerOption | null) => void;
   label: string;
+  disabled?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<EngineerOption[]>([]);
@@ -198,6 +212,7 @@ function EngineerPicker({
       onChange={(_, v) => onChange(v)}
       inputValue={query}
       onInputChange={(_, v) => setQuery(v)}
+      disabled={disabled}
       openOnFocus
       noOptionsText="No engineers assigned to this site"
       renderInput={(params) => <TextField {...params} label={label} size="small" />}
@@ -214,11 +229,13 @@ function GroupPicker({
   value,
   onChange,
   label,
+  disabled,
 }: {
   options: GroupOption[];
   value: GroupOption | null;
   onChange: (value: GroupOption | null) => void;
   label: string;
+  disabled?: boolean;
 }) {
   return (
     <Autocomplete
@@ -227,6 +244,7 @@ function GroupPicker({
       isOptionEqualToValue={(o, v) => o.id === v.id}
       value={value}
       onChange={(_, v) => onChange(v)}
+      disabled={disabled}
       openOnFocus
       noOptionsText="No support groups yet"
       renderInput={(params) => <TextField {...params} label={label} size="small" />}
@@ -247,6 +265,7 @@ function GroupPicker({
  */
 export function IncidentDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const canRoute = INCIDENT_ROUTING_ROLES.includes(getCurrentUserRole() ?? "");
   const [incident, setIncident] = useState<Incident | null>(null);
   const [sla, setSla] = useState<SlaState | null>(null);
   const [events, setEvents] = useState<IncidentEvent[]>([]);
@@ -576,6 +595,12 @@ export function IncidentDetailPage() {
         <Typography variant="h6" gutterBottom>
           Edit incident
         </Typography>
+        {!canRoute && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Reassigning ownership and overriding priority are a Service Desk/NOC or elevated-role
+            call — you can still update the description, category, impact/urgency and affected CI.
+          </Typography>
+        )}
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
             <TextField
@@ -633,6 +658,8 @@ export function IncidentDetailPage() {
               label="Priority"
               size="small"
               fullWidth
+              disabled={!canRoute}
+              helperText={!canRoute ? "Service Desk/NOC or elevated roles only" : undefined}
               value={editPriority}
               onChange={(e) => setEditPriority(e.target.value)}
             >
@@ -650,6 +677,7 @@ export function IncidentDetailPage() {
                 size="small"
                 fullWidth
                 required
+                disabled={!canRoute}
                 value={editPriorityChangeReason}
                 onChange={(e) => setEditPriorityChangeReason(e.target.value)}
               />
@@ -682,6 +710,7 @@ export function IncidentDetailPage() {
               value={editOwnerUser}
               onChange={setEditOwnerUser}
               label="Owner (engineer)"
+              disabled={!canRoute}
             />
           </Grid>
           <Grid item xs={12} sm={6}>
@@ -690,6 +719,7 @@ export function IncidentDetailPage() {
               value={editOwnerGroup}
               onChange={setEditOwnerGroup}
               label="Owner group"
+              disabled={!canRoute}
             />
           </Grid>
           <Grid item xs={12}>

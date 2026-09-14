@@ -40,6 +40,24 @@ export const ELEVATED_ROLES: readonly UserRole[] = [
   UserRole.DELIVERY_OPS_MANAGER,
 ];
 
+/**
+ * Who may reassign ownership (ownerGroupId/ownerUserId) or override priority
+ * through the plain PATCH /incidents/:id path, outside the transition state
+ * machine. Spec §4 gives "Triage, acknowledge, route, update incidents" to
+ * Service Desk/NOC, but Site Engineer's access is explicitly "limited admin"
+ * scoped to "On-site/remote diagnosis, worklogs, evidence, restoration" —
+ * routing a ticket to someone else, or overriding its calculated priority
+ * (§16: "Authorized priority override"), is a Service Desk/elevated call,
+ * not a Site Engineer one. Site Engineer keeps every other INCIDENT_WRITE_ROLES
+ * write (description, category, impact/urgency, CI) plus its normal
+ * transition moves (ASSIGNED -> ACKNOWLEDGED, etc.), which already carry
+ * their own role gates in TRANSITION_RULES above.
+ */
+export const INCIDENT_ROUTING_ROLES: readonly UserRole[] = [
+  UserRole.SERVICE_DESK_NOC,
+  ...ELEVATED_ROLES,
+];
+
 /** Reused by ReportsService for open-incident counters (Sprint 7) — the
  * single definition of "open" lives here, not duplicated per consumer. */
 export const OPEN_STATUSES: IncidentStatus[] = [

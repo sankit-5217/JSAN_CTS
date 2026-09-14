@@ -293,14 +293,14 @@ describe("IncidentsService.update", () => {
         .fn()
         .mockResolvedValue(baseIncident({ siteId: "site-a", priority: Priority.P3 })),
     });
-    await service.update("incident-1", { priority: Priority.P1 }, engineer, {
-      actorId: engineer.id,
+    await service.update("incident-1", { priority: Priority.P1 }, serviceDesk, {
+      actorId: serviceDesk.id,
     });
     expect(slaService.onPriorityChanged).toHaveBeenCalledWith(
       tx,
       { id: "incident-1", siteId: "site-a" },
       Priority.P1,
-      { actorId: engineer.id },
+      { actorId: serviceDesk.id },
     );
   });
 
@@ -323,8 +323,8 @@ describe("IncidentsService.update", () => {
         displayName: "Otis Engineer",
       }),
     });
-    await service.update("incident-1", { ownerUserId: "engineer-2" }, engineer, {
-      actorId: engineer.id,
+    await service.update("incident-1", { ownerUserId: "engineer-2" }, serviceDesk, {
+      actorId: serviceDesk.id,
     });
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -365,8 +365,8 @@ describe("IncidentsService.update", () => {
         ],
       }),
     });
-    await service.update("incident-1", { ownerGroupId: "group-1" }, engineer, {
-      actorId: engineer.id,
+    await service.update("incident-1", { ownerGroupId: "group-1" }, serviceDesk, {
+      actorId: serviceDesk.id,
     });
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -399,8 +399,8 @@ describe("IncidentsService.update", () => {
     await service.update(
       "incident-1",
       { ownerGroupId: "group-1", ownerUserId: "engineer-2" },
-      engineer,
-      { actorId: engineer.id },
+      serviceDesk,
+      { actorId: serviceDesk.id },
     );
     const kinds = (notifications.enqueue as jest.Mock).mock.calls.map(([job]) => job.event.kind);
     expect(kinds).toEqual(["INCIDENT_ASSIGNED"]);
@@ -414,6 +414,94 @@ describe("IncidentsService.update", () => {
       actorId: engineer.id,
     });
     expect(notifications.enqueue).not.toHaveBeenCalled();
+  });
+
+  // Routing (ownership) and priority overrides are a Service Desk/elevated
+  // call, not Site Engineer's (spec §4: Site Engineer's access is "limited
+  // admin" scoped to diagnosis/restoration) — see INCIDENT_ROUTING_ROLES.
+  it("forbids a Site Engineer from reassigning ownerUserId via PATCH", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+    });
+    await expect(
+      service.update("incident-1", { ownerUserId: "engineer-2" }, engineer, {
+        actorId: engineer.id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.incident.update).not.toHaveBeenCalled();
+  });
+
+  it("forbids a Site Engineer from reassigning ownerGroupId via PATCH", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+    });
+    await expect(
+      service.update("incident-1", { ownerGroupId: "group-1" }, engineer, {
+        actorId: engineer.id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.incident.update).not.toHaveBeenCalled();
+  });
+
+  it("forbids a Site Engineer from overriding priority via PATCH when it actually changes", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ priority: Priority.P3 })),
+    });
+    await expect(
+      service.update(
+        "incident-1",
+        { priority: Priority.P1, priorityChangeReason: "escalating" },
+        engineer,
+        { actorId: engineer.id },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.incident.update).not.toHaveBeenCalled();
+  });
+
+  it("still allows a Site Engineer to edit non-routing fields (diagnosis/description/CI)", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+    });
+    await service.update(
+      "incident-1",
+      { shortDescription: "Confirmed PDU B fault", impact: "MEDIUM", ciId: "ci-1" },
+      engineer,
+      { actorId: engineer.id },
+    );
+    expect(tx.incident.update).toHaveBeenCalled();
+  });
+
+  it("does not forbid a Site Engineer whose PATCH round-trips the ticket's current owner/priority unchanged", async () => {
+    // The edit form always resubmits the ticket's current owner/group/
+    // priority in the body — this must stay a no-op for Site Engineer, not
+    // a 403, or they couldn't edit anything else on a ticket they own.
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ ownerUserId: engineer.id, ownerGroupId: null, priority: Priority.P2 }),
+        ),
+    });
+    await service.update(
+      "incident-1",
+      { shortDescription: "Still working it", ownerUserId: engineer.id, priority: Priority.P2 },
+      engineer,
+      { actorId: engineer.id },
+    );
+    expect(tx.incident.update).toHaveBeenCalled();
+  });
+
+  it("allows Service Desk/NOC to reassign ownership and override priority via PATCH", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ priority: Priority.P3 })),
+    });
+    await service.update(
+      "incident-1",
+      { ownerUserId: "engineer-2", priority: Priority.P1, priorityChangeReason: "re-triaged" },
+      serviceDesk,
+      { actorId: serviceDesk.id },
+    );
+    expect(tx.incident.update).toHaveBeenCalled();
   });
 });
 

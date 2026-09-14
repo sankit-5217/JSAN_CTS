@@ -38,6 +38,7 @@ import { TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
 import {
   findTransitionRule,
+  INCIDENT_ROUTING_ROLES,
   isOwnerOrElevated,
   OPEN_STATUSES,
   TRANSITION_RULES,
@@ -282,6 +283,18 @@ export class IncidentsService {
       (dto.ownerGroupId !== undefined && dto.ownerGroupId !== before.ownerGroupId) ||
       (dto.ownerUserId !== undefined && dto.ownerUserId !== before.ownerUserId);
     const priorityChanged = dto.priority !== undefined && dto.priority !== before.priority;
+
+    // Routing (who owns the ticket) and priority overrides are a Service
+    // Desk/elevated call, not Site Engineer's — see INCIDENT_ROUTING_ROLES.
+    // Gated on the value actually changing, not just being present: the
+    // edit form always round-trips the ticket's *current* owner/group in
+    // the PATCH body, so a presence-only check would block a Site Engineer
+    // from editing anything else on a ticket they already own.
+    if ((ownerChanged || priorityChanged) && !INCIDENT_ROUTING_ROLES.includes(user.role)) {
+      throw new ForbiddenException(
+        "Only Service Desk/NOC or an elevated role can reassign ownership or override priority",
+      );
+    }
 
     const after = await this.prisma.$transaction(async (tx) => {
       const after = await tx.incident.update({
