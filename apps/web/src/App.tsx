@@ -24,6 +24,7 @@ import ChangeCircleOutlinedIcon from "@mui/icons-material/ChangeCircleOutlined";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import DnsOutlinedIcon from "@mui/icons-material/DnsOutlined";
 import GppMaybeOutlinedIcon from "@mui/icons-material/GppMaybeOutlined";
+import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
 import LocalShippingOutlinedIcon from "@mui/icons-material/LocalShippingOutlined";
 import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
@@ -61,6 +62,7 @@ import { RisksPage } from "./pages/RisksPage";
 import { SiteDetailPage } from "./pages/SiteDetailPage";
 import { SitesPage } from "./pages/SitesPage";
 import { SlaPoliciesPage } from "./pages/SlaPoliciesPage";
+import { SupportGroupsPage } from "./pages/SupportGroupsPage";
 import { VendorCaseDetailPage } from "./pages/VendorCaseDetailPage";
 import { VendorsPage } from "./pages/VendorsPage";
 
@@ -108,6 +110,11 @@ const NAV_GROUPS: NavGroup[] = [
         label: "SLA policies",
         to: "/sla-policies",
         icon: <ScheduleOutlinedIcon fontSize="small" />,
+      },
+      {
+        label: "Support groups",
+        to: "/support-groups",
+        icon: <GroupsOutlinedIcon fontSize="small" />,
       },
     ],
   },
@@ -373,6 +380,7 @@ export function App() {
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
         <Route path="/sla-policies" element={<SlaPoliciesPage />} />
+        <Route path="/support-groups" element={<SupportGroupsPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/alerts/:id" element={<AlertDetailPage />} />
         <Route path="/alert-rules" element={<AlertRulesPage />} />
