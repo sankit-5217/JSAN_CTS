@@ -341,6 +341,8 @@ export class IncidentsService {
 
     if (ownerChanged && after.ownerUserId) {
       await this.notifyAssignment(after, after.ownerUserId);
+    } else if (ownerChanged && after.ownerGroupId && !after.ownerUserId) {
+      await this.notifyGroupAssignment(after, after.ownerGroupId);
     }
 
     return after;
@@ -465,6 +467,13 @@ export class IncidentsService {
     await this.notifyStatusChange(incident, after, dto.reason);
     if (dto.ownerUserId !== undefined && dto.ownerUserId !== incident.ownerUserId) {
       await this.notifyAssignment(after, dto.ownerUserId);
+    } else if (
+      dto.ownerGroupId !== undefined &&
+      dto.ownerGroupId !== incident.ownerGroupId &&
+      after.ownerGroupId &&
+      !after.ownerUserId
+    ) {
+      await this.notifyGroupAssignment(after, after.ownerGroupId);
     }
 
     return after;
@@ -885,6 +894,44 @@ export class IncidentsService {
     } catch (err) {
       this.logger.warn(
         `assignment notification skipped for incident ${incident.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /** Tell every member of a support group when a ticket lands in their
+   *  queue with no individual owner yet — otherwise a group assignment
+   *  satisfies the NEW -> ASSIGNED gate but pages nobody. Only called when
+   *  ownerUserId is unset; once someone claims it, notifyAssignment takes
+   *  over. */
+  private async notifyGroupAssignment(incident: Incident, ownerGroupId: string): Promise<void> {
+    try {
+      const group = await this.prisma.supportGroup.findUnique({
+        where: { id: ownerGroupId },
+        include: { members: { include: { user: true } } },
+      });
+      if (!group) {
+        return;
+      }
+      const to: Party[] = group.members
+        .filter((m) => m.user.isActive && m.user.email)
+        .map((m) => ({ name: m.user.displayName, email: m.user.email }));
+      if (to.length === 0) {
+        return;
+      }
+      await this.notifications.enqueue(
+        {
+          event: {
+            kind: "INCIDENT_GROUP_ASSIGNED",
+            entity: this.toEntityRef(incident),
+            group: { name: group.name },
+          },
+          recipients: { to },
+        },
+        `INCIDENT_GROUP_ASSIGNED:${incident.id}:${ownerGroupId}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `group-assignment notification skipped for incident ${incident.id}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

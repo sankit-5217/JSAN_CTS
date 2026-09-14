@@ -80,6 +80,7 @@ function makeService(
     getAccessibleSiteIds?: jest.Mock;
     userFindUnique?: jest.Mock;
     userFindMany?: jest.Mock;
+    supportGroupFindUnique?: jest.Mock;
   } = {},
 ) {
   const txIncident = {
@@ -134,6 +135,9 @@ function makeService(
     user: {
       findUnique: overrides.userFindUnique ?? jest.fn().mockResolvedValue(null),
       findMany: overrides.userFindMany ?? jest.fn().mockResolvedValue([]),
+    },
+    supportGroup: {
+      findUnique: overrides.supportGroupFindUnique ?? jest.fn().mockResolvedValue(null),
     },
   } as unknown as PrismaService;
 
@@ -329,6 +333,77 @@ describe("IncidentsService.update", () => {
       }),
       "INCIDENT_ASSIGNED:incident-1:engineer-2",
     );
+  });
+
+  it("notifies every member of the group when a PATCH assigns it with no individual owner", async () => {
+    const { service, notifications } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ ownerGroupId: null, ownerUserId: null })),
+      supportGroupFindUnique: jest.fn().mockResolvedValue({
+        id: "group-1",
+        name: "Networking",
+        members: [
+          {
+            user: {
+              isActive: true,
+              email: "eng1@example.com",
+              displayName: "Eng One",
+            },
+          },
+          {
+            user: {
+              isActive: true,
+              email: "eng2@example.com",
+              displayName: "Eng Two",
+            },
+          },
+          // inactive members never get paged
+          {
+            user: { isActive: false, email: "gone@example.com", displayName: "Gone" },
+          },
+        ],
+      }),
+    });
+    await service.update("incident-1", { ownerGroupId: "group-1" }, engineer, {
+      actorId: engineer.id,
+    });
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "INCIDENT_GROUP_ASSIGNED",
+          group: { name: "Networking" },
+        }),
+        recipients: {
+          to: [
+            { name: "Eng One", email: "eng1@example.com" },
+            { name: "Eng Two", email: "eng2@example.com" },
+          ],
+        },
+      }),
+      "INCIDENT_GROUP_ASSIGNED:incident-1:group-1",
+    );
+  });
+
+  it("notifies the individual owner, not the group, when both are set in the same PATCH", async () => {
+    const { service, notifications } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ ownerGroupId: null, ownerUserId: null })),
+      userFindUnique: jest.fn().mockResolvedValue({
+        id: "engineer-2",
+        email: "engineer2@example.com",
+        displayName: "Otis Engineer",
+      }),
+    });
+    await service.update(
+      "incident-1",
+      { ownerGroupId: "group-1", ownerUserId: "engineer-2" },
+      engineer,
+      { actorId: engineer.id },
+    );
+    const kinds = (notifications.enqueue as jest.Mock).mock.calls.map(([job]) => job.event.kind);
+    expect(kinds).toEqual(["INCIDENT_ASSIGNED"]);
   });
 
   it("does not notify when ownerUserId is left unchanged", async () => {
@@ -718,6 +793,30 @@ describe("IncidentsService.createTransition", () => {
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ event: expect.objectContaining({ kind: "INCIDENT_ASSIGNED" }) }),
       "INCIDENT_ASSIGNED:incident-1:engineer-1",
+    );
+  });
+
+  it("notifies the group when NEW -> ASSIGNED resolves one with no individual owner", async () => {
+    const { service, notifications } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+      supportGroupFindUnique: jest.fn().mockResolvedValue({
+        id: "group-1",
+        name: "Networking",
+        members: [{ user: { isActive: true, email: "eng1@example.com", displayName: "Eng One" } }],
+      }),
+    });
+    await service.createTransition(
+      "incident-1",
+      { toStatus: IncidentStatus.ASSIGNED, ownerGroupId: "group-1" },
+      { actorId: serviceDesk.id },
+      serviceDesk,
+    );
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ kind: "INCIDENT_GROUP_ASSIGNED" }),
+        recipients: { to: [{ name: "Eng One", email: "eng1@example.com" }] },
+      }),
+      "INCIDENT_GROUP_ASSIGNED:incident-1:group-1",
     );
   });
 
