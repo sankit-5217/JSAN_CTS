@@ -156,13 +156,14 @@ model User {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  incidentsOwned     Incident[]      @relation("IncidentOwner")
-  incidentsReported  Incident[]      @relation("IncidentReportedBy")
-  worklogs           Worklog[]
-  auditEvents        AuditEvent[]
-  siteAccess         UserSiteAccess[]
-  attachments        Attachment[]
-  deletedAttachments Attachment[]    @relation("AttachmentDeletedBy")
+  incidentsOwned      Incident[]           @relation("IncidentOwner")
+  incidentsReported   Incident[]           @relation("IncidentReportedBy")
+  worklogs            Worklog[]
+  auditEvents         AuditEvent[]
+  siteAccess          UserSiteAccess[]
+  attachments         Attachment[]
+  deletedAttachments  Attachment[]         @relation("AttachmentDeletedBy")
+  supportGroupMembers SupportGroupMember[]
 
   @@map("users")
 }
@@ -198,12 +199,12 @@ model Site {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  contacts             SiteContact[]
-  supportCalendars     SupportCalendar[]
-  configurationItems   ConfigurationItem[]
-  incidents            Incident[]
-  userAccess           UserSiteAccess[]
-  racks                Rack[]
+  contacts           SiteContact[]
+  supportCalendars   SupportCalendar[]
+  configurationItems ConfigurationItem[]
+  incidents          Incident[]
+  userAccess         UserSiteAccess[]
+  racks              Rack[]
 
   @@map("sites")
 }
@@ -225,14 +226,14 @@ model SiteContact {
 }
 
 model SupportCalendar {
-  id            String   @id @default(uuid())
-  siteId        String   @map("site_id")
+  id            String     @id @default(uuid())
+  siteId        String     @map("site_id")
   name          String
-  businessStart String   @map("business_start") // "09:00"
-  businessEnd   String   @map("business_end") // "18:00"
-  workdays      Int[]    @map("workdays") // 0=Sun .. 6=Sat
+  businessStart String     @map("business_start") // "09:00"
+  businessEnd   String     @map("business_end") // "18:00"
+  workdays      Int[]      @map("workdays") // 0=Sun .. 6=Sat
   holidays      DateTime[]
-  is247         Boolean  @default(false) @map("is_24x7")
+  is247         Boolean    @default(false) @map("is_24x7")
 
   site Site @relation(fields: [siteId], references: [id])
 
@@ -246,8 +247,27 @@ model SupportGroup {
   createdAt DateTime @default(now()) @map("created_at")
 
   incidents Incident[]
+  members   SupportGroupMember[]
 
   @@map("support_groups")
+}
+
+/// Who's actually on a support group's roster — SupportGroup itself has no
+/// members concept without this, which meant assigning an incident to a
+/// group had no one to notify (spec gap; see incidents.service.ts's
+/// notifyGroupAssignment). Same explicit-join-table shape as UserSiteAccess.
+model SupportGroupMember {
+  id        String   @id @default(uuid())
+  groupId   String   @map("group_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  group SupportGroup @relation(fields: [groupId], references: [id])
+  user  User         @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@map("support_group_members")
 }
 
 // ---------------------------------------------------------------------------
@@ -288,17 +308,17 @@ model ConfigurationItem {
   managedBy          ManagedBy       @map("managed_by")
   criticality        Criticality
   lifecycleStatus    LifecycleStatus @map("lifecycle_status")
-  metadata           Json?           // vendor-specific fields only
+  metadata           Json? // vendor-specific fields only
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
 
-  site         Site           @relation(fields: [siteId], references: [id])
-  rack         Rack?          @relation(fields: [rackId], references: [id])
-  incidents    Incident[]
-  alerts       Alert[]
+  site           Site            @relation(fields: [siteId], references: [id])
+  rack           Rack?           @relation(fields: [rackId], references: [id])
+  incidents      Incident[]
+  alerts         Alert[]
   healthSnapshot HealthSnapshot?
-  warranties   Warranty[]
-  vendorCases  VendorCase[]
+  warranties     Warranty[]
+  vendorCases    VendorCase[]
 
   parentOf CiRelation[] @relation("ParentCi")
   childOf  CiRelation[] @relation("ChildCi")
@@ -322,12 +342,12 @@ model CiRelation {
 }
 
 model HealthSnapshot {
-  id           String   @id @default(uuid())
-  ciId         String   @unique @map("ci_id")
-  overallHealth String  @map("overall_health") // HEALTHY / WARNING / CRITICAL / UNKNOWN / MAINTENANCE
-  details      Json?
+  id              String    @id @default(uuid())
+  ciId            String    @unique @map("ci_id")
+  overallHealth   String    @map("overall_health") // HEALTHY / WARNING / CRITICAL / UNKNOWN / MAINTENANCE
+  details         Json?
   lastHeartbeatAt DateTime? @map("last_heartbeat_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   ci ConfigurationItem @relation(fields: [ciId], references: [id])
 
@@ -335,12 +355,12 @@ model HealthSnapshot {
 }
 
 model Warranty {
-  id            String         @id @default(uuid())
-  ciId          String         @map("ci_id")
-  status        WarrantyStatus
-  provider      String?
-  expiresAt     DateTime?      @map("expires_at")
-  createdAt     DateTime       @default(now()) @map("created_at")
+  id        String         @id @default(uuid())
+  ciId      String         @map("ci_id")
+  status    WarrantyStatus
+  provider  String?
+  expiresAt DateTime?      @map("expires_at")
+  createdAt DateTime       @default(now()) @map("created_at")
 
   ci ConfigurationItem @relation(fields: [ciId], references: [id])
 
@@ -354,29 +374,29 @@ model Warranty {
 // ---------------------------------------------------------------------------
 
 model Incident {
-  id           String         @id @default(uuid())
-  incidentNo   String         @unique @map("incident_no")
-  siteId       String         @map("site_id")
-  ciId         String?        @map("ci_id")
-  status       IncidentStatus @default(NEW)
-  priority     Priority
-  category     String
-  impact       String
-  urgency      String
-  shortDescription String     @map("short_description")
-  ownerGroupId String?        @map("owner_group_id")
-  ownerUserId  String?        @map("owner_user_id")
+  id                 String         @id @default(uuid())
+  incidentNo         String         @unique @map("incident_no")
+  siteId             String         @map("site_id")
+  ciId               String?        @map("ci_id")
+  status             IncidentStatus @default(NEW)
+  priority           Priority
+  category           String
+  impact             String
+  urgency            String
+  shortDescription   String         @map("short_description")
+  ownerGroupId       String?        @map("owner_group_id")
+  ownerUserId        String?        @map("owner_user_id")
   // Set only when this incident came in via POST /incidents/customer-report —
   // null for internally-created incidents (spec §10.3: who to notify back on
   // status/comment updates for a self-service ticket).
-  reportedByUserId String?    @map("reported_by_user_id")
-  acknowledgedAt DateTime?    @map("acknowledged_at")
-  resolutionCategory String?  @map("resolution_category")
-  rootCauseSummary   String?  @map("root_cause_summary")
-  restoredAt   DateTime?      @map("restored_at")
-  closedAt     DateTime?      @map("closed_at")
-  createdAt    DateTime       @default(now()) @map("created_at")
-  updatedAt    DateTime       @updatedAt @map("updated_at")
+  reportedByUserId   String?        @map("reported_by_user_id")
+  acknowledgedAt     DateTime?      @map("acknowledged_at")
+  resolutionCategory String?        @map("resolution_category")
+  rootCauseSummary   String?        @map("root_cause_summary")
+  restoredAt         DateTime?      @map("restored_at")
+  closedAt           DateTime?      @map("closed_at")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
 
   site       Site               @relation(fields: [siteId], references: [id])
   ci         ConfigurationItem? @relation(fields: [ciId], references: [id])
@@ -384,9 +404,9 @@ model Incident {
   ownerGroup SupportGroup?      @relation(fields: [ownerGroupId], references: [id])
   reportedBy User?              @relation("IncidentReportedBy", fields: [reportedByUserId], references: [id])
 
-  events    IncidentEvent[]
-  comments  IncidentComment[]
-  worklogs  Worklog[]
+  events       IncidentEvent[]
+  comments     IncidentComment[]
+  worklogs     Worklog[]
   slaInstances SlaInstance[]
   vendorCases  VendorCase[]
 
@@ -452,18 +472,18 @@ model Worklog {
 // ---------------------------------------------------------------------------
 
 model SlaPolicy {
-  id                String   @id @default(uuid())
-  name              String
-  priority          Priority
-  ackTargetMinutes  Int      @map("ack_target_minutes")
-  resolveTargetMinutes Int   @map("resolve_target_minutes")
-  usesBusinessCalendar Boolean @default(false) @map("uses_business_calendar")
-  escalationThresholdsPercent Int[] @default([50, 75, 90]) @map("escalation_thresholds_percent")
-  pausesOnPendingVendor   Boolean @default(true) @map("pauses_on_pending_vendor")
-  pausesOnPendingCustomer Boolean @default(true) @map("pauses_on_pending_customer")
-  effectiveFrom     DateTime @map("effective_from")
-  effectiveTo       DateTime? @map("effective_to")
-  isActive          Boolean  @default(true) @map("is_active")
+  id                          String    @id @default(uuid())
+  name                        String
+  priority                    Priority
+  ackTargetMinutes            Int       @map("ack_target_minutes")
+  resolveTargetMinutes        Int       @map("resolve_target_minutes")
+  usesBusinessCalendar        Boolean   @default(false) @map("uses_business_calendar")
+  escalationThresholdsPercent Int[]     @default([50, 75, 90]) @map("escalation_thresholds_percent")
+  pausesOnPendingVendor       Boolean   @default(true) @map("pauses_on_pending_vendor")
+  pausesOnPendingCustomer     Boolean   @default(true) @map("pauses_on_pending_customer")
+  effectiveFrom               DateTime  @map("effective_from")
+  effectiveTo                 DateTime? @map("effective_to")
+  isActive                    Boolean   @default(true) @map("is_active")
 
   slaInstances SlaInstance[]
 
@@ -502,23 +522,23 @@ model SlaInstance {
 // ---------------------------------------------------------------------------
 
 model Alert {
-  id              String        @id @default(uuid())
-  externalEventId String        @map("external_event_id")
-  source          String        // ZABBIX / PROMETHEUS / REDFISH / SNMP / SYSLOG
-  siteId          String?       @map("site_id")
-  ciId            String?       @map("ci_id")
-  alertType       String        @map("alert_type")
-  severity        AlertSeverity
-  fingerprint     String
-  firstSeenAt     DateTime      @map("first_seen_at")
-  lastSeenAt      DateTime      @map("last_seen_at")
-  state           AlertState    @default(OPEN)
-  rawReference    String?       @map("raw_reference") // pointer, not unlimited raw payload storage
+  id                   String        @id @default(uuid())
+  externalEventId      String        @map("external_event_id")
+  source               String // ZABBIX / PROMETHEUS / REDFISH / SNMP / SYSLOG
+  siteId               String?       @map("site_id")
+  ciId                 String?       @map("ci_id")
+  alertType            String        @map("alert_type")
+  severity             AlertSeverity
+  fingerprint          String
+  firstSeenAt          DateTime      @map("first_seen_at")
+  lastSeenAt           DateTime      @map("last_seen_at")
+  state                AlertState    @default(OPEN)
+  rawReference         String?       @map("raw_reference") // pointer, not unlimited raw payload storage
   // Set once when the alert is attached to a still-open incident on the same CI
   // (spec §10.10). Scalar, no FK relation: the incidents module owns that table,
   // correlation only reads it. Link-only — correlation never opens or mutates a
   // ticket.
-  correlatedIncidentId String?  @map("correlated_incident_id")
+  correlatedIncidentId String?       @map("correlated_incident_id")
 
   ci ConfigurationItem? @relation(fields: [ciId], references: [id])
 
@@ -537,18 +557,18 @@ model Alert {
 /// (site+type > site > type > global), falling back to code defaults, behind
 /// a short in-memory cache.
 model AlertRule {
-  id                     String          @id @default(uuid())
-  name                   String
-  siteId                 String?         @map("site_id")
-  alertType              String?         @map("alert_type")
-  flappingThreshold      Int             @default(3) @map("flapping_threshold")
-  flappingWindowMinutes  Int             @default(30) @map("flapping_window_minutes")
-  pagingSeverities       AlertSeverity[] @default([CRITICAL]) @map("paging_severities")
-  autoCorrelateIncidents Boolean         @default(true) @map("auto_correlate_incidents")
-  suppressAutoTicketDuringMaintenance Boolean @default(true) @map("suppress_auto_ticket_during_maintenance")
-  isActive               Boolean         @default(true) @map("is_active")
-  createdAt              DateTime        @default(now()) @map("created_at")
-  updatedAt              DateTime        @updatedAt @map("updated_at")
+  id                                  String          @id @default(uuid())
+  name                                String
+  siteId                              String?         @map("site_id")
+  alertType                           String?         @map("alert_type")
+  flappingThreshold                   Int             @default(3) @map("flapping_threshold")
+  flappingWindowMinutes               Int             @default(30) @map("flapping_window_minutes")
+  pagingSeverities                    AlertSeverity[] @default([CRITICAL]) @map("paging_severities")
+  autoCorrelateIncidents              Boolean         @default(true) @map("auto_correlate_incidents")
+  suppressAutoTicketDuringMaintenance Boolean         @default(true) @map("suppress_auto_ticket_during_maintenance")
+  isActive                            Boolean         @default(true) @map("is_active")
+  createdAt                           DateTime        @default(now()) @map("created_at")
+  updatedAt                           DateTime        @updatedAt @map("updated_at")
 
   @@index([isActive])
   @@index([siteId])
@@ -562,7 +582,7 @@ model AlertRule {
 model Vendor {
   id        String   @id @default(uuid())
   name      String   @unique
-  type      String   // DELL / HPE / ISP / LOCAL
+  type      String // DELL / HPE / ISP / LOCAL
   createdAt DateTime @default(now()) @map("created_at")
 
   vendorCases VendorCase[]
@@ -571,20 +591,20 @@ model Vendor {
 }
 
 model VendorCase {
-  id                String          @id @default(uuid())
-  vendorCaseNo      String          @unique @map("vendor_case_no")
-  vendorId          String          @map("vendor_id")
-  linkedIncidentId  String?         @map("linked_incident_id")
-  ciId              String?         @map("ci_id")
-  warrantyStatus    WarrantyStatus  @default(UNKNOWN) @map("warranty_status")
-  openedAt          DateTime        @default(now()) @map("opened_at")
-  acknowledgedAt    DateTime?       @map("acknowledged_at")
-  rmaRequired       Boolean         @default(false) @map("rma_required")
-  replacementPart   String?         @map("replacement_part")
-  dispatchStatus    DispatchStatus? @map("dispatch_status")
-  vendorEta         DateTime?       @map("vendor_eta")
-  closedAt          DateTime?       @map("closed_at")
-  outcome           String?
+  id               String          @id @default(uuid())
+  vendorCaseNo     String          @unique @map("vendor_case_no")
+  vendorId         String          @map("vendor_id")
+  linkedIncidentId String?         @map("linked_incident_id")
+  ciId             String?         @map("ci_id")
+  warrantyStatus   WarrantyStatus  @default(UNKNOWN) @map("warranty_status")
+  openedAt         DateTime        @default(now()) @map("opened_at")
+  acknowledgedAt   DateTime?       @map("acknowledged_at")
+  rmaRequired      Boolean         @default(false) @map("rma_required")
+  replacementPart  String?         @map("replacement_part")
+  dispatchStatus   DispatchStatus? @map("dispatch_status")
+  vendorEta        DateTime?       @map("vendor_eta")
+  closedAt         DateTime?       @map("closed_at")
+  outcome          String?
 
   vendor   Vendor             @relation(fields: [vendorId], references: [id])
   incident Incident?          @relation(fields: [linkedIncidentId], references: [id])
@@ -675,60 +695,60 @@ model ProblemLink {
 }
 
 model Change {
-  id               String     @id @default(uuid())
-  changeType       ChangeType @map("change_type")
-  reason           String
-  implementationPlan String   @map("implementation_plan")
-  validationPlan   String     @map("validation_plan")
-  rollbackPlan     String     @map("rollback_plan")
-  risk             String
-  windowStart      DateTime   @map("window_start")
-  windowEnd        DateTime   @map("window_end")
-  approverId       String?    @map("approver_id")
-  outcome          String?
+  id                 String     @id @default(uuid())
+  changeType         ChangeType @map("change_type")
+  reason             String
+  implementationPlan String     @map("implementation_plan")
+  validationPlan     String     @map("validation_plan")
+  rollbackPlan       String     @map("rollback_plan")
+  risk               String
+  windowStart        DateTime   @map("window_start")
+  windowEnd          DateTime   @map("window_end")
+  approverId         String?    @map("approver_id")
+  outcome            String?
   // CIs this change touches. Empty = a site-wide window. Lets the
   // alert-suppression feed answer "is CI X under maintenance right now?"
   // rather than only keying off ci.lifecycleStatus.
-  affectedCiIds    String[]   @default([]) @map("affected_ci_ids")
-  createdAt        DateTime   @default(now()) @map("created_at")
+  affectedCiIds      String[]   @default([]) @map("affected_ci_ids")
+  createdAt          DateTime   @default(now()) @map("created_at")
 
   @@map("changes")
 }
 
 model KnowledgeArticle {
-  id           String   @id @default(uuid())
-  title        String
-  body         String
-  version      Int      @default(1)
-  ownerId      String?  @map("owner_id")
+  id               String    @id @default(uuid())
+  title            String
+  body             String
+  version          Int       @default(1)
+  ownerId          String?   @map("owner_id")
   // Scope & linkage (spec §10.14). siteId null = global runbook; set = a
   // site-specific SOP. incidentCategory / ciType tie the article to the kind
   // of incident and hardware it applies to.
-  siteId       String?  @map("site_id")
-  incidentCategory String? @map("incident_category")
-  ciType       CiType?  @map("ci_type")
-  approvalState String  @default("DRAFT") @map("approval_state") // DRAFT / APPROVED
-  reviewDueAt  DateTime? @map("review_due_at")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  siteId           String?   @map("site_id")
+  incidentCategory String?   @map("incident_category")
+  ciType           CiType?   @map("ci_type")
+  approvalState    String    @default("DRAFT") @map("approval_state") // DRAFT / APPROVED
+  reviewDueAt      DateTime? @map("review_due_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   @@index([siteId])
   @@map("knowledge_articles")
 }
 
 model Risk {
-  id          String   @id @default(uuid())
-  siteId      String?  @map("site_id")
+  id          String    @id @default(uuid())
+  siteId      String?   @map("site_id")
   description String
   likelihood  Int
   impact      Int
   score       Int
   mitigation  String?
   evidence    String?
-  ownerId     String?  @map("owner_id")
+  ownerId     String?   @map("owner_id")
   dueDate     DateTime? @map("due_date")
-  status      String   @default("OPEN")
-  createdAt   DateTime @default(now()) @map("created_at")
+  status      String    @default("OPEN")
+  createdAt   DateTime  @default(now()) @map("created_at")
 
   @@map("risks")
 }

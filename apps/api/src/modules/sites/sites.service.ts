@@ -4,6 +4,7 @@ import { ActorContext } from "../../common/types/actor-context.type";
 import { Paginated } from "../../common/types/paginated.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { AddSupportGroupMemberDto } from "./dto/add-support-group-member.dto";
 import { CreateSiteContactDto } from "./dto/create-site-contact.dto";
 import { CreateSiteDto } from "./dto/create-site.dto";
 import { CreateSupportCalendarDto } from "./dto/create-support-calendar.dto";
@@ -168,6 +169,83 @@ export class SitesService {
         tx,
       );
       return group;
+    });
+  }
+
+  private async getSupportGroup(id: string) {
+    const group = await this.prisma.supportGroup.findUnique({ where: { id } });
+    if (!group) {
+      throw new NotFoundException(`Support group ${id} not found`);
+    }
+    return group;
+  }
+
+  /** Who's actually on a group's roster — this is what
+   * IncidentsService.notifyGroupAssignment reads to know who to tell when a
+   * ticket lands in this group unassigned. */
+  async listGroupMembers(groupId: string) {
+    await this.getSupportGroup(groupId);
+    const members = await this.prisma.supportGroupMember.findMany({
+      where: { groupId },
+      include: { user: { select: { id: true, displayName: true, email: true, role: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+    return members.map((m) => ({ membershipId: m.id, ...m.user }));
+  }
+
+  async addGroupMember(groupId: string, dto: AddSupportGroupMemberDto, actor: ActorContext) {
+    await this.getSupportGroup(groupId);
+    const user = await this.prisma.user.findUnique({
+      where: { id: dto.userId },
+      select: { id: true, displayName: true, email: true, role: true },
+    });
+    if (!user) {
+      throw new NotFoundException(`User ${dto.userId} not found`);
+    }
+    return this.prisma.$transaction(async (tx) => {
+      // Idempotent by design — clicking "add" twice on the same person is a
+      // no-op, not an error the UI has to swallow.
+      const membership = await tx.supportGroupMember.upsert({
+        where: { groupId_userId: { groupId, userId: dto.userId } },
+        create: { groupId, userId: dto.userId },
+        update: {},
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportGroup",
+          entityId: groupId,
+          action: "ADD_MEMBER",
+          after: { userId: dto.userId, displayName: user.displayName },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return { membershipId: membership.id, ...user };
+    });
+  }
+
+  async removeGroupMember(groupId: string, userId: string, actor: ActorContext) {
+    await this.getSupportGroup(groupId);
+    const membership = await this.prisma.supportGroupMember.findUnique({
+      where: { groupId_userId: { groupId, userId } },
+    });
+    if (!membership) {
+      throw new NotFoundException(`User ${userId} is not a member of group ${groupId}`);
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.supportGroupMember.delete({ where: { id: membership.id } });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportGroup",
+          entityId: groupId,
+          action: "REMOVE_MEMBER",
+          before: { userId },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
     });
   }
 }
