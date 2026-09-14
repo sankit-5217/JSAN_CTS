@@ -49,6 +49,17 @@ export class SupportGroupsController {
     return this.sitesService.createSupportGroup(dto, { actorId: user.id, correlationId });
   }
 
+  @Delete(":id")
+  @Roles(...SUPPORT_GROUP_WRITE_ROLES)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    await this.sitesService.deleteSupportGroup(id, { actorId: user.id, correlationId });
+  }
+
   @Get(":id/members")
   listMembers(@Param("id") id: string) {
     return this.sitesService.listGroupMembers(id);

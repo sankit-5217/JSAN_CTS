@@ -137,6 +137,26 @@ export function SupportGroupsPage() {
     }
   };
 
+  // --- Delete group ---------------------------------------------------------
+  const deleteGroup = async () => {
+    if (!selectedGroup) return;
+    if (
+      !window.confirm(
+        `Delete "${selectedGroup.name}"? This removes its roster too. Groups with incidents still assigned to them can't be deleted.`,
+      )
+    ) {
+      return;
+    }
+    setActionError(null);
+    try {
+      await apiDelete(`/support-groups/${selectedGroup.id}`);
+      setSelectedGroupId(null);
+      refetchGroups();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const selectedGroup = groups.find((g) => g.id === selectedGroupId) ?? null;
 
   return (
@@ -211,9 +231,21 @@ export function SupportGroupsPage() {
 
         <Grid item xs={12} md={8}>
           <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              {selectedGroup ? `${selectedGroup.name} — members` : "Select a group"}
-            </Typography>
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Typography variant="h6" gutterBottom>
+                {selectedGroup ? `${selectedGroup.name} — members` : "Select a group"}
+              </Typography>
+              {selectedGroup && canWrite && (
+                <Button
+                  size="small"
+                  color="error"
+                  startIcon={<DeleteOutlineIcon fontSize="small" />}
+                  onClick={deleteGroup}
+                >
+                  Delete group
+                </Button>
+              )}
+            </Stack>
             {selectedGroup && (
               <>
                 <Stack spacing={1} sx={{ mb: 2 }}>

@@ -10,7 +10,9 @@ function makeService(prismaOverrides: Record<string, unknown> = {}) {
         .fn()
         .mockImplementation(({ create }) => Promise.resolve({ id: "member-1", ...create })),
       delete: jest.fn().mockResolvedValue(undefined),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
+    supportGroup: { delete: jest.fn().mockResolvedValue(undefined) },
   };
   const prisma = {
     $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
@@ -20,6 +22,7 @@ function makeService(prismaOverrides: Record<string, unknown> = {}) {
       findUnique: jest.fn().mockResolvedValue(null),
     },
     user: { findUnique: jest.fn().mockResolvedValue(null) },
+    incident: { findFirst: jest.fn().mockResolvedValue(null) },
     ...prismaOverrides,
   } as unknown as PrismaService;
   const auditService = {
@@ -197,6 +200,45 @@ describe("SitesService support group membership", () => {
           entityType: "SupportGroup",
           entityId: groupId,
           action: "REMOVE_MEMBER",
+          correlationId: "corr-1",
+        }),
+        tx,
+      );
+    });
+  });
+
+  describe("deleteSupportGroup", () => {
+    it("throws NotFoundException when the group doesn't exist", async () => {
+      const { service } = makeService();
+      await expect(service.deleteSupportGroup(groupId, { actorId: "actor-1" })).rejects
+        .toBeInstanceOf(NotFoundException);
+    });
+
+    it("rejects deletion when an incident is still assigned to the group", async () => {
+      const { service, tx } = makeService({
+        supportGroup: { findUnique: jest.fn().mockResolvedValue(group) },
+        incident: { findFirst: jest.fn().mockResolvedValue({ id: "incident-1" }) },
+      });
+      await expect(
+        service.deleteSupportGroup(groupId, { actorId: "actor-1" }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.supportGroup.delete).not.toHaveBeenCalled();
+    });
+
+    it("clears the roster, deletes the group, and audits it", async () => {
+      const { service, tx, auditService } = makeService({
+        supportGroup: { findUnique: jest.fn().mockResolvedValue(group) },
+      });
+      await service.deleteSupportGroup(groupId, { actorId: "actor-1", correlationId: "corr-1" });
+      expect(tx.supportGroupMember.deleteMany).toHaveBeenCalledWith({ where: { groupId } });
+      expect(tx.supportGroup.delete).toHaveBeenCalledWith({ where: { id: groupId } });
+      expect(auditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: "actor-1",
+          entityType: "SupportGroup",
+          entityId: groupId,
+          action: "DELETE",
+          before: group,
           correlationId: "corr-1",
         }),
         tx,

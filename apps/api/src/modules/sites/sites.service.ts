@@ -180,6 +180,40 @@ export class SitesService {
     return group;
   }
 
+  async deleteSupportGroup(id: string, actor: ActorContext) {
+    const group = await this.getSupportGroup(id);
+    // Incident.ownerGroupId is a real FK (Restrict by default) — a group
+    // still holding tickets can't just vanish out from under them, so this
+    // is a deliberate business rule, not just letting the DB constraint
+    // surface as a raw 500.
+    const assignedIncident = await this.prisma.incident.findFirst({
+      where: { ownerGroupId: id },
+      select: { id: true },
+    });
+    if (assignedIncident) {
+      throw new BadRequestException(
+        "Cannot delete a support group that still has incidents assigned to it",
+      );
+    }
+    await this.prisma.$transaction(async (tx) => {
+      // SupportGroupMember rows FK into the group too — clear the roster
+      // first so the group delete itself doesn't hit that constraint.
+      await tx.supportGroupMember.deleteMany({ where: { groupId: id } });
+      await tx.supportGroup.delete({ where: { id } });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportGroup",
+          entityId: id,
+          action: "DELETE",
+          before: group,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+    });
+  }
+
   /** Who's actually on a group's roster — this is what
    * IncidentsService.notifyGroupAssignment reads to know who to tell when a
    * ticket lands in this group unassigned. */
