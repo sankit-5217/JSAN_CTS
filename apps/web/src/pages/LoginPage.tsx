@@ -314,7 +314,7 @@ export function LoginPage() {
         sx={{
           position: "sticky",
           top: 0,
-          zIndex: 10,
+          zIndex: 12,
           bgcolor: alpha("#f5f7fa", 0.9),
           backdropFilter: "blur(8px)",
           borderBottom: "1px solid",
@@ -332,7 +332,7 @@ export function LoginPage() {
             <Typography
               sx={{
                 display: { xs: "none", sm: "block" },
-                fontSize: 11,
+                fontSize: 14.5,
                 fontWeight: 600,
                 letterSpacing: "0.04em",
                 color: "text.secondary",
@@ -350,8 +350,8 @@ export function LoginPage() {
               href="#how"
               sx={{
                 display: { xs: "none", sm: "block" },
-                fontSize: 13.5,
-                fontWeight: 500,
+                fontSize: 14.5,
+                fontWeight: 700,
                 color: "text.secondary",
                 textDecoration: "none",
                 "&:hover": { color: "text.primary" },
@@ -364,8 +364,8 @@ export function LoginPage() {
               href="#features"
               sx={{
                 display: { xs: "none", sm: "block" },
-                fontSize: 13.5,
-                fontWeight: 500,
+                fontSize: 14.5,
+                fontWeight: 700,
                 color: "text.secondary",
                 textDecoration: "none",
                 "&:hover": { color: "text.primary" },
@@ -378,8 +378,8 @@ export function LoginPage() {
               href="#contact"
               sx={{
                 display: { xs: "none", sm: "block" },
-                fontSize: 13.5,
-                fontWeight: 500,
+                fontSize: 14.5,
+                fontWeight: 700,
                 color: "text.secondary",
                 textDecoration: "none",
                 "&:hover": { color: "text.primary" },
@@ -392,7 +392,7 @@ export function LoginPage() {
               onClick={scrollToHero}
               sx={{
                 textTransform: "none",
-                fontWeight: 600,
+                fontWeight: 700,
                 borderRadius: 2,
                 bgcolor: theme.palette.primary.main,
                 color: "#fff",
@@ -495,9 +495,24 @@ export function LoginPage() {
           }}
         >
           <Box sx={{ width: "100%", maxWidth: 420 }}>
-            <Stack spacing={0.75} sx={{ mb: 3, display: { xs: "flex", md: "none" } }}>
-              <BrandMark height={32} on="light" />
-              <Typography sx={{ color: "text.secondary", fontSize: 11, letterSpacing: "0.06em" }}>
+            <Stack
+              direction="row"
+              spacing={1.25}
+              alignItems="center"
+              sx={{ mb: 3, display: { xs: "flex", md: "none" } }}
+            >
+              <BrandMark height={38} on="light" />
+              <Typography
+                sx={{
+                  color: "text.secondary",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: "0.06em",
+                  borderLeft: "1px solid",
+                  borderColor: "divider",
+                  pl: 1.25,
+                }}
+              >
                 CTS DATA CENTER OPSDESK
               </Typography>
             </Stack>
@@ -981,13 +996,17 @@ export function LoginPage() {
         >
           <Stack direction="row" spacing={1} alignItems="center">
             <BrandMark height={17} on="light" />
-            <Typography sx={{ fontSize: 11,
-                fontWeight: 600,
+            <Typography
+              sx={{
+                fontSize: 14.5,
+                fontWeight: 700,
                 letterSpacing: "0.04em",
                 color: "text.secondary",
                 borderLeft: "1px solid",
                 borderColor: "divider",
-                pl: 1.25, }}>
+                pl: 1.25,
+              }}
+            >
               CTS Data Center OpsDesk
             </Typography>
           </Stack>
