@@ -119,7 +119,7 @@ const SEEDED_USERS = [
   },
   {
     email: "viewer@example.com",
-    role: "CTS_MANAGER_VIEWER",
+    role: "CLIENT_MANAGER_VIEWER",
     scope: "SITE01",
     note: "Read-only: no internal comments, no management IPs, nothing editable.",
   },
@@ -296,7 +296,7 @@ export function LoginPage() {
       const { accessToken } = await apiPost<DevLoginResponse>("/auth/dev-login", { email });
       storeToken(accessToken);
       const role = decodeJwtPayload(accessToken)?.role;
-      navigate(role === "CTS_MANAGER_VIEWER" ? "/client/report" : "/");
+      navigate(role === "CLIENT_MANAGER_VIEWER" ? "/client/report" : "/");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

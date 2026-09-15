@@ -240,7 +240,7 @@ export class SitesService {
     // customer was never a candidate, and this rejects it server-side
     // rather than just hiding the option in the picker (spec §4: a
     // customer's only writes are their own ticket's comments/attachments).
-    if (user.role === UserRole.CTS_MANAGER_VIEWER) {
+    if (user.role === UserRole.CLIENT_MANAGER_VIEWER) {
       throw new BadRequestException("Customers cannot be added to a support group");
     }
     return this.prisma.$transaction(async (tx) => {

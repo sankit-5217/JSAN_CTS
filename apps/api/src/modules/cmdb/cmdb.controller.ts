@@ -32,7 +32,7 @@ const CMDB_WRITE_ROLES = [
 ] as const;
 
 // managementAddress is spec-restricted ("never expose to customer viewer",
-// §9.1). CTS_MANAGER_VIEWER can already read every GET route here (no
+// §9.1). CLIENT_MANAGER_VIEWER can already read every GET route here (no
 // @Roles restriction on reads, by design), so redact it at the HTTP
 // boundary rather than in CmdbService — the service stays the single
 // source of truth other code (e.g. update()'s audit before/after
@@ -41,7 +41,7 @@ function redactManagementAddress<T extends { managementAddress?: string | null }
   ci: T,
   role: UserRole,
 ): T {
-  if (role !== UserRole.CTS_MANAGER_VIEWER) {
+  if (role !== UserRole.CLIENT_MANAGER_VIEWER) {
     return ci;
   }
   return { ...ci, managementAddress: undefined };

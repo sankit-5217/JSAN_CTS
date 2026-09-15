@@ -58,7 +58,7 @@ describe("Worklogs API (e2e)", () => {
   });
 
   it("a forbidden role cannot create a worklog (403)", async () => {
-    const viewer = await t.tokenFor(fx.users.ctsViewer.email);
+    const viewer = await t.tokenFor(fx.users.clientViewer.email);
     await t
       .http()
       .post(`/api/v1/incidents/${incidentId}/worklogs`)

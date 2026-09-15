@@ -126,7 +126,7 @@ export class IncidentsService {
       // grant, not "this is my ticket." Forced, never client-settable —
       // there's no ?reportedByUserId= query param a customer could spoof
       // even if they tried; this branches on the caller's own role only.
-      reportedByUserId: user.role === UserRole.CTS_MANAGER_VIEWER ? user.id : undefined,
+      reportedByUserId: user.role === UserRole.CLIENT_MANAGER_VIEWER ? user.id : undefined,
       // An explicit ?status= wins; slaAtRisk alone still implies "open"
       // (a resolved incident's stale fired-milestone history isn't
       // actionable risk) — matches ReportsService's own queue definition.
@@ -171,12 +171,12 @@ export class IncidentsService {
     const incident = await this.findOne(id);
     await this.assertSiteAccess(user, incident.siteId);
     // Site access alone is staff-shaped scoping — every internal role at a
-    // site can see every incident there. A CTS_MANAGER_VIEWER isn't staff:
+    // site can see every incident there. A CLIENT_MANAGER_VIEWER isn't staff:
     // the client portal's entire promise is "track your own ticket," not
     // "see every ticket your site has ever raised" (which would leak other
     // reporters' incidents, including ones with no connection to this
     // caller at all — see reportedByUserId, added for exactly this reason).
-    if (user.role === UserRole.CTS_MANAGER_VIEWER && incident.reportedByUserId !== user.id) {
+    if (user.role === UserRole.CLIENT_MANAGER_VIEWER && incident.reportedByUserId !== user.id) {
       throw new ForbiddenException("You do not have access to this incident");
     }
     return incident;
@@ -243,7 +243,7 @@ export class IncidentsService {
   }
 
   /**
-   * Self-service intake for a site POC (CTS_MANAGER_VIEWER). Deliberately
+   * Self-service intake for a site POC (CLIENT_MANAGER_VIEWER). Deliberately
    * thin over `create()`: a customer never sets priority/impact/urgency or
    * picks a CI — those are triage decisions Service Desk makes afterward
    * via the normal PATCH /incidents/:id path (which already re-fires the
@@ -632,7 +632,8 @@ export class IncidentsService {
     // A customer can never post an internal note, regardless of what the
     // request body says — the frontend doesn't offer the toggle, but the
     // backend is the actual guarantee (CLAUDE.md: never trust the client).
-    const isInternal = user.role === UserRole.CTS_MANAGER_VIEWER ? false : (dto.isInternal ?? true);
+    const isInternal =
+      user.role === UserRole.CLIENT_MANAGER_VIEWER ? false : (dto.isInternal ?? true);
 
     const comment = await this.prisma.$transaction(async (tx) => {
       const comment = await tx.incidentComment.create({
@@ -677,7 +678,7 @@ export class IncidentsService {
 
   /**
    * Spec §19: "separate internal engineer notes from customer-visible
-   * comments." CTS_MANAGER_VIEWER never sees isInternal rows; every other
+   * comments." CLIENT_MANAGER_VIEWER never sees isInternal rows; every other
    * role (including AUDITOR_READ_ONLY, which needs full evidence per §4)
    * sees everything.
    */
@@ -687,7 +688,7 @@ export class IncidentsService {
       where: { incidentId },
       orderBy: { createdAt: "asc" },
     });
-    if (user.role === UserRole.CTS_MANAGER_VIEWER) {
+    if (user.role === UserRole.CLIENT_MANAGER_VIEWER) {
       return comments.filter((comment) => !comment.isInternal);
     }
     return comments;
@@ -1005,7 +1006,7 @@ export class IncidentsService {
   ): Promise<void> {
     try {
       const recipientId =
-        author.role === UserRole.CTS_MANAGER_VIEWER
+        author.role === UserRole.CLIENT_MANAGER_VIEWER
           ? incident.ownerUserId
           : comment.isInternal
             ? null

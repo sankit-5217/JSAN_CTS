@@ -98,7 +98,7 @@ export function SupportGroupsPage() {
   // --- Add member ----------------------------------------------------------
   // No role filter beyond excluding customers — a group's roster can mix
   // Service Desk, engineers, whoever actually covers that queue. The
-  // backend rejects a CTS_MANAGER_VIEWER id regardless; filtering it out
+  // backend rejects a CLIENT_MANAGER_VIEWER id regardless; filtering it out
   // here too just avoids ever offering an option that would be rejected.
   const [memberQuery, setMemberQuery] = useState("");
   const [memberOptions, setMemberOptions] = useState<Member[]>([]);
@@ -107,7 +107,7 @@ export function SupportGroupsPage() {
   useEffect(() => {
     const qParam = memberQuery ? `&q=${encodeURIComponent(memberQuery)}` : "";
     apiGet<Member[]>(`/users?limit=50${qParam}`)
-      .then((res) => setMemberOptions(res.filter((u) => u.role !== "CTS_MANAGER_VIEWER")))
+      .then((res) => setMemberOptions(res.filter((u) => u.role !== "CLIENT_MANAGER_VIEWER")))
       .catch(() => undefined);
   }, [memberQuery]);
 

@@ -15,7 +15,7 @@ const ROLE_META: Record<string, { label: string; color: string }> = {
   INFRASTRUCTURE_LEAD: { label: "Infrastructure Lead", color: "#5c6bc0" },
   VENDOR_COORDINATOR: { label: "Vendor Coordinator", color: "#8e5b9f" },
   DELIVERY_OPS_MANAGER: { label: "Delivery Ops Manager", color: "#536da7" },
-  CTS_MANAGER_VIEWER: { label: "Client Manager (Viewer)", color: "#6b7c93" },
+  CLIENT_MANAGER_VIEWER: { label: "Client Manager (Viewer)", color: "#6b7c93" },
   AUDITOR_READ_ONLY: { label: "Auditor (Read Only)", color: "#5c5f66" },
 };
 

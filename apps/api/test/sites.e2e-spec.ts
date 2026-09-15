@@ -49,7 +49,7 @@ describe("Sites API (e2e)", () => {
   });
 
   it("SiteScopeGuard: a scoped viewer can read a granted site but not a restricted one (403)", async () => {
-    const viewer = await t.tokenFor(fx.users.ctsViewer.email); // granted only `site`, not `siteB`
+    const viewer = await t.tokenFor(fx.users.clientViewer.email); // granted only `site`, not `siteB`
     await t
       .http()
       .get(`/api/v1/sites/${fx.site.id}`)

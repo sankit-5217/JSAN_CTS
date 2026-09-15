@@ -122,11 +122,11 @@ describe("SitesService support group membership", () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
-    it("rejects a CTS_MANAGER_VIEWER — a customer is never a group member", async () => {
+    it("rejects a CLIENT_MANAGER_VIEWER — a customer is never a group member", async () => {
       const { service, tx } = makeService({
         supportGroup: { findUnique: jest.fn().mockResolvedValue(group) },
         user: {
-          findUnique: jest.fn().mockResolvedValue({ ...user, role: "CTS_MANAGER_VIEWER" }),
+          findUnique: jest.fn().mockResolvedValue({ ...user, role: "CLIENT_MANAGER_VIEWER" }),
         },
       });
       await expect(
@@ -210,8 +210,9 @@ describe("SitesService support group membership", () => {
   describe("deleteSupportGroup", () => {
     it("throws NotFoundException when the group doesn't exist", async () => {
       const { service } = makeService();
-      await expect(service.deleteSupportGroup(groupId, { actorId: "actor-1" })).rejects
-        .toBeInstanceOf(NotFoundException);
+      await expect(
+        service.deleteSupportGroup(groupId, { actorId: "actor-1" }),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it("rejects deletion when an incident is still assigned to the group", async () => {

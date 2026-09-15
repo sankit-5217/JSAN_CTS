@@ -59,7 +59,7 @@ describe("SiteScopeGuard", () => {
       canAccessSite: jest.fn().mockResolvedValue(false),
     } as unknown as AuthzService;
     const guard = new SiteScopeGuard(authzService);
-    const user = { id: "user-1", role: "CTS_MANAGER_VIEWER" };
+    const user = { id: "user-1", role: "CLIENT_MANAGER_VIEWER" };
     await expect(guard.canActivate(makeContext(user, { siteId: "site-2" }))).rejects.toBeInstanceOf(
       ForbiddenException,
     );

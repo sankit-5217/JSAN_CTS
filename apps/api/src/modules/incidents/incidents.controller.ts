@@ -46,7 +46,7 @@ export const INCIDENT_WRITE_ROLES = [
 // on their own ticket. Every other write (create, update, transition) stays
 // on INCIDENT_WRITE_ROLES only — this constant is deliberately scoped to
 // just the comment route, not merged into the list above.
-const INCIDENT_COMMENT_ROLES = [...INCIDENT_WRITE_ROLES, UserRole.CTS_MANAGER_VIEWER] as const;
+const INCIDENT_COMMENT_ROLES = [...INCIDENT_WRITE_ROLES, UserRole.CLIENT_MANAGER_VIEWER] as const;
 
 // The second customer write: attaching evidence (a photo of a fault light,
 // a screenshot) to their own report. Upload only — deleting an attachment
@@ -54,7 +54,7 @@ const INCIDENT_COMMENT_ROLES = [...INCIDENT_WRITE_ROLES, UserRole.CTS_MANAGER_VI
 // never letting the customer mark something internal.
 const INCIDENT_ATTACHMENT_UPLOAD_ROLES = [
   ...INCIDENT_WRITE_ROLES,
-  UserRole.CTS_MANAGER_VIEWER,
+  UserRole.CLIENT_MANAGER_VIEWER,
 ] as const;
 
 @ApiTags("incidents")
@@ -89,7 +89,7 @@ export class IncidentsController {
   }
 
   @Post("customer-report")
-  @Roles(UserRole.CTS_MANAGER_VIEWER)
+  @Roles(UserRole.CLIENT_MANAGER_VIEWER)
   createAsCustomer(
     @Body() dto: CreateIncidentAsCustomerDto,
     @CurrentUser() user: AuthenticatedUser,

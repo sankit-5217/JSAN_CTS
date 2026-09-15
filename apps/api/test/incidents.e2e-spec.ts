@@ -43,7 +43,7 @@ describe("Incidents API (e2e)", () => {
       .expect(200);
     expect(sla.body.slaPolicyId).toBe(fx.slaPolicy.id);
 
-    const viewer = await t.tokenFor(fx.users.ctsViewer.email); // not in INCIDENT_WRITE_ROLES
+    const viewer = await t.tokenFor(fx.users.clientViewer.email); // not in INCIDENT_WRITE_ROLES
     await createIncident(viewer, fx.site.id).expect(403);
   });
 
@@ -80,7 +80,7 @@ describe("Incidents API (e2e)", () => {
 
   it("GET /transitions reflects the caller's actual role-eligible next moves, not a fixed list", async () => {
     const noc = await t.tokenFor(fx.users.serviceDesk.email);
-    const viewer = await t.tokenFor(fx.users.ctsViewer.email);
+    const viewer = await t.tokenFor(fx.users.clientViewer.email);
     // Customer-reported, not staff-created — so `viewer`'s own transitions
     // check below is against a ticket they're actually allowed to see
     // (reportedByUserId scoping, see the reporter-scoping test at the
@@ -114,7 +114,7 @@ describe("Incidents API (e2e)", () => {
       },
     ]);
 
-    // CTS_MANAGER_VIEWER is never in any incident transition's allowedRoles
+    // CLIENT_MANAGER_VIEWER is never in any incident transition's allowedRoles
     // — but they can still see their own ticket's (empty) transition list.
     const viewerView = await t
       .http()
@@ -180,7 +180,7 @@ describe("Incidents API (e2e)", () => {
     const admin = await t.tokenFor(fx.users.superAdmin.email);
     const created = await createIncident(admin, fx.siteB.id).expect(201);
 
-    const viewer = await t.tokenFor(fx.users.ctsViewer.email); // granted only `site`, not `siteB`
+    const viewer = await t.tokenFor(fx.users.clientViewer.email); // granted only `site`, not `siteB`
     await t
       .http()
       .get(`/api/v1/incidents/${created.body.id}`)
@@ -189,7 +189,7 @@ describe("Incidents API (e2e)", () => {
   });
 
   it("a customer self-reports an issue, it lands as P3/MEDIUM/MEDIUM pending triage, and Service Desk can see + reply on it", async () => {
-    const viewer = await t.tokenFor(fx.users.ctsViewer.email);
+    const viewer = await t.tokenFor(fx.users.clientViewer.email);
     const noc = await t.tokenFor(fx.users.serviceDesk.email);
 
     // rejected: a site the customer has no access to
@@ -279,7 +279,7 @@ describe("Incidents API (e2e)", () => {
 
   it("a customer only sees their own reported tickets, never another incident at the same site", async () => {
     const admin = await t.tokenFor(fx.users.superAdmin.email);
-    const viewer = await t.tokenFor(fx.users.ctsViewer.email);
+    const viewer = await t.tokenFor(fx.users.clientViewer.email);
 
     // Staff-created — reportedByUserId is null, not the customer's.
     const staffIncident = await createIncident(admin, fx.site.id).expect(201);

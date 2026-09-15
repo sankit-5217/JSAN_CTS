@@ -17,7 +17,7 @@ describe("Reports API (e2e)", () => {
   });
 
   it("any authenticated role can read the command-center summary", async () => {
-    const viewer = await t.tokenFor(fx.users.ctsViewer.email); // no @Roles restriction on this route
+    const viewer = await t.tokenFor(fx.users.clientViewer.email); // no @Roles restriction on this route
     const res = await t
       .http()
       .get("/api/v1/reports/command-center")
@@ -29,7 +29,7 @@ describe("Reports API (e2e)", () => {
   });
 
   it("site-scopes siteCards: a scoped viewer sees only their granted site", async () => {
-    const viewer = await t.tokenFor(fx.users.ctsViewer.email); // granted only `site`, not `siteB`
+    const viewer = await t.tokenFor(fx.users.clientViewer.email); // granted only `site`, not `siteB`
     const res = await t
       .http()
       .get("/api/v1/reports/command-center")

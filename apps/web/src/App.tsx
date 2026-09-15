@@ -337,7 +337,7 @@ function AuthenticatedLayout() {
   }
   // The client role gets a purpose-built portal (ClientLayout), not the
   // internal ops console — none of the fourteen modules below are theirs.
-  if (getCurrentUserRole() === "CTS_MANAGER_VIEWER") {
+  if (getCurrentUserRole() === "CLIENT_MANAGER_VIEWER") {
     return <Navigate to="/client/report" replace />;
   }
   return (

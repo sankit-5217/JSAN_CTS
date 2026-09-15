@@ -23,7 +23,7 @@ const NAV_ITEMS = [
 ];
 
 /**
- * The client/end-user shell (CTS_MANAGER_VIEWER) — deliberately not the
+ * The client/end-user shell (CLIENT_MANAGER_VIEWER) — deliberately not the
  * internal Sidebar/TopBar from App.tsx. A site POC doesn't need CMDB, SLA
  * policy config, alert rules or any of the other fourteen internal modules;
  * giving them the same nav as staff (even with writes blocked server-side)
@@ -38,7 +38,7 @@ export function ClientLayout() {
   // A staff member who wanders onto a /client/* URL gets sent back to the
   // internal console rather than seeing a portal built for someone else's
   // role — symmetric with AuthenticatedLayout's own redirect the other way.
-  if (getCurrentUserRole() !== "CTS_MANAGER_VIEWER") {
+  if (getCurrentUserRole() !== "CLIENT_MANAGER_VIEWER") {
     return <Navigate to="/" replace />;
   }
 
@@ -96,7 +96,7 @@ export function ClientLayout() {
             <AccountMenu
               email={user.email}
               roleLabel="Client"
-              roleColor={roleMeta("CTS_MANAGER_VIEWER").color}
+              roleColor={roleMeta("CLIENT_MANAGER_VIEWER").color}
               onLogout={() => {
                 clearStoredToken();
                 window.location.assign("/login");

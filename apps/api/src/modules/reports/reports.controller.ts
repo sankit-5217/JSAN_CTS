@@ -8,7 +8,7 @@ import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { ReportsService } from "./reports.service";
 
 // Read-only for every authenticated role — no @Roles restriction, matching
-// AUDITOR_READ_ONLY/CTS_MANAGER_VIEWER's need to see operational health
+// AUDITOR_READ_ONLY/CLIENT_MANAGER_VIEWER's need to see operational health
 // too (spec §4). Site-scoped the same way as incidents/cmdb.
 @ApiTags("reports")
 @ApiBearerAuth()

@@ -42,7 +42,7 @@ export class CreateCiDto {
   serialOrServiceTag?: string;
 
   // Access-restricted — spec §9.1: "never expose to customer viewer".
-  // Redacted from GET responses for CTS_MANAGER_VIEWER; see CisController.
+  // Redacted from GET responses for CLIENT_MANAGER_VIEWER; see CisController.
   @ApiProperty({ required: false, description: "iDRAC/iLO/management IP — access-restricted" })
   @IsOptional()
   @IsString()

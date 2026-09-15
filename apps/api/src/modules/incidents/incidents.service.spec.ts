@@ -30,10 +30,10 @@ const serviceDesk: AuthenticatedUser = {
   isActive: true,
 };
 
-const ctsViewer: AuthenticatedUser = {
+const clientViewer: AuthenticatedUser = {
   id: "viewer-1",
   email: "viewer@example.com",
-  role: UserRole.CTS_MANAGER_VIEWER,
+  role: UserRole.CLIENT_MANAGER_VIEWER,
   isActive: true,
 };
 
@@ -231,8 +231,8 @@ describe("IncidentsService.createFromCustomer", () => {
     const { service, tx } = makeService();
     const result = await service.createFromCustomer(
       customerDto,
-      { actorId: ctsViewer.id },
-      ctsViewer,
+      { actorId: clientViewer.id },
+      clientViewer,
     );
 
     expect(result).toMatchObject({ impact: "MEDIUM", urgency: "MEDIUM", priority: Priority.P3 });
@@ -250,7 +250,7 @@ describe("IncidentsService.createFromCustomer", () => {
   it("rejects a site the caller can't access before ever creating anything", async () => {
     const { service, tx } = makeService({ canAccessSite: jest.fn().mockResolvedValue(false) });
     await expect(
-      service.createFromCustomer(customerDto, { actorId: ctsViewer.id }, ctsViewer),
+      service.createFromCustomer(customerDto, { actorId: clientViewer.id }, clientViewer),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(tx.incident.create).not.toHaveBeenCalled();
   });
@@ -265,12 +265,12 @@ describe("IncidentsService.createFromCustomer", () => {
     const { service, tx } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
     });
     await service.createFromCustomer(
       { ...customerDto, details: "Started around 2pm." },
-      { actorId: ctsViewer.id },
-      ctsViewer,
+      { actorId: clientViewer.id },
+      clientViewer,
     );
     expect(tx.incidentComment.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -281,7 +281,7 @@ describe("IncidentsService.createFromCustomer", () => {
 
   it("creates no comment when `details` is omitted", async () => {
     const { service, tx } = makeService();
-    await service.createFromCustomer(customerDto, { actorId: ctsViewer.id }, ctsViewer);
+    await service.createFromCustomer(customerDto, { actorId: clientViewer.id }, clientViewer);
     expect(tx.incidentComment.create).not.toHaveBeenCalled();
   });
 });
@@ -522,31 +522,31 @@ describe("IncidentsService site-scope enforcement", () => {
     await expect(service.findOneScoped("incident-1", engineer)).resolves.toBeDefined();
   });
 
-  it("findOneScoped allows a CTS_MANAGER_VIEWER to see an incident they reported", async () => {
+  it("findOneScoped allows a CLIENT_MANAGER_VIEWER to see an incident they reported", async () => {
     const { service } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
     });
-    await expect(service.findOneScoped("incident-1", ctsViewer)).resolves.toBeDefined();
+    await expect(service.findOneScoped("incident-1", clientViewer)).resolves.toBeDefined();
   });
 
-  it("findOneScoped throws for a CTS_MANAGER_VIEWER on an incident reported by someone else at the same site", async () => {
+  it("findOneScoped throws for a CLIENT_MANAGER_VIEWER on an incident reported by someone else at the same site", async () => {
     const { service } = makeService({
       incidentFindUnique: jest
         .fn()
         .mockResolvedValue(baseIncident({ reportedByUserId: "someone-else" })),
     });
-    await expect(service.findOneScoped("incident-1", ctsViewer)).rejects.toBeInstanceOf(
+    await expect(service.findOneScoped("incident-1", clientViewer)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
   });
 
-  it("findOneScoped throws for a CTS_MANAGER_VIEWER on an incident nobody reported (staff-created)", async () => {
+  it("findOneScoped throws for a CLIENT_MANAGER_VIEWER on an incident nobody reported (staff-created)", async () => {
     const { service } = makeService({
       incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ reportedByUserId: null })),
     });
-    await expect(service.findOneScoped("incident-1", ctsViewer)).rejects.toBeInstanceOf(
+    await expect(service.findOneScoped("incident-1", clientViewer)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
   });
@@ -614,12 +614,12 @@ describe("IncidentsService.findAll", () => {
     );
   });
 
-  it("forces reportedByUserId to the caller's own id for CTS_MANAGER_VIEWER, ignoring site scope alone", async () => {
+  it("forces reportedByUserId to the caller's own id for CLIENT_MANAGER_VIEWER, ignoring site scope alone", async () => {
     const { service, prisma } = makeService();
-    await service.findAll({ limit: 50, offset: 0 }, ["site-a"], ctsViewer);
+    await service.findAll({ limit: 50, offset: 0 }, ["site-a"], clientViewer);
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ reportedByUserId: ctsViewer.id }),
+        where: expect.objectContaining({ reportedByUserId: clientViewer.id }),
       }),
     );
   });
@@ -672,13 +672,13 @@ describe("IncidentsService.createTransition", () => {
           baseIncident({ status: IncidentStatus.ASSIGNED, ownerUserId: engineer.id }),
         ),
     });
-    // CTS_MANAGER_VIEWER isn't in ASSIGNED -> ACKNOWLEDGED's allowedRoles.
+    // CLIENT_MANAGER_VIEWER isn't in ASSIGNED -> ACKNOWLEDGED's allowedRoles.
     await expect(
       service.createTransition(
         "incident-1",
         { toStatus: IncidentStatus.ACKNOWLEDGED },
         { actorId: "user-1" },
-        ctsViewer,
+        clientViewer,
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
@@ -991,11 +991,11 @@ describe("IncidentsService.getAvailableTransitions", () => {
       incidentFindUnique: jest
         .fn()
         .mockResolvedValue(
-          baseIncident({ status: IncidentStatus.NEW, reportedByUserId: ctsViewer.id }),
+          baseIncident({ status: IncidentStatus.NEW, reportedByUserId: clientViewer.id }),
         ),
     });
-    // NEW -> ASSIGNED's allowedRoles doesn't include CTS_MANAGER_VIEWER.
-    const result = await service.getAvailableTransitions("incident-1", ctsViewer);
+    // NEW -> ASSIGNED's allowedRoles doesn't include CLIENT_MANAGER_VIEWER.
+    const result = await service.getAvailableTransitions("incident-1", clientViewer);
     expect(result).toEqual([]);
   });
 
@@ -1090,7 +1090,7 @@ describe("IncidentsService.getAvailableTransitions", () => {
 });
 
 describe("IncidentsService comment visibility", () => {
-  it("excludes internal comments for CTS_MANAGER_VIEWER", async () => {
+  it("excludes internal comments for CLIENT_MANAGER_VIEWER", async () => {
     const comments = [
       { id: "c1", incidentId: "incident-1", isInternal: true, body: "internal note" },
       { id: "c2", incidentId: "incident-1", isInternal: false, body: "customer-visible" },
@@ -1098,11 +1098,11 @@ describe("IncidentsService comment visibility", () => {
     const { service, prisma } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
     });
     (prisma.incidentComment.findMany as jest.Mock).mockResolvedValue(comments);
 
-    const result = await service.listComments("incident-1", ctsViewer);
+    const result = await service.listComments("incident-1", clientViewer);
     expect(result).toEqual([comments[1]]);
   });
 
@@ -1120,17 +1120,17 @@ describe("IncidentsService comment visibility", () => {
 });
 
 describe("IncidentsService.createComment isInternal enforcement", () => {
-  it("forces isInternal false for CTS_MANAGER_VIEWER even if the request asked for true", async () => {
+  it("forces isInternal false for CLIENT_MANAGER_VIEWER even if the request asked for true", async () => {
     const { service, tx } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
     });
     await service.createComment(
       "incident-1",
       { body: "Any update?", isInternal: true },
-      { actorId: ctsViewer.id },
-      ctsViewer,
+      { actorId: clientViewer.id },
+      clientViewer,
     );
     expect(tx.incidentComment.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ isInternal: false }) }),
@@ -1152,7 +1152,7 @@ describe("IncidentsService.createComment notifications", () => {
       incidentFindUnique: jest
         .fn()
         .mockResolvedValue(
-          baseIncident({ ownerUserId: engineer.id, reportedByUserId: ctsViewer.id }),
+          baseIncident({ ownerUserId: engineer.id, reportedByUserId: clientViewer.id }),
         ),
       userFindUnique: jest.fn().mockResolvedValue({
         id: engineer.id,
@@ -1163,8 +1163,8 @@ describe("IncidentsService.createComment notifications", () => {
     await service.createComment(
       "incident-1",
       { body: "Any update?" },
-      { actorId: ctsViewer.id },
-      ctsViewer,
+      { actorId: clientViewer.id },
+      clientViewer,
     );
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1178,13 +1178,13 @@ describe("IncidentsService.createComment notifications", () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ ownerUserId: null, reportedByUserId: ctsViewer.id })),
+        .mockResolvedValue(baseIncident({ ownerUserId: null, reportedByUserId: clientViewer.id })),
     });
     await service.createComment(
       "incident-1",
       { body: "Any update?" },
-      { actorId: ctsViewer.id },
-      ctsViewer,
+      { actorId: clientViewer.id },
+      clientViewer,
     );
     expect(notifications.enqueue).not.toHaveBeenCalled();
   });

@@ -62,8 +62,8 @@ describe("CMDB API (e2e)", () => {
     expect(res.body.items.length).toBe(1);
   });
 
-  it("redacts managementAddress from list and detail responses for CTS_MANAGER_VIEWER, but not other roles", async () => {
-    const viewer = await t.tokenFor(fx.users.ctsViewer.email);
+  it("redacts managementAddress from list and detail responses for CLIENT_MANAGER_VIEWER, but not other roles", async () => {
+    const viewer = await t.tokenFor(fx.users.clientViewer.email);
     const admin = await t.tokenFor(fx.users.superAdmin.email);
 
     const viewerDetail = await t
@@ -94,7 +94,7 @@ describe("CMDB API (e2e)", () => {
   });
 
   it("a scoped role cannot fetch a CI outside its site access (403)", async () => {
-    const viewer = await t.tokenFor(fx.users.ctsViewer.email); // granted only `site`
+    const viewer = await t.tokenFor(fx.users.clientViewer.email); // granted only `site`
     const admin = await t.tokenFor(fx.users.superAdmin.email);
 
     const restrictedCi = await t

@@ -33,11 +33,11 @@ export async function resetSchema(prisma: PrismaClient): Promise<void> {
 
 export interface Fixture {
   users: Record<
-    "superAdmin" | "serviceDesk" | "siteEngineer" | "infraLead" | "ctsViewer" | "auditor",
+    "superAdmin" | "serviceDesk" | "siteEngineer" | "infraLead" | "clientViewer" | "auditor",
     { id: string; email: string; role: UserRole }
   >;
   site: { id: string; code: string };
-  /** A second site `ctsViewer` has no UserSiteAccess grant for -- for site-scope-restriction tests. */
+  /** A second site `clientViewer` has no UserSiteAccess grant for -- for site-scope-restriction tests. */
   siteB: { id: string; code: string };
   rack: { id: string };
   ci: { id: string; ciCode: string };
@@ -47,7 +47,7 @@ export interface Fixture {
 
 /**
  * Minimal data every Dev A/Dev B e2e spec can rely on: 6 role-holders, two
- * sites (with `ctsViewer` scoped to only the first, via UserSiteAccess),
+ * sites (with `clientViewer` scoped to only the first, via UserSiteAccess),
  * a rack, and a CI.
  */
 export async function seedFixture(prisma: PrismaClient): Promise<Fixture> {
@@ -56,14 +56,15 @@ export async function seedFixture(prisma: PrismaClient): Promise<Fixture> {
       data: { email, role, displayName, idpSubject: `e2e|${email}` },
     });
 
-  const [superAdmin, serviceDesk, siteEngineer, infraLead, ctsViewer, auditor] = await Promise.all([
-    mk("e2e-admin@example.com", UserRole.SUPER_ADMIN, "E2E Admin"),
-    mk("e2e-noc@example.com", UserRole.SERVICE_DESK_NOC, "E2E NOC"),
-    mk("e2e-engineer@example.com", UserRole.SITE_ENGINEER, "E2E Engineer"),
-    mk("e2e-infra@example.com", UserRole.INFRASTRUCTURE_LEAD, "E2E Infra Lead"),
-    mk("e2e-cts-viewer@example.com", UserRole.CTS_MANAGER_VIEWER, "E2E Client Viewer"),
-    mk("e2e-auditor@example.com", UserRole.AUDITOR_READ_ONLY, "E2E Auditor"),
-  ]);
+  const [superAdmin, serviceDesk, siteEngineer, infraLead, clientViewer, auditor] =
+    await Promise.all([
+      mk("e2e-admin@example.com", UserRole.SUPER_ADMIN, "E2E Admin"),
+      mk("e2e-noc@example.com", UserRole.SERVICE_DESK_NOC, "E2E NOC"),
+      mk("e2e-engineer@example.com", UserRole.SITE_ENGINEER, "E2E Engineer"),
+      mk("e2e-infra@example.com", UserRole.INFRASTRUCTURE_LEAD, "E2E Infra Lead"),
+      mk("e2e-client-viewer@example.com", UserRole.CLIENT_MANAGER_VIEWER, "E2E Client Viewer"),
+      mk("e2e-auditor@example.com", UserRole.AUDITOR_READ_ONLY, "E2E Auditor"),
+    ]);
 
   const [site, siteB] = await Promise.all([
     prisma.site.create({
@@ -76,11 +77,11 @@ export async function seedFixture(prisma: PrismaClient): Promise<Fixture> {
   // None of these roles are in AuthzService's ALL_SITES_ROLES, so each only
   // sees sites it has an explicit grant for. serviceDesk/siteEngineer/
   // infraLead are staff actually assigned to work `site` -- grant it, same
-  // as a real deployment would. ctsViewer is also granted `site`, but
+  // as a real deployment would. clientViewer is also granted `site`, but
   // deliberately NOT `siteB`, so it can serve as the "restricted site"
   // case in site-scope tests.
   await prisma.userSiteAccess.createMany({
-    data: [serviceDesk, siteEngineer, infraLead, ctsViewer].map((u) => ({
+    data: [serviceDesk, siteEngineer, infraLead, clientViewer].map((u) => ({
       userId: u.id,
       siteId: site.id,
     })),
@@ -118,7 +119,7 @@ export async function seedFixture(prisma: PrismaClient): Promise<Fixture> {
       serviceDesk: { id: serviceDesk.id, email: serviceDesk.email, role: serviceDesk.role },
       siteEngineer: { id: siteEngineer.id, email: siteEngineer.email, role: siteEngineer.role },
       infraLead: { id: infraLead.id, email: infraLead.email, role: infraLead.role },
-      ctsViewer: { id: ctsViewer.id, email: ctsViewer.email, role: ctsViewer.role },
+      clientViewer: { id: clientViewer.id, email: clientViewer.email, role: clientViewer.role },
       auditor: { id: auditor.id, email: auditor.email, role: auditor.role },
     },
     site: { id: site.id, code: site.code },
