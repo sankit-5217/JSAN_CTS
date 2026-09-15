@@ -18,6 +18,7 @@ import {
   Typography,
 } from "@mui/material";
 import { alpha, darken, keyframes } from "@mui/material/styles";
+import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import DnsOutlinedIcon from "@mui/icons-material/DnsOutlined";
 import GroupOutlinedIcon from "@mui/icons-material/GroupOutlined";
 import HistoryOutlinedIcon from "@mui/icons-material/HistoryOutlined";
@@ -250,7 +251,7 @@ function BrandMark({ height = 24, on = "dark" }: { height?: number; on?: "dark" 
     <Box
       component="img"
       src={on === "dark" ? "/jsan-logo-white.png" : "/jsan-logo.png"}
-      alt="JSAN"
+      alt="JSAN "
       sx={{ height, width: "auto", display: "block" }}
     />
   );
@@ -304,7 +305,7 @@ export function LoginPage() {
   };
 
   return (
-    <Box>
+    <Box sx={{ bgcolor: "#f5f7fa" }}>
       {/* Nav — this page is the whole site for a signed-out visitor, so it
           carries its own header/footer rather than living inside App.tsx's
           authenticated shell (which /login deliberately renders outside of). */}
@@ -326,7 +327,23 @@ export function LoginPage() {
           justifyContent="space-between"
           sx={{ maxWidth: 1180, mx: "auto", px: { xs: 2, sm: 3 }, py: 1.5 }}
         >
-          <BrandMark height={20} on="light" />
+          <Stack direction="row" spacing={1.25} alignItems="center">
+            <BrandMark height={20} on="light" />
+            <Typography
+              sx={{
+                display: { xs: "none", sm: "block" },
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                color: "text.secondary",
+                borderLeft: "1px solid",
+                borderColor: "divider",
+                pl: 1.25,
+              }}
+            >
+              CTS Data Center OpsDesk
+            </Typography>
+          </Stack>
           <Stack direction="row" spacing={3} alignItems="center">
             <Typography
               component="a"
@@ -394,110 +411,87 @@ export function LoginPage() {
         sx={{
           display: "flex",
           flexDirection: { xs: "column", md: "row" },
-          minHeight: { md: "88vh" },
+          alignItems: "center",
+          gap: { xs: 6, md: 8 },
+          maxWidth: 1180,
+          mx: "auto",
+          px: { xs: 2, sm: 3 },
+          py: { xs: 6, md: 11 },
         }}
       >
-        {/* Brand panel — desktop/tablet only; mobile gets a compact header instead. */}
-        <Box
-          sx={{
-            display: { xs: "none", md: "flex" },
-            flexDirection: "column",
-            justifyContent: "space-between",
-            width: "42%",
-            maxWidth: 480,
-            p: 6,
-            bgcolor: PANEL_BG,
-            backgroundImage: `radial-gradient(circle at 15% 8%, ${alpha(ACCENT, 0.16)}, transparent 45%)`,
-            color: "#fff",
-          }}
-        >
-          <Stack spacing={1.5} sx={{ alignSelf: "flex-start" }}>
-            <BrandMark height={36} />
+        {/* Text column — desktop/tablet only; mobile gets a compact header instead. */}
+        <Box sx={{ display: { xs: "none", md: "block" }, flex: "1 1 0", maxWidth: 540 }}>
+          <Box
+            sx={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 1,
+              px: 1.75,
+              py: 0.7,
+              borderRadius: 5,
+              bgcolor: alpha(theme.palette.primary.main, 0.06),
+              border: "1px solid",
+              borderColor: alpha(theme.palette.primary.main, 0.16),
+            }}
+          >
             <Box
               sx={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 1,
-                px: 1.75,
-                py: 0.7,
-                borderRadius: 5,
-                bgcolor: alpha("#ffffff", 0.08),
-                border: "1px solid",
-                borderColor: alpha("#ffffff", 0.14),
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                bgcolor: theme.palette.secondary.main,
+                flexShrink: 0,
+              }}
+            />
+            <Typography
+              sx={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                color: theme.palette.primary.main,
               }}
             >
-              <Box
-                sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: ACCENT, flexShrink: 0 }}
-              />
-              <Typography
-                sx={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: "0.08em",
-                  color: alpha("#ffffff", 0.85),
-                  whiteSpace: "nowrap",
-                }}
-              >
-                CTS &middot; DATA CENTER OPSDESK
-              </Typography>
-            </Box>
-          </Stack>
-
-          <Box sx={{ mt: 4 }}>
-            <Typography variant="h4" sx={{ fontWeight: 700, mb: 1.5, lineHeight: 1.25 }}>
-              One console for{" "}
-              <Box component="span" sx={{ color: ACCENT }}>
-                the floor and the desk.
-              </Box>
+              CTS DATA CENTER OPSDESK
             </Typography>
-            <Typography sx={{ color: alpha("#ffffff", 0.65), mb: 4, maxWidth: 360 }}>
-              Ticketing, CMDB, monitoring and governance for CTS/JSAN data-center operations —
-              backend-enforced access, every change audited.
-            </Typography>
-            <Stack spacing={2.5}>
-              {CAPABILITIES.map((cap) => (
-                <Stack key={cap.label} direction="row" spacing={1.75} alignItems="flex-start">
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: 30,
-                      height: 30,
-                      borderRadius: "8px",
-                      bgcolor: alpha("#ffffff", 0.08),
-                      color: ACCENT,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {cap.icon}
-                  </Box>
-                  <Box>
-                    <Typography sx={{ fontWeight: 600, fontSize: 13.5 }}>{cap.label}</Typography>
-                    <Typography sx={{ color: alpha("#ffffff", 0.55), fontSize: 12.5 }}>
-                      {cap.detail}
-                    </Typography>
-                  </Box>
-                </Stack>
-              ))}
-            </Stack>
           </Box>
 
-          <Typography sx={{ color: alpha("#ffffff", 0.4), fontSize: 11.5 }}>
+          <Typography
+            variant="h3"
+            sx={{ fontWeight: 800, mt: 3, mb: 2, lineHeight: 1.15, letterSpacing: "-0.01em" }}
+          >
+            One console for{" "}
+            <Box component="span" sx={{ color: theme.palette.secondary.main }}>
+              the floor and the desk.
+            </Box>
+          </Typography>
+          <Typography color="text.secondary" sx={{ fontSize: 16, mb: 4, maxWidth: 460 }}>
+            Ticketing, CMDB, monitoring and governance for CTS/JSAN data-center operations —
+            backend-enforced access, every change audited.
+          </Typography>
+
+          <Stack spacing={1.75}>
+            {CAPABILITIES.map((cap) => (
+              <Stack key={cap.label} direction="row" spacing={1.25} alignItems="center">
+                <CheckCircleOutlinedIcon
+                  sx={{ fontSize: 20, color: theme.palette.secondary.main, flexShrink: 0 }}
+                />
+                <Typography sx={{ fontSize: 14.5, fontWeight: 500 }}>{cap.detail}</Typography>
+              </Stack>
+            ))}
+          </Stack>
+
+          <Typography sx={{ mt: 4, fontSize: 12, color: "text.disabled" }}>
             Local/dev environment — real SSO lands in a later sprint.
           </Typography>
         </Box>
 
-        {/* Sign-in panel */}
+        {/* Sign-in card */}
         <Box
           sx={{
-            flex: 1,
+            width: "100%",
+            flex: { md: "0 1 420px" },
             display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
             justifyContent: "center",
-            p: { xs: 3, sm: 6 },
-            bgcolor: "#f5f7fa",
           }}
         >
           <Box sx={{ width: "100%", maxWidth: 420 }}>
@@ -988,7 +982,7 @@ export function LoginPage() {
           <Stack direction="row" spacing={1} alignItems="center">
             <BrandMark height={17} on="light" />
             <Typography sx={{ fontSize: 11, color: "text.secondary" }}>
-              JSAN CTS Data Center OpsDesk
+              CTS Data Center OpsDesk
             </Typography>
           </Stack>
           <Typography sx={{ fontSize: 11.5, color: "text.secondary", maxWidth: 420 }}>
