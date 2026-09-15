@@ -411,35 +411,37 @@ export function LoginPage() {
             color: "#fff",
           }}
         >
-          <Box
-            sx={{
-              display: "inline-flex",
-              alignSelf: "flex-start",
-              alignItems: "center",
-              gap: 1,
-              px: 1.75,
-              py: 0.7,
-              borderRadius: 5,
-              bgcolor: alpha("#ffffff", 0.08),
-              border: "1px solid",
-              borderColor: alpha("#ffffff", 0.14),
-            }}
-          >
+          <Stack spacing={1.5} sx={{ alignSelf: "flex-start" }}>
+            <BrandMark height={36} />
             <Box
-              sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: ACCENT, flexShrink: 0 }}
-            />
-            <Typography
               sx={{
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                color: alpha("#ffffff", 0.85),
-                whiteSpace: "nowrap",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 1,
+                px: 1.75,
+                py: 0.7,
+                borderRadius: 5,
+                bgcolor: alpha("#ffffff", 0.08),
+                border: "1px solid",
+                borderColor: alpha("#ffffff", 0.14),
               }}
             >
-              CTS &middot; DATA CENTER OPSDESK
-            </Typography>
-          </Box>
+              <Box
+                sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: ACCENT, flexShrink: 0 }}
+              />
+              <Typography
+                sx={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  color: alpha("#ffffff", 0.85),
+                  whiteSpace: "nowrap",
+                }}
+              >
+                CTS &middot; DATA CENTER OPSDESK
+              </Typography>
+            </Box>
+          </Stack>
 
           <Box sx={{ mt: 4 }}>
             <Typography variant="h4" sx={{ fontWeight: 700, mb: 1.5, lineHeight: 1.25 }}>
@@ -983,11 +985,12 @@ export function LoginPage() {
           alignItems={{ xs: "flex-start", sm: "center" }}
           justifyContent="space-between"
         >
-          <Typography
-            sx={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", color: "text.secondary" }}
-          >
-            CTS DATA CENTER OPSDESK
-          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <BrandMark height={17} on="light" />
+            <Typography sx={{ fontSize: 11, color: "text.secondary" }}>
+              JSAN CTS Data Center OpsDesk
+            </Typography>
+          </Stack>
           <Typography sx={{ fontSize: 11.5, color: "text.secondary", maxWidth: 420 }}>
             Local/dev environment — real SSO lands in a later sprint. The contact form above is
             illustrative and doesn't send anywhere yet.
