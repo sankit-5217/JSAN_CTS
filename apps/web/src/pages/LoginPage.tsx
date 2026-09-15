@@ -8,9 +8,11 @@ import {
   CardContent,
   Chip,
   CircularProgress,
+  Divider,
   MenuItem,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import { alpha, darken } from "@mui/material/styles";
@@ -26,6 +28,52 @@ import { theme } from "../theme/theme";
 interface DevLoginResponse {
   accessToken: string;
 }
+
+// No OAuth app is registered yet (no client id/secret for any provider, no
+// passport strategy on the backend) — these render disabled with a "Soon"
+// chip rather than being left out, so the intended sign-in surface is real
+// but never pretends to work. Swap in real handlers once credentials exist.
+const SOCIAL_PROVIDERS = [
+  {
+    name: "Google",
+    icon: (
+      <svg viewBox="0 0 48 48" width={19} height={19}>
+        <path
+          fill="#4285F4"
+          d="M45.1 24.5c0-1.6-.1-3.1-.4-4.6H24v9h11.8c-.5 2.7-2.1 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.5 6.6-16.5Z"
+        />
+        <path
+          fill="#34A853"
+          d="M24 46c6 0 11-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8 41 15.4 46 24 46Z"
+        />
+        <path
+          fill="#FBBC05"
+          d="M11.8 28.2A13.6 13.6 0 0 1 11.1 24c0-1.5.3-2.9.7-4.2v-5.7H4.5A22 22 0 0 0 2 24c0 3.5.8 6.9 2.5 9.9l7.3-5.7Z"
+        />
+        <path
+          fill="#EA4335"
+          d="M24 10.7c3.3 0 6.2 1.1 8.5 3.3l6.3-6.3C34.9 4.2 30 2 24 2 15.4 2 8 7 4.5 14.1l7.3 5.7c1.7-5.2 6.5-9.1 12.2-9.1Z"
+        />
+      </svg>
+    ),
+  },
+  {
+    name: "GitHub",
+    icon: (
+      <svg viewBox="0 0 24 24" width={19} height={19} fill="#181717">
+        <path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2 0 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.4-1.3-5.4-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.7 5.6-5.4 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5Z" />
+      </svg>
+    ),
+  },
+  {
+    name: "Apple",
+    icon: (
+      <svg viewBox="0 0 24 24" width={19} height={19} fill="#000">
+        <path d="M16.7 1c.1 1.2-.4 2.4-1.1 3.2-.7.9-1.9 1.6-3 1.5-.1-1.2.5-2.4 1.2-3.2C14.5 1.6 15.7 1 16.7 1Zm3.9 16.9c-.5 1.2-.8 1.7-1.5 2.7-1 1.4-2.3 3.2-4 3.2-1.5 0-1.9-1-3.9-1s-2.5 1-4 1c-1.7 0-3-1.6-4-3-1.7-2.5-3-7-1.2-10 .9-1.5 2.4-2.5 4.1-2.5 1.6 0 2.6 1 3.9 1 1.3 0 2.1-1 3.9-1 1.4 0 3 .8 4 2.1-3.5 1.9-2.9 6.8 1.7 8.5Z" />
+      </svg>
+    ),
+  },
+];
 
 // Same dark-navy-derived-from-primary palette as the app shell's sidebar
 // (App.tsx) — each page derives its own tokens from theme/theme.ts rather
@@ -153,19 +201,7 @@ export function LoginPage() {
           color: "#fff",
         }}
       >
-        <Stack spacing={1.25}>
-          <BrandMark height={36} />
-          <Typography
-            sx={{
-              color: alpha("#ffffff", 0.55),
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-            }}
-          >
-            CTS &middot; DATA CENTER OPSDESK
-          </Typography>
-        </Stack>
+        <BrandMark height={36} />
 
         <Box>
           <Typography variant="h4" sx={{ fontWeight: 700, mb: 1.5, lineHeight: 1.25 }}>
@@ -253,7 +289,60 @@ export function LoginPage() {
               <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
                 Sign in to JSAN CTS OpsDesk
               </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
+                Continue with your organization account, or use email below.
+              </Typography>
+
+              <Stack spacing={1.1} sx={{ mb: 2.5 }}>
+                {SOCIAL_PROVIDERS.map((provider) => (
+                  <Tooltip
+                    key={provider.name}
+                    title={`${provider.name} sign-in isn't wired up yet — use email below.`}
+                  >
+                    <span>
+                      <Button
+                        fullWidth
+                        disabled
+                        startIcon={provider.icon}
+                        sx={{
+                          justifyContent: "flex-start",
+                          gap: 0.5,
+                          py: 1.1,
+                          px: 2,
+                          borderRadius: 2,
+                          border: "1px solid",
+                          borderColor: "divider",
+                          textTransform: "none",
+                          fontWeight: 600,
+                          fontSize: 14,
+                          color: "text.primary",
+                          "&.Mui-disabled": { color: "text.primary", opacity: 0.6 },
+                        }}
+                      >
+                        <Box component="span" sx={{ flex: 1, textAlign: "left" }}>
+                          Continue with {provider.name}
+                        </Box>
+                        <Chip
+                          size="small"
+                          label="Soon"
+                          sx={{
+                            height: 20,
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            bgcolor: alpha(theme.palette.text.primary, 0.06),
+                          }}
+                        />
+                      </Button>
+                    </span>
+                  </Tooltip>
+                ))}
+              </Stack>
+
+              <Divider sx={{ mb: 2.5, fontSize: 12, color: "text.secondary" }}>
+                or continue with email
+              </Divider>
+
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 Dev-mode sign-in — pick a seeded user, no password. Disabled server-side outside
                 local/dev.
               </Typography>
