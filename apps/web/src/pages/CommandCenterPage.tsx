@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import {
   Alert,
@@ -10,6 +10,7 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import SensorsOutlinedIcon from "@mui/icons-material/SensorsOutlined";
 import HubOutlinedIcon from "@mui/icons-material/HubOutlined";
 import AssignmentTurnedInOutlinedIcon from "@mui/icons-material/AssignmentTurnedInOutlined";
@@ -104,119 +105,158 @@ const FLOW_STEPS = [
 
 function OperationsFlow() {
   const [activeStep, setActiveStep] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
   const step = FLOW_STEPS[activeStep];
+  const stepCount = FLOW_STEPS.length;
+
+  const prefersReducedMotion = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    [],
+  );
+
+  // Auto-advance the loop so it reads as alive without requiring a click;
+  // pausing on hover (and skipping entirely under prefers-reduced-motion)
+  // keeps it from fighting a user who's actually reading a stage.
+  useEffect(() => {
+    if (prefersReducedMotion || isPaused) return undefined;
+    const id = window.setInterval(() => {
+      setActiveStep((prev) => (prev + 1) % stepCount);
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [isPaused, prefersReducedMotion, stepCount]);
 
   return (
     <Card
-      sx={{
-        mb: 4,
-        overflow: "hidden",
-        border: "1px solid rgba(15, 61, 99, 0.12)",
-        background: "linear-gradient(120deg, #102f4a 0%, #174f68 58%, #236b6b 100%)",
-        color: "#f8fbfa",
-      }}
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      sx={{ mb: 4, overflow: "hidden", border: "1px solid rgba(15, 61, 99, 0.12)" }}
     >
       <CardContent sx={{ p: { xs: 2.5, md: 4 }, "&:last-child": { pb: { xs: 2.5, md: 4 } } }}>
         <Stack direction={{ xs: "column", md: "row" }} spacing={3} justifyContent="space-between">
           <Box sx={{ maxWidth: 520 }}>
             <Typography
               variant="overline"
-              sx={{ color: "#9bd6c9", letterSpacing: "0.14em", fontWeight: 700 }}
+              sx={{ color: "secondary.main", letterSpacing: "0.14em", fontWeight: 700 }}
             >
               THE OPSDESK LOOP
             </Typography>
-            <Typography variant="h4" sx={{ mt: 0.5, mb: 1, fontWeight: 700 }}>
+            <Typography
+              variant="h4"
+              sx={{ mt: 0.5, mb: 1, fontWeight: 700, color: "primary.main" }}
+            >
               From signal to decision
             </Typography>
-            <Typography sx={{ color: "rgba(248,251,250,0.76)", maxWidth: 470 }}>
+            <Typography color="text.secondary" sx={{ maxWidth: 470 }}>
               One governed path for the data-center operation: observe the estate, correlate impact,
               resolve service, and preserve what the team learned.
             </Typography>
           </Box>
-          <Box sx={{ minWidth: { md: 280 }, alignSelf: { md: "flex-end" } }}>
-            <Typography variant="caption" sx={{ color: "rgba(248,251,250,0.62)" }}>
+          <Box
+            sx={{
+              minWidth: { md: 240 },
+              alignSelf: { md: "flex-end" },
+              textAlign: { xs: "left", md: "right" },
+            }}
+          >
+            <Typography variant="caption" color="text.secondary">
               CURRENT STAGE
             </Typography>
-            <Typography variant="h6" sx={{ color: "#f4c979", mt: 0.25 }}>
+            <Typography variant="h6" sx={{ color: step.color, mt: 0.25, fontWeight: 700 }}>
               {step.label} / {step.title}
             </Typography>
           </Box>
         </Stack>
 
-        {/* flex-wrap (not a breakpoint-keyed grid) so this reflows against the
-            actual content width -- with a permanent sidebar now taking real
-            estate, the viewport can be "sm and up" while this card's own
-            column is much narrower, which broke the old grid's fixed
-            4-across-until-sm-breakpoint layout. Borders between items (not
-            absolutely-positioned connector lines) so wrapping to a second
-            row never leaves a line floating over the wrong row. */}
-        <Box
-          sx={{
-            display: "flex",
-            flexWrap: "wrap",
-            mt: 4,
-            mb: 3,
-            borderRadius: 1,
-            overflow: "hidden",
-          }}
-        >
-          {FLOW_STEPS.map((flowStep, index) => {
-            const Icon = flowStep.icon;
-            const isActive = index === activeStep;
-            return (
-              <Box
-                key={flowStep.label}
-                component="button"
-                type="button"
-                onClick={() => setActiveStep(index)}
-                aria-label={`Show ${flowStep.label} stage`}
-                sx={{
-                  flex: "1 1 190px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 1.25,
-                  minWidth: 0,
-                  border: 0,
-                  borderRight:
-                    index < FLOW_STEPS.length - 1 ? "1px solid rgba(248,251,250,0.2)" : "none",
-                  p: 1.25,
-                  color: "inherit",
-                  font: "inherit",
-                  textAlign: "left",
-                  cursor: "pointer",
-                  backgroundColor: isActive ? "rgba(255,255,255,0.14)" : "transparent",
-                  transition: "background-color 160ms ease",
-                  "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
-                }}
-              >
+        {/* A real progress gauge, not four flat buttons: a track fills from
+            the first step to the active one, with per-step circles layered
+            above it, since Observe -> Correlate -> Respond -> Learn is an
+            actual sequence rather than four unrelated options. */}
+        <Box sx={{ position: "relative", mt: 5, mb: 1 }}>
+          <Box
+            sx={{
+              position: "absolute",
+              top: 19,
+              left: 19,
+              right: 19,
+              height: 3,
+              borderRadius: 2,
+              backgroundColor: "rgba(15, 61, 99, 0.12)",
+            }}
+          />
+          <Box
+            sx={{
+              position: "absolute",
+              top: 19,
+              left: 19,
+              height: 3,
+              borderRadius: 2,
+              backgroundColor: "secondary.main",
+              width: `calc((100% - 38px) * ${activeStep / (stepCount - 1)})`,
+              transition: prefersReducedMotion ? "none" : "width 500ms ease",
+            }}
+          />
+          <Stack direction="row" sx={{ position: "relative" }}>
+            {FLOW_STEPS.map((flowStep, index) => {
+              const Icon = flowStep.icon;
+              const isActive = index === activeStep;
+              const isDone = index < activeStep;
+              const reached = isActive || isDone;
+              return (
                 <Box
+                  key={flowStep.label}
+                  component="button"
+                  type="button"
+                  onClick={() => setActiveStep(index)}
+                  aria-label={`Show ${flowStep.label} stage`}
+                  aria-current={isActive ? "step" : undefined}
                   sx={{
-                    display: "grid",
-                    placeItems: "center",
-                    width: 38,
-                    height: 38,
-                    borderRadius: "50%",
-                    flexShrink: 0,
-                    color: flowStep.color,
-                    backgroundColor: "#f8fbfa",
+                    flex: "1 1 0",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 0.75,
+                    minWidth: 0,
+                    border: 0,
+                    background: "none",
+                    p: 0.5,
+                    font: "inherit",
+                    cursor: "pointer",
+                    color: "inherit",
                   }}
                 >
-                  <Icon fontSize="small" />
-                </Box>
-                <Box sx={{ minWidth: 0 }}>
+                  <Box
+                    sx={{
+                      display: "grid",
+                      placeItems: "center",
+                      width: 38,
+                      height: 38,
+                      borderRadius: "50%",
+                      flexShrink: 0,
+                      backgroundColor: reached ? flowStep.color : "#fff",
+                      color: reached ? "#fff" : "text.disabled",
+                      border: reached ? "none" : "2px solid rgba(15, 61, 99, 0.18)",
+                      boxShadow: isActive ? `0 0 0 5px ${alpha(flowStep.color, 0.18)}` : "none",
+                      transition: "background-color 200ms ease, box-shadow 200ms ease",
+                    }}
+                  >
+                    <Icon fontSize="small" />
+                  </Box>
                   <Typography
                     variant="caption"
-                    sx={{ display: "block", color: "rgba(248,251,250,0.58)" }}
+                    noWrap
+                    sx={{
+                      fontWeight: isActive ? 700 : 500,
+                      color: isActive ? flowStep.color : "text.secondary",
+                    }}
                   >
-                    0{index + 1}
-                  </Typography>
-                  <Typography sx={{ fontWeight: 700 }} noWrap>
                     {flowStep.label}
                   </Typography>
                 </Box>
-              </Box>
-            );
-          })}
+              );
+            })}
+          </Stack>
         </Box>
 
         <Box
@@ -224,9 +264,12 @@ function OperationsFlow() {
             display: "grid",
             gridTemplateColumns: { xs: "1fr", md: "1.25fr 1fr" },
             gap: 3,
+            mt: 3,
             p: { xs: 2, md: 2.5 },
             borderRadius: 1,
-            backgroundColor: "rgba(5, 25, 39, 0.28)",
+            backgroundColor: alpha(step.color, 0.06),
+            border: `1px solid ${alpha(step.color, 0.18)}`,
+            transition: "background-color 200ms ease, border-color 200ms ease",
           }}
         >
           <Box>
@@ -239,10 +282,10 @@ function OperationsFlow() {
             <Typography variant="h6" sx={{ mb: 0.75 }}>
               {step.title}
             </Typography>
-            <Typography sx={{ color: "rgba(248,251,250,0.72)" }}>{step.description}</Typography>
+            <Typography color="text.secondary">{step.description}</Typography>
           </Box>
           <Box>
-            <Typography variant="caption" sx={{ color: "rgba(248,251,250,0.58)" }}>
+            <Typography variant="caption" color="text.secondary">
               WHAT MOVES FORWARD
             </Typography>
             <Stack spacing={1} sx={{ mt: 1 }}>

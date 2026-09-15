@@ -981,7 +981,13 @@ export function LoginPage() {
         >
           <Stack direction="row" spacing={1} alignItems="center">
             <BrandMark height={17} on="light" />
-            <Typography sx={{ fontSize: 11, color: "text.secondary" }}>
+            <Typography sx={{ fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                color: "text.secondary",
+                borderLeft: "1px solid",
+                borderColor: "divider",
+                pl: 1.25, }}>
               CTS Data Center OpsDesk
             </Typography>
           </Stack>
