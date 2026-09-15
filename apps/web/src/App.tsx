@@ -167,7 +167,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
               letterSpacing: "0.08em",
             }}
           >
-            CTS &middot; DATA CENTER OPSDESK
+            JSAN &middot; DATA CENTER OPSDESK
           </Typography>
         </Stack>
       </Toolbar>

@@ -223,7 +223,7 @@ const CONTACT_ROWS = [
   {
     icon: <MailOutlineIcon fontSize="small" />,
     label: "General enquiries",
-    value: "ops@jsan-cts.example",
+    value: "ops@jsan.example",
   },
   {
     icon: <GroupOutlinedIcon fontSize="small" />,
@@ -233,7 +233,7 @@ const CONTACT_ROWS = [
   {
     icon: <SecurityOutlinedIcon fontSize="small" />,
     label: "Security & incidents",
-    value: "security@jsan-cts.example",
+    value: "security@jsan.example",
   },
 ];
 
@@ -341,7 +341,7 @@ export function LoginPage() {
                 pl: 1.25,
               }}
             >
-              CTS Data Center OpsDesk
+              JSAN Data Center OpsDesk
             </Typography>
           </Stack>
           <Stack direction="row" spacing={3} alignItems="center">
@@ -451,7 +451,7 @@ export function LoginPage() {
                 color: theme.palette.primary.main,
               }}
             >
-              CTS DATA CENTER OPSDESK
+              JSAN DATA CENTER OPSDESK
             </Typography>
           </Box>
 
@@ -465,7 +465,7 @@ export function LoginPage() {
             </Box>
           </Typography>
           <Typography color="text.secondary" sx={{ fontSize: 16, mb: 4, maxWidth: 460 }}>
-            Ticketing, CMDB, monitoring and governance for CTS/JSAN data-center operations —
+            Ticketing, CMDB, monitoring and governance for JSAN data-center operations —
             backend-enforced access, every change audited.
           </Typography>
 
@@ -513,7 +513,7 @@ export function LoginPage() {
                   pl: 1.25,
                 }}
               >
-                CTS DATA CENTER OPSDESK
+                JSAN DATA CENTER OPSDESK
               </Typography>
             </Stack>
 
@@ -539,7 +539,7 @@ export function LoginPage() {
                   OPS PLATFORM
                 </Typography>
                 <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
-                  Sign in to JSAN CTS OpsDesk
+                  Sign in to JSAN OpsDesk
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
                   Continue with your organization account, or use email below.
@@ -1007,7 +1007,7 @@ export function LoginPage() {
                 pl: 1.25,
               }}
             >
-              CTS Data Center OpsDesk
+              JSAN Data Center OpsDesk
             </Typography>
           </Stack>
           <Typography sx={{ fontSize: 11.5, color: "text.secondary", maxWidth: 420 }}>

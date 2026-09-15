@@ -19,10 +19,8 @@ async function bootstrap() {
   );
 
   const config = new DocumentBuilder()
-    .setTitle("JSAN CTS Data Center OpsDesk API")
-    .setDescription(
-      "ITSM + CMDB + monitoring integration platform for CTS/JSAN data-center operations",
-    )
+    .setTitle("JSAN Data Center OpsDesk API")
+    .setDescription("ITSM + CMDB + monitoring integration platform for JSAN data-center operations")
     .setVersion("0.1.0")
     .addBearerAuth()
     .build();

@@ -4,7 +4,7 @@ Guidance for AI agents (and humans) working in this repository.
 
 ## What this repo is
 
-JSAN CTS Data Center OpsDesk — an ITSM + CMDB + monitoring-integration platform for CTS/JSAN data-center operations. Full spec: `docs/JSAN_CTS_DC_OpsDesk_Developer_Build_Architecture_v1.0.pdf`. Read it before implementing any module.
+JSAN Data Center OpsDesk — an ITSM + CMDB + monitoring-integration platform for JSAN data-center operations. Full spec: `docs/JSAN_CTS_DC_OpsDesk_Developer_Build_Architecture_v1.0.pdf`. Read it before implementing any module.
 
 ## Non-negotiable rules (from the build spec)
 

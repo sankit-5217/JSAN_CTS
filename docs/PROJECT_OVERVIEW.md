@@ -1,10 +1,10 @@
-# JSAN CTS Data Center OpsDesk — Project Overview & Task Division
+# JSAN Data Center OpsDesk — Project Overview & Task Division
 
 Source of truth: `docs/JSAN_CTS_DC_OpsDesk_Developer_Build_Architecture_v1.0.pdf`. This document summarizes it and assigns ownership between the two developers building it.
 
 ## What we're building
 
-A centralized data-center infrastructure operations and service-management platform: site/asset visibility, CMDB, incidents and requests, SLA governance, engineer worklogs, Dell/HPE hardware lifecycle tracking, monitoring alerts, vendor/RMA coordination, SOPs, risk/BCP records, and management reporting. **Not** a ServiceNow clone — build only what CTS/JSAN data-center operations need, and reuse mature monitoring/logging tools instead of rebuilding them.
+A centralized data-center infrastructure operations and service-management platform: site/asset visibility, CMDB, incidents and requests, SLA governance, engineer worklogs, Dell/HPE hardware lifecycle tracking, monitoring alerts, vendor/RMA coordination, SOPs, risk/BCP records, and management reporting. **Not** a ServiceNow clone — build only what JSAN data-center operations need, and reuse mature monitoring/logging tools instead of rebuilding them.
 
 **Operating chain:** Site → Rack → Asset/CI → Health/Alert → Incident → Engineer Action → Vendor Case/RMA → Restoration → RCA → SLA/Management Report.
 

@@ -61,7 +61,7 @@ export async function seedFixture(prisma: PrismaClient): Promise<Fixture> {
     mk("e2e-noc@example.com", UserRole.SERVICE_DESK_NOC, "E2E NOC"),
     mk("e2e-engineer@example.com", UserRole.SITE_ENGINEER, "E2E Engineer"),
     mk("e2e-infra@example.com", UserRole.INFRASTRUCTURE_LEAD, "E2E Infra Lead"),
-    mk("e2e-cts-viewer@example.com", UserRole.CTS_MANAGER_VIEWER, "E2E CTS Viewer"),
+    mk("e2e-cts-viewer@example.com", UserRole.CTS_MANAGER_VIEWER, "E2E Client Viewer"),
     mk("e2e-auditor@example.com", UserRole.AUDITOR_READ_ONLY, "E2E Auditor"),
   ]);
 

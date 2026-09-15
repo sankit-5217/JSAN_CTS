@@ -1,8 +1,8 @@
-# JSAN CTS Data Center OpsDesk
+# JSAN Data Center OpsDesk
 
 A centralized data-center infrastructure operations and service-management platform: site/asset visibility, CMDB, incidents and requests, SLA governance, engineer worklogs, Dell/HPE hardware lifecycle tracking, monitoring alerts, vendor/RMA coordination, SOPs, risk/BCP records, and management reporting.
 
-This is **not** a ServiceNow clone. We build only the capabilities required for CTS data-center operations and reuse mature monitoring/logging technologies (Zabbix/Prometheus/Grafana, Loki/OpenSearch) instead of rebuilding them.
+This is **not** a ServiceNow clone. We build only the capabilities required for JSAN data-center operations and reuse mature monitoring/logging technologies (Zabbix/Prometheus/Grafana, Loki/OpenSearch) instead of rebuilding them.
 
 Full requirements live in `docs/JSAN_CTS_DC_OpsDesk_Developer_Build_Architecture_v1.0.pdf` (the build specification). Read it before writing code — this scaffold implements Sprint 1 (Foundation) from that document's §23 backlog.
 

@@ -2,7 +2,7 @@
   "name": "cts-dc-opsdesk",
   "version": "0.1.0",
   "private": true,
-  "description": "JSAN CTS Data Center OpsDesk - ITSM + CMDB + monitoring integration platform",
+  "description": "JSAN Data Center OpsDesk - ITSM + CMDB + monitoring integration platform",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": ">=20.0.0"

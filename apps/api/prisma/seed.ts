@@ -137,7 +137,7 @@ async function main() {
     create: {
       idpSubject: "seed-cts-viewer",
       email: "ctsviewer@example.com",
-      displayName: "Seed CTS Manager Viewer",
+      displayName: "Seed Client Manager Viewer",
       role: UserRole.CTS_MANAGER_VIEWER,
     },
   });

@@ -1,4 +1,4 @@
-// JSAN CTS Data Center OpsDesk — Prisma schema
+// JSAN Data Center OpsDesk — Prisma schema
 // Baseline tables per build spec §13. UUID primary keys internally,
 // separate human-readable codes for UI. Timestamps stored in UTC.
 // This is the Sprint 1-2 baseline: core identity, sites, CMDB and audit.

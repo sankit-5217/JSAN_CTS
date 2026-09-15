@@ -64,7 +64,7 @@ export function ClientLayout() {
                 letterSpacing: "0.07em",
               }}
             >
-              CTS &middot; SUPPORT PORTAL
+              JSAN &middot; SUPPORT PORTAL
             </Typography>
           </Stack>
 
