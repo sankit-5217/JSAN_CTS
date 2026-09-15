@@ -132,11 +132,11 @@ async function main() {
   // in as this user actually shows something — the seeded incident lives
   // there.
   const ctsViewer = await prisma.user.upsert({
-    where: { email: "ctsviewer@example.com" },
+    where: { email: "viewer@example.com" },
     update: {},
     create: {
       idpSubject: "seed-cts-viewer",
-      email: "ctsviewer@example.com",
+      email: "viewer@example.com",
       displayName: "Seed Client Manager Viewer",
       role: UserRole.CTS_MANAGER_VIEWER,
     },

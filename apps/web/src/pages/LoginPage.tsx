@@ -118,7 +118,7 @@ const SEEDED_USERS = [
     note: "Hands-on floor engineering and hardware actions.",
   },
   {
-    email: "ctsviewer@example.com",
+    email: "viewer@example.com",
     role: "CTS_MANAGER_VIEWER",
     scope: "SITE01",
     note: "Read-only: no internal comments, no management IPs, nothing editable.",
