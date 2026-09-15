@@ -1,6 +1,7 @@
 import { Navigate, Outlet, Link, useLocation } from "react-router-dom";
-import { AppBar, Box, Button, Chip, Stack, Toolbar, Typography } from "@mui/material";
+import { AppBar, Box, Button, Stack, Toolbar, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
+import { AccountMenu, roleMeta } from "../../components/AccountMenu";
 import { clearStoredToken, getStoredToken } from "../../api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "../../api/jwt";
 import { theme } from "../../theme/theme";
@@ -91,25 +92,17 @@ export function ClientLayout() {
 
           <Box sx={{ flex: 1 }} />
 
-          {user && <Chip size="small" label="Client" variant="outlined" />}
           {user && (
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ display: { xs: "none", sm: "block" } }}
-            >
-              {user.email}
-            </Typography>
+            <AccountMenu
+              email={user.email}
+              roleLabel="Client"
+              roleColor={roleMeta("CTS_MANAGER_VIEWER").color}
+              onLogout={() => {
+                clearStoredToken();
+                window.location.assign("/login");
+              }}
+            />
           )}
-          <Button
-            size="small"
-            onClick={() => {
-              clearStoredToken();
-              window.location.assign("/login");
-            }}
-          >
-            Log out
-          </Button>
         </Toolbar>
       </AppBar>
 

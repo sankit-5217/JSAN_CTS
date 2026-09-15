@@ -2,7 +2,6 @@ import { useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route, Routes, Link, useLocation } from "react-router-dom";
 import {
   AppBar,
-  Avatar,
   Box,
   Divider,
   Drawer,
@@ -12,11 +11,8 @@ import {
   ListItemIcon,
   ListItemText,
   ListSubheader,
-  Menu,
-  MenuItem,
   Stack,
   Toolbar,
-  Tooltip,
   Typography,
 } from "@mui/material";
 import { alpha, darken } from "@mui/material/styles";
@@ -25,11 +21,9 @@ import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
 import ChangeCircleOutlinedIcon from "@mui/icons-material/ChangeCircleOutlined";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import DnsOutlinedIcon from "@mui/icons-material/DnsOutlined";
-import ExpandMoreOutlinedIcon from "@mui/icons-material/ExpandMoreOutlined";
 import GppMaybeOutlinedIcon from "@mui/icons-material/GppMaybeOutlined";
 import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
 import LocalShippingOutlinedIcon from "@mui/icons-material/LocalShippingOutlined";
-import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
 import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
@@ -37,6 +31,7 @@ import PolicyOutlinedIcon from "@mui/icons-material/PolicyOutlined";
 import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
+import { AccountMenu, roleMeta } from "./components/AccountMenu";
 import { clearStoredToken, getStoredToken } from "./api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "./api/jwt";
 import { theme } from "./theme/theme";
@@ -83,25 +78,6 @@ const SIDEBAR_HOVER_BG = alpha("#ffffff", 0.06);
 const ACCENT = theme.palette.secondary.light;
 const ACCENT_BG = alpha(ACCENT, 0.16);
 const ACCENT_HOVER_BG = alpha(ACCENT, 0.24);
-
-// Role identity colors — deliberately outside the severity palette
-// (severityColors in theme/theme.ts: green/orange/red/blue-maintenance) so a
-// role badge never reads as a health status. One entry per UserRole (spec
-// §5's 8 roles); ROLE_META falls back to a neutral slate for anything else.
-const ROLE_META: Record<string, { label: string; color: string }> = {
-  SUPER_ADMIN: { label: "Super Admin", color: "#0f3d63" },
-  SERVICE_DESK_NOC: { label: "Service Desk / NOC", color: "#1565c0" },
-  SITE_ENGINEER: { label: "Site Engineer", color: "#2f8f83" },
-  INFRASTRUCTURE_LEAD: { label: "Infrastructure Lead", color: "#5c6bc0" },
-  VENDOR_COORDINATOR: { label: "Vendor Coordinator", color: "#8e5b9f" },
-  DELIVERY_OPS_MANAGER: { label: "Delivery Ops Manager", color: "#536da7" },
-  CTS_MANAGER_VIEWER: { label: "CTS Manager (Viewer)", color: "#6b7c93" },
-  AUDITOR_READ_ONLY: { label: "Auditor (Read Only)", color: "#5c5f66" },
-};
-
-function roleMeta(role: string): { label: string; color: string } {
-  return ROLE_META[role] ?? { label: role, color: "#5c5f66" };
-}
 
 interface NavItem {
   label: string;
@@ -311,28 +287,12 @@ function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => 
   );
 }
 
-/** Initials for the avatar — no display-name field on the JWT, so this reads
- * from the email local-part (e.g. "priya.singh@..." -> "PS", "admin@..." -> "A"). */
-function initialsFromEmail(email: string): string {
-  const local = email.split("@")[0] ?? "";
-  const parts = local.split(/[.\-_]+/).filter(Boolean);
-  const chars = parts.length >= 2 ? [parts[0][0], parts[1][0]] : [local.slice(0, 2)];
-  return chars.join("").toUpperCase();
-}
-
 /** Slim top bar: an interactive identity menu (avatar + role, click for
  * account details and logout) plus the mobile nav toggle. */
 function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
   const token = getStoredToken();
   const user = token ? decodeJwtPayload(token) : null;
-  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
-  const menuOpen = Boolean(anchorEl);
   const meta = user ? roleMeta(user.role) : null;
-
-  const handleLogout = () => {
-    clearStoredToken();
-    window.location.assign("/login");
-  };
 
   return (
     <AppBar
@@ -352,90 +312,15 @@ function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
         </IconButton>
         <Box sx={{ flex: 1 }} />
         {user && meta && (
-          <>
-            <Tooltip title="Account">
-              <Stack
-                component="button"
-                type="button"
-                onClick={(e) => setAnchorEl(e.currentTarget)}
-                aria-label="Open account menu"
-                aria-haspopup="true"
-                aria-expanded={menuOpen}
-                direction="row"
-                alignItems="center"
-                spacing={1}
-                sx={{
-                  border: "1px solid",
-                  borderColor: alpha(meta.color, 0.28),
-                  borderRadius: 999,
-                  pl: 0.5,
-                  pr: 1.25,
-                  py: 0.5,
-                  bgcolor: menuOpen ? alpha(meta.color, 0.14) : alpha(meta.color, 0.07),
-                  cursor: "pointer",
-                  font: "inherit",
-                  transition: "background-color 150ms ease, box-shadow 150ms ease",
-                  "&:hover": { bgcolor: alpha(meta.color, 0.14) },
-                  "&:focus-visible": { boxShadow: `0 0 0 3px ${alpha(meta.color, 0.3)}` },
-                }}
-              >
-                <Avatar
-                  sx={{
-                    width: 30,
-                    height: 30,
-                    bgcolor: meta.color,
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                  }}
-                >
-                  {initialsFromEmail(user.email)}
-                </Avatar>
-                <Box sx={{ display: { xs: "none", sm: "block" }, textAlign: "left", minWidth: 0 }}>
-                  <Typography
-                    sx={{ fontSize: 12.5, fontWeight: 700, color: meta.color, lineHeight: 1.2 }}
-                  >
-                    {meta.label}
-                  </Typography>
-                  <Typography
-                    noWrap
-                    sx={{ fontSize: 11.5, color: "text.secondary", lineHeight: 1.3, maxWidth: 180 }}
-                  >
-                    {user.email}
-                  </Typography>
-                </Box>
-                <ExpandMoreOutlinedIcon
-                  fontSize="small"
-                  sx={{
-                    color: meta.color,
-                    transition: "transform 150ms ease",
-                    transform: menuOpen ? "rotate(180deg)" : "none",
-                  }}
-                />
-              </Stack>
-            </Tooltip>
-            <Menu
-              anchorEl={anchorEl}
-              open={menuOpen}
-              onClose={() => setAnchorEl(null)}
-              anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-              transformOrigin={{ vertical: "top", horizontal: "right" }}
-              slotProps={{ paper: { sx: { minWidth: 240, mt: 1 } } }}
-            >
-              <Box sx={{ px: 2, py: 1.25, display: { xs: "block", sm: "none" } }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 700, color: meta.color }}>
-                  {meta.label}
-                </Typography>
-                <Typography noWrap sx={{ fontSize: 12, color: "text.secondary" }}>
-                  {user.email}
-                </Typography>
-              </Box>
-              <Divider sx={{ display: { xs: "block", sm: "none" } }} />
-              <MenuItem onClick={handleLogout} sx={{ color: "error.main", gap: 1 }}>
-                <LogoutOutlinedIcon fontSize="small" />
-                Log out
-              </MenuItem>
-            </Menu>
-          </>
+          <AccountMenu
+            email={user.email}
+            roleLabel={meta.label}
+            roleColor={meta.color}
+            onLogout={() => {
+              clearStoredToken();
+              window.location.assign("/login");
+            }}
+          />
         )}
       </Toolbar>
     </AppBar>
