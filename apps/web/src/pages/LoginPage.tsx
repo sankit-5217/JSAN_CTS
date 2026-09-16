@@ -994,8 +994,8 @@ export function LoginPage() {
           alignItems={{ xs: "flex-start", sm: "center" }}
           justifyContent="space-between"
         >
-          <Stack direction="row" spacing={1} alignItems="center">
-            <BrandMark height={17} on="light" />
+          <Stack direction="row" spacing={1.25} alignItems="center">
+            <BrandMark height={20} on="light" />
             <Typography
               sx={{
                 fontSize: 14.5,
