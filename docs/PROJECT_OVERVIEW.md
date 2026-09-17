@@ -39,7 +39,7 @@ tests/
   integration/, e2e/
 ```
 
-This scaffold implements **Sprint 1 (Foundation)**: repo, Docker Compose, NestJS/React skeletons, Prisma schema and migrations setup, CI pipeline, coding standards. See `CLAUDE.md` for the guardrails AI/human contributors should follow, and `README.md` for local dev setup.
+**Current status**: all 16 backend modules (`apps/api/src/modules/*`) are implemented with tests (465+ passing), the frontend covers every module with a working page, and Sprint 12 (Hardening/UAT) work — rate limiting, CI dependency/secret/container scanning, DB and object-storage backup/restore drills (`docs/runbooks/`) — is done. Real SSO/OIDC integration is the one deferred item; `dev-login` (disabled outside dev/local) stands in for it. See `CLAUDE.md` for the guardrails AI/human contributors should follow, and `README.md` for local dev setup.
 
 ## Two-developer task split
 
@@ -82,8 +82,8 @@ Everything that talks to the outside world, plus operational governance.
 
 ### Shared / collaborative
 
-- **Sprint 1 (Foundation)** — done in this scaffold; both devs should read it end-to-end before extending it.
-- **Sprint 12 (Hardening/UAT)** — security review, resilience testing, backup/restore drill: joint effort.
+- **Sprint 1 (Foundation)** — done; both devs should read it end-to-end before extending it.
+- **Sprint 12 (Hardening/UAT)** — done: rate limiting, CI dependency/secret/container scanning, `SiteScopeGuard` test coverage, and DB + object-storage backup/restore drills (`docs/runbooks/`). Real SSO/OIDC (spec's auth integration) remains open — `dev-login` stands in for it, disabled outside dev/local.
 - `cmdb` is a shared dependency: Dev A builds it first since `incidents` needs it (target: stable by end of Sprint 3), but Dev B's hardware/alert work all links back to CIs — sync when the CMDB schema stabilizes.
 - Both developers independently satisfy the **Definition of Done** (spec §24) on every story: backend authorization, audit events, tests, no hardcoded values, OpenAPI docs, UI error/empty/loading states, peer review. This isn't divisible — it's the bar both clear on every PR.
 
@@ -91,6 +91,6 @@ Everything that talks to the outside world, plus operational governance.
 
 Follow the **Recommended First Development Demo** (spec §31) as the integration checkpoint after Sprints 1–4: admin creates a site/rack/CIs → service desk creates an incident → SLA starts → engineer acknowledges and clocks time → a simulated alert lands on the same incident timeline → a vendor case/RMA is recorded → recovery is observed → incident resolves → manager sees updated dashboards → auditor reconstructs the full timeline. If this vertical slice works, the core architecture (identity → CMDB → ticket → SLA → worklog → telemetry → vendor → audit → reporting) is proven.
 
-## Reference implementation in this scaffold
+## Reference implementation
 
-The `sites` module (`apps/api/src/modules/sites/`) is fully wired end-to-end — Prisma-backed service, controller, validated DTO — as the pattern to copy for `cmdb`, `incidents`, and the rest. The `SitesPage` in `apps/web/src/pages/` shows the matching frontend pattern (fetch from API, typed response, MUI table). Every other module is stubbed with a `TODO` comment naming its owner, its spec section, and its target sprint (see `apps/api/src/modules/*/*.module.ts`).
+The `sites` module (`apps/api/src/modules/sites/`) was the original pattern to copy — Prisma-backed service, controller, validated DTO — and the `SitesPage` in `apps/web/src/pages/` the matching frontend pattern (fetch from API, typed response, MUI table). Every other module now follows the same shape: `alerts`, `audit`, `auth`, `changes`, `cmdb`, `health`, `incidents`, `knowledge`, `monitoring`, `problems`, `reports`, `risks`, `sla`, `vendors`, `worklogs` are all implemented, not stubbed — each with its own `*.service.spec.ts` (and e2e coverage in `apps/api/test/` for the ones that need it) rather than a `TODO` comment.
