@@ -97,16 +97,14 @@ jobs:
       - name: E2E tests
         run: pnpm --filter @cts-dc-opsdesk/api test:e2e
 
-      # 7. Dependency scan (spec §20.1). Informational, not build-blocking:
-      # `pnpm audit --audit-level=high` currently reports 11 pre-existing
-      # high-severity advisories in transitive deps (js-yaml via
-      # @nestjs/swagger, vite, etc.) that predate this step and need their
-      # own upgrade/compat pass — wiring this as a hard gate today would
-      # break every build for reasons unrelated to whatever a given PR
-      # actually changed. Flip `continue-on-error` off once that pass lands.
+      # 7. Dependency scan (spec §20.1) — build-blocking. The high-severity
+      # advisories that used to require `continue-on-error` here (multer,
+      # js-yaml, vite, glob, picomatch, lodash, tmp) are pinned to patched
+      # versions via root package.json's `pnpm.overrides` (transitive deps)
+      # and a direct vite 5->6 bump (apps/web/package.json) — see that
+      # commit for why each override stays within its current major version.
       - name: Dependency scan
         run: pnpm audit --audit-level=high
-        continue-on-error: true
 
       # 7. Secret scan (spec §20.1) — scans the pushed commits / PR diff.
       - name: Secret scan
