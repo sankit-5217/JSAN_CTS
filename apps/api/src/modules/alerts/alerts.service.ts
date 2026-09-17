@@ -475,6 +475,7 @@ export class AlertsService {
         ...(query.severity ? { severity: query.severity } : {}),
         ...(query.fingerprint ? { fingerprint: query.fingerprint } : {}),
         ...(ciId ? { ciId } : {}),
+        ...(query.correlatedIncidentId ? { correlatedIncidentId: query.correlatedIncidentId } : {}),
       },
       orderBy: { lastSeenAt: "desc" },
       take: query.limit ?? 50,

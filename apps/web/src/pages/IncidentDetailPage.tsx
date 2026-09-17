@@ -152,11 +152,27 @@ interface VendorCase {
   closedAt: string | null;
 }
 
+interface LinkedAlert {
+  id: string;
+  source: string;
+  alertType: string;
+  severity: string;
+  state: string;
+  lastSeenAt: string;
+}
+
 const PRIORITY_COLOR: Record<string, "error" | "warning" | "info" | "default"> = {
   P1: "error",
   P2: "warning",
   P3: "info",
   P4: "default",
+};
+
+const ALERT_SEVERITY_COLOR: Record<string, "error" | "warning" | "info" | "default"> = {
+  CRITICAL: "error",
+  HIGH: "warning",
+  WARNING: "info",
+  INFO: "default",
 };
 
 function humanDuration(ms: number): string {
@@ -282,6 +298,7 @@ export function IncidentDetailPage() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [availableTransitions, setAvailableTransitions] = useState<AvailableTransition[]>([]);
   const [vendorCases, setVendorCases] = useState<VendorCase[]>([]);
+  const [linkedAlerts, setLinkedAlerts] = useState<LinkedAlert[]>([]);
   const [supportGroups, setSupportGroups] = useState<GroupOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -313,8 +330,9 @@ export function IncidentDetailPage() {
         apiGet<Attachment[]>(`/incidents/${id}/attachments`),
         apiGet<AvailableTransition[]>(`/incidents/${id}/transitions`),
         apiGet<VendorCase[]>(`/vendor-cases?linkedIncidentId=${id}`),
+        apiGet<LinkedAlert[]>(`/alerts?correlatedIncidentId=${id}`),
       ])
-        .then(([inc, slaState, evts, cmts, wls, atts, transitions, vCases]) => {
+        .then(([inc, slaState, evts, cmts, wls, atts, transitions, vCases, aAlerts]) => {
           setIncident(inc);
           setSla(slaState);
           setEvents(evts);
@@ -323,6 +341,7 @@ export function IncidentDetailPage() {
           setAttachments(atts);
           setAvailableTransitions(transitions);
           setVendorCases(vCases);
+          setLinkedAlerts(aAlerts);
           setLastUpdatedAt(new Date());
         })
         .catch((err: Error) => {
@@ -644,7 +663,7 @@ export function IncidentDetailPage() {
             Group: {editOwnerGroup?.name ?? (incident.ownerGroupId ? "…" : "unassigned")}
           </Typography>
           {sla && (
-            <Typography variant="body2" sx={{ mt: 1 }}>
+            <Typography variant="body2" component="div" sx={{ mt: 1 }}>
               Ack: {slaCountdown(sla.ackDueAt, sla.ackedAt, null)} · Resolve:{" "}
               {slaCountdown(sla.resolveDueAt, sla.resolvedAt, sla.pausedAt)}
               {sla.breached && (
@@ -1017,6 +1036,48 @@ export function IncidentDetailPage() {
                     Vendors
                   </Link>{" "}
                   page and link this incident's ID.
+                </Typography>
+              )}
+            </Stack>
+          </Paper>
+
+          <Paper sx={{ p: 2, mt: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Linked alerts
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Monitoring alerts the ingestion pipeline correlated to this ticket automatically —
+              no manual step. New alerts on the same CI appear here as soon as the next poll
+              picks them up.
+            </Typography>
+            <Stack spacing={1.5}>
+              {linkedAlerts.map((a) => (
+                <Box key={a.id}>
+                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                    <Chip
+                      size="small"
+                      label={a.severity}
+                      color={ALERT_SEVERITY_COLOR[a.severity] ?? "default"}
+                    />
+                    <Link component={RouterLink} to={`/alerts/${a.id}`}>
+                      {a.alertType}
+                    </Link>
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={a.state}
+                      color={a.state === "RECOVERED" ? "default" : "warning"}
+                    />
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    {a.source} · last seen {new Date(a.lastSeenAt).toLocaleString()}
+                  </Typography>
+                  <Divider sx={{ mt: 1 }} />
+                </Box>
+              ))}
+              {linkedAlerts.length === 0 && (
+                <Typography variant="body2" color="text.secondary">
+                  No alerts linked to this ticket yet.
                 </Typography>
               )}
             </Stack>
