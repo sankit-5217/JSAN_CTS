@@ -17,10 +17,18 @@ import {
   Paper,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
+import { keyframes } from "@mui/material/styles";
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
+import { severityColors } from "../theme/theme";
+
+const pulse = keyframes`
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+`;
 
 const WORKLOG_ACTIVITY_TYPES = ["REMOTE_WORK", "ONSITE", "TRAVEL", "VENDOR_CALL"];
 const IMPACT_URGENCY_VALUES = ["HIGH", "MEDIUM", "LOW"];
@@ -286,35 +294,70 @@ export function IncidentDetailPage() {
       .catch(() => undefined);
   }, []);
 
-  const refetch = useCallback(() => {
-    if (!id) return;
-    setError(null);
-    Promise.all([
-      apiGet<Incident>(`/incidents/${id}`),
-      apiGet<SlaState | null>(`/incidents/${id}/sla`),
-      apiGet<IncidentEvent[]>(`/incidents/${id}/events`),
-      apiGet<Comment[]>(`/incidents/${id}/comments`),
-      apiGet<Worklog[]>(`/incidents/${id}/worklogs`),
-      apiGet<Attachment[]>(`/incidents/${id}/attachments`),
-      apiGet<AvailableTransition[]>(`/incidents/${id}/transitions`),
-      apiGet<VendorCase[]>(`/vendor-cases?linkedIncidentId=${id}`),
-    ])
-      .then(([inc, slaState, evts, cmts, wls, atts, transitions, vCases]) => {
-        setIncident(inc);
-        setSla(slaState);
-        setEvents(evts);
-        setComments(cmts);
-        setWorklogs(wls);
-        setAttachments(atts);
-        setAvailableTransitions(transitions);
-        setVendorCases(vCases);
-      })
-      .catch((err: Error) => setError(err.message));
-  }, [id]);
+  // `silent: true` (the polling tick below) never touches `error` — a
+  // transient network blip on a background refresh shouldn't blank out an
+  // already-loaded ticket the user is actively looking at; it just tries
+  // again next tick. Only the initial load and explicit user actions
+  // (submitEdit, submitComment, etc., which all call refetch() bare) surface
+  // a failure.
+  const refetch = useCallback(
+    (opts?: { silent?: boolean }) => {
+      if (!id) return;
+      if (!opts?.silent) setError(null);
+      Promise.all([
+        apiGet<Incident>(`/incidents/${id}`),
+        apiGet<SlaState | null>(`/incidents/${id}/sla`),
+        apiGet<IncidentEvent[]>(`/incidents/${id}/events`),
+        apiGet<Comment[]>(`/incidents/${id}/comments`),
+        apiGet<Worklog[]>(`/incidents/${id}/worklogs`),
+        apiGet<Attachment[]>(`/incidents/${id}/attachments`),
+        apiGet<AvailableTransition[]>(`/incidents/${id}/transitions`),
+        apiGet<VendorCase[]>(`/vendor-cases?linkedIncidentId=${id}`),
+      ])
+        .then(([inc, slaState, evts, cmts, wls, atts, transitions, vCases]) => {
+          setIncident(inc);
+          setSla(slaState);
+          setEvents(evts);
+          setComments(cmts);
+          setWorklogs(wls);
+          setAttachments(atts);
+          setAvailableTransitions(transitions);
+          setVendorCases(vCases);
+          setLastUpdatedAt(new Date());
+        })
+        .catch((err: Error) => {
+          if (!opts?.silent) setError(err.message);
+        });
+    },
+    [id],
+  );
 
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  // Live timeline (plan Decision: polling, not a WebSocket gateway — no
+  // real-time transport exists anywhere in this codebase yet, and polling
+  // gets every role watching a ticket the same "someone else just changed
+  // this" experience without standing up new infrastructure this late).
+  // Paused when the tab isn't visible so a background tab doesn't keep
+  // hammering the API for a page nobody's looking at.
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  useEffect(() => {
+    if (!id) return undefined;
+    const POLL_INTERVAL_MS = 4000;
+    const tick = () => {
+      if (document.visibilityState === "visible") {
+        refetch({ silent: true });
+      }
+    };
+    const intervalId = window.setInterval(tick, POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [id, refetch]);
 
   // --- Edit incident form --------------------------------------------------
   // Seeded from the incident once per incident id, not on every refetch, so
@@ -557,10 +600,37 @@ export function IncidentDetailPage() {
     <Box>
       <Card sx={{ mb: 3 }}>
         <CardContent>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-            <Typography variant="h5">{incident.incidentNo}</Typography>
-            <Chip label={incident.status} />
-            <Chip label={incident.priority} color={PRIORITY_COLOR[incident.priority]} />
+          <Stack
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            justifyContent="space-between"
+            sx={{ mb: 1 }}
+          >
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography variant="h5">{incident.incidentNo}</Typography>
+              <Chip label={incident.status} />
+              <Chip label={incident.priority} color={PRIORITY_COLOR[incident.priority]} />
+            </Stack>
+            {lastUpdatedAt && (
+              <Tooltip title="This page refreshes automatically — status, assignment, comments and worklogs from anyone else appear here without reloading.">
+                <Stack direction="row" spacing={0.75} alignItems="center">
+                  <Box
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      bgcolor: severityColors.healthy,
+                      animation: `${pulse} 2s ease-in-out infinite`,
+                      "@media (prefers-reduced-motion: reduce)": { animation: "none" },
+                    }}
+                  />
+                  <Typography variant="caption" color="text.secondary">
+                    Live · updated {lastUpdatedAt.toLocaleTimeString()}
+                  </Typography>
+                </Stack>
+              </Tooltip>
+            )}
           </Stack>
           <Typography variant="body1" sx={{ mb: 1 }}>
             {incident.shortDescription}
@@ -837,7 +907,7 @@ export function IncidentDetailPage() {
             <Stack spacing={1} sx={{ mb: 2 }}>
               {comments.map((c) => (
                 <Box key={c.id}>
-                  <Typography variant="body2">
+                  <Typography variant="body2" component="div">
                     {c.body} {c.isInternal && <Chip size="small" label="internal" />}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
@@ -961,7 +1031,7 @@ export function IncidentDetailPage() {
             <Stack spacing={1} sx={{ mb: 2 }}>
               {worklogs.map((w) => (
                 <Box key={w.id}>
-                  <Typography variant="body2">
+                  <Typography variant="body2" component="div">
                     {w.activityType} — {new Date(w.startedAt).toLocaleString()}
                     {w.endedAt && ` → ${new Date(w.endedAt).toLocaleString()}`}
                     {w.durationMinutes !== null && ` (${w.durationMinutes}m)`}
