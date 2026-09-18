@@ -34,6 +34,7 @@ export type SlaKind = "RESPONSE" | "RESOLUTION";
 
 /** Outbound notification events the worker can raise. Discriminated on `kind`. */
 export type NotificationEvent =
+  | { kind: "INCIDENT_CREATED"; entity: EntityRef; reporter?: Party }
   | { kind: "INCIDENT_ASSIGNED"; entity: EntityRef; assignee: Party; actor?: Party }
   | {
       kind: "INCIDENT_GROUP_ASSIGNED";

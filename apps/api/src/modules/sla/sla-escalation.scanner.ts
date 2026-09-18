@@ -1,6 +1,16 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
-import { Prisma, SlaInstance, SlaPolicy, Incident, User, Site, SiteContact } from "@prisma/client";
+import {
+  Prisma,
+  SlaInstance,
+  SlaPolicy,
+  Incident,
+  User,
+  Site,
+  SiteContact,
+  SupportGroup,
+  SupportGroupMember,
+} from "@prisma/client";
 import type { EntityRef, NotificationEvent, Party } from "@cts-dc-opsdesk/email-adapter";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
@@ -13,6 +23,7 @@ type InstanceWithContext = SlaInstance & {
   incident: Incident & {
     owner: User | null;
     site: Site & { contacts: SiteContact[] };
+    ownerGroup: (SupportGroup & { members: (SupportGroupMember & { user: User })[] }) | null;
   };
 };
 
@@ -59,7 +70,13 @@ export class SlaEscalationScanner {
       },
       include: {
         slaPolicy: true,
-        incident: { include: { owner: true, site: { include: { contacts: true } } } },
+        incident: {
+          include: {
+            owner: true,
+            site: { include: { contacts: true } },
+            ownerGroup: { include: { members: { include: { user: true } } } },
+          },
+        },
       },
     })) as InstanceWithContext[];
 
@@ -173,6 +190,17 @@ export class SlaEscalationScanner {
     }
   }
 
+  /**
+   * Owner + on-call site contacts (unchanged) plus, new: every active member
+   * of the incident's assigned support group, when one is set. Previously an
+   * unassigned-to-an-individual ticket (group-only, or no owner and no
+   * on-call contact configured) got its SLA warning/breach silently dropped
+   * — `notify()`'s `to.length === 0` guard just logged a warning and skipped
+   * delivery entirely, so a breaching ticket with only a team assigned paged
+   * no one. The team is now always included alongside the individual owner,
+   * not just as a fallback when there's no owner — a breach is exactly the
+   * moment backup coverage matters most.
+   */
   private recipients(instance: InstanceWithContext): Party[] {
     const parties: Party[] = [];
     if (instance.incident.owner?.email) {
@@ -186,8 +214,13 @@ export class SlaEscalationScanner {
         parties.push({ name: contact.name, email: contact.email });
       }
     }
-    // De-dupe by email — an owner who's also listed as an on-call contact
-    // shouldn't get the same notification twice.
+    for (const member of instance.incident.ownerGroup?.members ?? []) {
+      if (member.user.isActive && member.user.email) {
+        parties.push({ name: member.user.displayName, email: member.user.email });
+      }
+    }
+    // De-dupe by email — someone who's owner, on-call, and a group member
+    // at once shouldn't get the same notification three times.
     const seen = new Set<string>();
     return parties.filter((p) => (seen.has(p.email) ? false : (seen.add(p.email), true)));
   }
@@ -196,7 +229,8 @@ export class SlaEscalationScanner {
     const to = this.recipients(instance);
     if (to.length === 0) {
       this.logger.warn(
-        `SLA ${crossed.milestone} on incident ${instance.incident.incidentNo} has no owner or on-call contact to notify — skipping delivery`,
+        `SLA ${crossed.milestone} on incident ${instance.incident.incidentNo} has no owner, ` +
+          `assigned-group member, or on-call contact to notify — skipping delivery`,
       );
       return;
     }

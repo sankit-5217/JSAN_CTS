@@ -60,6 +60,13 @@ interface Rendered {
 
 function renderBody(event: NotificationEvent): Rendered {
   switch (event.kind) {
+    case "INCIDENT_CREATED":
+      return {
+        phrase: "new ticket needs triage",
+        lines: [
+          `${event.entity.key} was just raised${event.reporter ? ` by ${addr(event.reporter)}` : ""} and is waiting in the queue.`,
+        ],
+      };
     case "INCIDENT_ASSIGNED":
       return {
         phrase: `assigned to ${event.assignee.name ?? event.assignee.email}`,

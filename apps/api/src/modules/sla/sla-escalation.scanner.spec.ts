@@ -229,6 +229,100 @@ describe("SlaEscalationScanner.scan", () => {
     jest.useRealTimers();
   });
 
+  it("notifies every active, emailed member of the incident's assigned support group", async () => {
+    jest.useFakeTimers().setSystemTime(NOW);
+    const { scanner, publisher } = makeScanner({
+      findMany: jest.fn().mockResolvedValue([
+        baseInstance({
+          incident: {
+            ...baseInstance().incident,
+            owner: null,
+            site: { code: "SITE01", contacts: [] },
+            ownerGroup: {
+              members: [
+                { user: { displayName: "Team A", email: "a@corp.example", isActive: true } },
+                { user: { displayName: "Team B", email: "b@corp.example", isActive: true } },
+                // excluded: inactive, and no email on file
+                { user: { displayName: "Left Co", email: "left@corp.example", isActive: false } },
+                { user: { displayName: "No Email", email: "", isActive: true } },
+              ],
+            },
+          },
+        }),
+      ]),
+    });
+
+    await scanner.scan();
+
+    const call = (publisher.enqueue as jest.Mock).mock.calls[0][0];
+    expect(call.recipients.to).toEqual(
+      expect.arrayContaining([
+        { name: "Team A", email: "a@corp.example" },
+        { name: "Team B", email: "b@corp.example" },
+      ]),
+    );
+    expect(call.recipients.to).toHaveLength(2);
+
+    jest.useRealTimers();
+  });
+
+  it("notifies the individual owner AND the assigned team together, not the team only as a fallback", async () => {
+    jest.useFakeTimers().setSystemTime(NOW);
+    const { scanner, publisher } = makeScanner({
+      findMany: jest.fn().mockResolvedValue([
+        baseInstance({
+          incident: {
+            ...baseInstance().incident,
+            ownerGroup: {
+              members: [
+                { user: { displayName: "Team A", email: "a@corp.example", isActive: true } },
+              ],
+            },
+          },
+        }),
+      ]),
+    });
+
+    await scanner.scan();
+
+    const call = (publisher.enqueue as jest.Mock).mock.calls[0][0];
+    expect(call.recipients.to).toEqual(
+      expect.arrayContaining([
+        { name: "Sam Engineer", email: "sam@corp.example" },
+        { name: "On-call Lead", email: "oncall@corp.example" },
+        { name: "Team A", email: "a@corp.example" },
+      ]),
+    );
+
+    jest.useRealTimers();
+  });
+
+  it("no longer drops delivery when the ticket has only a team assigned, no individual owner", async () => {
+    jest.useFakeTimers().setSystemTime(NOW);
+    const { scanner, publisher } = makeScanner({
+      findMany: jest.fn().mockResolvedValue([
+        baseInstance({
+          incident: {
+            ...baseInstance().incident,
+            owner: null,
+            site: { code: "SITE01", contacts: [] },
+            ownerGroup: {
+              members: [
+                { user: { displayName: "Team A", email: "a@corp.example", isActive: true } },
+              ],
+            },
+          },
+        }),
+      ]),
+    });
+
+    await scanner.scan();
+
+    expect(publisher.enqueue).toHaveBeenCalled();
+
+    jest.useRealTimers();
+  });
+
   it("one instance failing doesn't stop the rest of the scan", async () => {
     jest.useFakeTimers().setSystemTime(NOW);
     const { scanner, tx } = makeScanner({

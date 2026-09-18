@@ -212,6 +212,54 @@ describe("IncidentsService.create", () => {
     );
   });
 
+  it("notifies the service desk/NOC roster when a new ticket is raised", async () => {
+    const { service, notifications } = makeService({
+      userFindMany: jest
+        .fn()
+        .mockResolvedValue([{ email: "desk@corp.example", displayName: "Service Desk" }]),
+    });
+
+    const result = await service.create(baseCreateDto, { actorId: "user-1" });
+
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ kind: "INCIDENT_CREATED" }),
+        recipients: { to: [{ name: "Service Desk", email: "desk@corp.example" }] },
+      }),
+      `INCIDENT_CREATED:${result.id}:new`,
+    );
+  });
+
+  it("includes the reporting customer on the new-ticket notification when self-reported", async () => {
+    const { service, notifications } = makeService({
+      userFindMany: jest
+        .fn()
+        .mockResolvedValue([{ email: "desk@corp.example", displayName: "Service Desk" }]),
+      userFindUnique: jest
+        .fn()
+        .mockResolvedValue({ id: "customer-1", email: "jane@client.example", displayName: "Jane" }),
+    });
+
+    await service.create(baseCreateDto, { actorId: "user-1" }, "customer-1");
+
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "INCIDENT_CREATED",
+          reporter: { name: "Jane", email: "jane@client.example" },
+        }),
+      }),
+      expect.any(String),
+    );
+  });
+
+  it("skips the new-ticket notification (not the ticket itself) when no service desk user is on file", async () => {
+    const { service, notifications } = makeService({ userFindMany: jest.fn().mockResolvedValue([]) });
+    const result = await service.create(baseCreateDto, { actorId: "user-1" });
+    expect(result).toMatchObject({ incidentNo: "INC-000001" });
+    expect(notifications.enqueue).not.toHaveBeenCalled();
+  });
+
   it("starts the SLA clock in the same transaction as the incident row", async () => {
     const { service, tx, slaService } = makeService();
     const result = await service.create(baseCreateDto, { actorId: "user-1" });

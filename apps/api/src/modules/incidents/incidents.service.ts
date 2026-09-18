@@ -195,8 +195,8 @@ export class IncidentsService {
   // `reportedByUserId` is never client-settable — only createFromCustomer()
   // passes it, straight from the authenticated caller's own id, never from
   // request body input.
-  create(dto: CreateIncidentDto, actor: ActorContext, reportedByUserId?: string) {
-    return this.prisma.$transaction(async (tx) => {
+  async create(dto: CreateIncidentDto, actor: ActorContext, reportedByUserId?: string) {
+    const incident = await this.prisma.$transaction(async (tx) => {
       const incidentNo = await this.nextIncidentNo(tx);
       const incident = await tx.incident.create({
         data: {
@@ -240,6 +240,9 @@ export class IncidentsService {
       );
       return incident;
     });
+
+    await this.notifyServiceDeskOfNewIncident(incident);
+    return incident;
   }
 
   /**
@@ -1055,6 +1058,53 @@ export class IncidentsService {
   ): Party | undefined {
     const match = id ? users.find((u) => u.id === id) : undefined;
     return match?.email ? { name: match.displayName, email: match.email } : undefined;
+  }
+
+  /**
+   * Tell the service desk/NOC roster the moment a ticket is raised. Before
+   * this, the first notification any incident ever got was on assignment —
+   * a brand-new ticket could sit unnoticed in the queue until someone
+   * happened to look. Called from create() (and so from createFromCustomer()
+   * too, which calls create() internally) — one insertion point covers both
+   * staff-created and customer self-service tickets. Mirrors
+   * AlertsService.notifyNocOfCriticalAlert's role-roster pattern; there was
+   * no equivalent "page the desk" helper in this module yet.
+   */
+  private async notifyServiceDeskOfNewIncident(incident: Incident): Promise<void> {
+    try {
+      const roster = await this.prisma.user.findMany({
+        where: { isActive: true, role: UserRole.SERVICE_DESK_NOC },
+        select: { email: true, displayName: true },
+      });
+      const to = roster
+        .filter((u) => u.email)
+        .map((u) => ({ name: u.displayName, email: u.email }));
+      if (to.length === 0) {
+        return;
+      }
+      let reporter: Party | undefined;
+      if (incident.reportedByUserId) {
+        const reportedBy = await this.prisma.user.findUnique({
+          where: { id: incident.reportedByUserId },
+        });
+        reporter = reportedBy?.email
+          ? { name: reportedBy.displayName, email: reportedBy.email }
+          : undefined;
+      }
+      await this.notifications.enqueue(
+        {
+          event: { kind: "INCIDENT_CREATED", entity: this.toEntityRef(incident), reporter },
+          recipients: { to },
+        },
+        `INCIDENT_CREATED:${incident.id}:new`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `new-incident service-desk notification skipped for incident ${incident.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   /** Tell the (re)assigned owner. Called from createTransition (assigning as
