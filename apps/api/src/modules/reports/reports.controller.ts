@@ -1,10 +1,11 @@
-import { Controller, Get, Header, UseGuards } from "@nestjs/common";
+import { Controller, Get, Header, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { AuthzService } from "../auth/authz.service";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { QueryResponseTrendDto } from "./dto/query-response-trend.dto";
 import { ReportsService } from "./reports.service";
 
 // Read-only for every authenticated role — no @Roles restriction, matching
@@ -34,5 +35,15 @@ export class ReportsController {
   async downloadOperationalHealthCsv(@CurrentUser() user: AuthenticatedUser): Promise<string> {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
     return this.reportsService.generateOperationalHealthCsv(accessibleSiteIds);
+  }
+
+  // Same audience/scope as the other two reports above.
+  @Get("response-trend")
+  async getResponseTrend(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: QueryResponseTrendDto,
+  ) {
+    const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
+    return this.reportsService.getResponseTrend(accessibleSiteIds, query.windowDays ?? 30);
   }
 }

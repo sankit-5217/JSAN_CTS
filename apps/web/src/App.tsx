@@ -24,6 +24,7 @@ import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import DnsOutlinedIcon from "@mui/icons-material/DnsOutlined";
 import GppMaybeOutlinedIcon from "@mui/icons-material/GppMaybeOutlined";
 import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
+import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
 import LocalShippingOutlinedIcon from "@mui/icons-material/LocalShippingOutlined";
 import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
@@ -52,6 +53,7 @@ import { CisPage } from "./pages/CisPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { IncidentDetailPage } from "./pages/IncidentDetailPage";
 import { IncidentsPage } from "./pages/IncidentsPage";
+import { InsightsPage } from "./pages/InsightsPage";
 import { KnowledgeDetailPage } from "./pages/KnowledgeDetailPage";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { LoginPage } from "./pages/LoginPage";
@@ -100,6 +102,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Ticketing core",
     items: [
       { label: "Command Center", to: "/", icon: <DashboardOutlinedIcon fontSize="small" /> },
+      { label: "Insights", to: "/insights", icon: <InsightsOutlinedIcon fontSize="small" /> },
       {
         label: "Incidents",
         to: "/incidents",
@@ -371,6 +374,7 @@ export function App() {
       </Route>
       <Route element={<AuthenticatedLayout />}>
         <Route path="/" element={<CommandCenterPage />} />
+        <Route path="/insights" element={<InsightsPage />} />
         <Route path="/sites" element={<SitesPage />} />
         <Route path="/sites/:id" element={<SiteDetailPage />} />
         <Route path="/cis" element={<CisPage />} />

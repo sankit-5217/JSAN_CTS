@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { AlertSeverity, AlertState, CiType, IncidentStatus, Priority } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { OPEN_STATUSES } from "../incidents/incident-transitions";
+import { ResponseTrendWindow } from "./dto/query-response-trend.dto";
 
 export type HealthLevel = "HEALTHY" | "WARNING" | "CRITICAL" | "UNKNOWN";
 
@@ -79,6 +80,41 @@ interface IncidentRow {
   priority: Priority;
   createdAt: Date;
   slaInstances: { breached: boolean; firedMilestones: string[] }[];
+}
+
+export interface DailyResponseTrendPoint {
+  date: string; // YYYY-MM-DD, UTC calendar day
+  incidentsCreated: number;
+  avgAckMinutes: number | null;
+  avgRestoreMinutes: number | null;
+}
+
+export interface PriorityResponseSummary {
+  priority: Priority;
+  incidentCount: number;
+  avgAckMinutes: number | null;
+  avgRestoreMinutes: number | null;
+}
+
+export interface ResponseTrendReport {
+  windowDays: ResponseTrendWindow;
+  from: string;
+  to: string;
+  overall: {
+    incidentCount: number;
+    avgAckMinutes: number | null;
+    avgRestoreMinutes: number | null;
+  };
+  daily: DailyResponseTrendPoint[];
+  byPriority: PriorityResponseSummary[];
+}
+
+interface ResponseTrendRow {
+  siteId: string;
+  priority: Priority;
+  createdAt: Date;
+  acknowledgedAt: Date | null;
+  restoredAt: Date | null;
 }
 
 /**
@@ -282,5 +318,121 @@ export class ReportsService {
     ];
 
     return lines.join("\n");
+  }
+
+  private static dayKey(date: Date): string {
+    return date.toISOString().slice(0, 10);
+  }
+
+  private static average(values: number[]): number | null {
+    if (values.length === 0) {
+      return null;
+    }
+    return Math.round(values.reduce((sum, v) => sum + v, 0) / values.length);
+  }
+
+  private static minutesBetween(start: Date, end: Date): number {
+    return Math.round((end.getTime() - start.getTime()) / 60_000);
+  }
+
+  /**
+   * Incident response trend (spec §10.16, Insights) — MTTA/MTTR over a
+   * rolling window, bucketed by UTC calendar day of incident creation. Not
+   * a live/point-in-time read like {@link getCommandCenterSummary}: this
+   * necessarily looks backward over history, so it's exposed as its own
+   * endpoint/page rather than folded into the live dashboard.
+   */
+  async getResponseTrend(
+    accessibleSiteIds: string[] | null,
+    windowDays: ResponseTrendWindow,
+  ): Promise<ResponseTrendReport> {
+    const to = new Date();
+    const from = new Date(to.getTime() - windowDays * 24 * 60 * 60_000);
+
+    const incidents: ResponseTrendRow[] = await this.prisma.incident.findMany({
+      where: {
+        siteId: accessibleSiteIds ? { in: accessibleSiteIds } : undefined,
+        createdAt: { gte: from, lte: to },
+      },
+      select: {
+        siteId: true,
+        priority: true,
+        createdAt: true,
+        acknowledgedAt: true,
+        restoredAt: true,
+      },
+    });
+
+    // Pre-seed every day in the window so the trend has no gaps for days
+    // with zero incidents created.
+    const byDay = new Map<string, ResponseTrendRow[]>();
+    for (let cursor = new Date(from); cursor <= to; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      byDay.set(ReportsService.dayKey(cursor), []);
+    }
+    for (const incident of incidents) {
+      const key = ReportsService.dayKey(incident.createdAt);
+      const bucket = byDay.get(key);
+      if (bucket) {
+        bucket.push(incident);
+      }
+    }
+
+    const daily: DailyResponseTrendPoint[] = [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, rows]) => ({
+        date,
+        incidentsCreated: rows.length,
+        avgAckMinutes: ReportsService.average(
+          rows
+            .filter((r) => r.acknowledgedAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.acknowledgedAt!)),
+        ),
+        avgRestoreMinutes: ReportsService.average(
+          rows
+            .filter((r) => r.restoredAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.restoredAt!)),
+        ),
+      }));
+
+    const byPriority: PriorityResponseSummary[] = (
+      Object.values(Priority) as Priority[]
+    ).map((priority) => {
+      const rows = incidents.filter((i) => i.priority === priority);
+      return {
+        priority,
+        incidentCount: rows.length,
+        avgAckMinutes: ReportsService.average(
+          rows
+            .filter((r) => r.acknowledgedAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.acknowledgedAt!)),
+        ),
+        avgRestoreMinutes: ReportsService.average(
+          rows
+            .filter((r) => r.restoredAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.restoredAt!)),
+        ),
+      };
+    });
+
+    return {
+      windowDays,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      overall: {
+        incidentCount: incidents.length,
+        avgAckMinutes: ReportsService.average(
+          incidents
+            .filter((r) => r.acknowledgedAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.acknowledgedAt!)),
+        ),
+        avgRestoreMinutes: ReportsService.average(
+          incidents
+            .filter((r) => r.restoredAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.restoredAt!)),
+        ),
+      },
+      daily,
+      byPriority,
+    };
   }
 }

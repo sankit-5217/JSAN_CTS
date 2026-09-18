@@ -230,6 +230,96 @@ describe("ReportsService.generateOperationalHealthCsv", () => {
   });
 });
 
+describe("ReportsService.getResponseTrend", () => {
+  // Anchored to "yesterday, mid-morning" relative to the real clock at test
+  // time, so the fixture always lands inside the window regardless of when
+  // the suite runs, without mocking Date.
+  const yesterday = new Date(Date.now() - 24 * 60 * 60_000);
+  yesterday.setUTCHours(10, 0, 0, 0);
+  const dayKey = yesterday.toISOString().slice(0, 10);
+
+  function trendIncident(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      siteId: "site-a",
+      priority: Priority.P2,
+      createdAt: yesterday,
+      acknowledgedAt: null,
+      restoredAt: null,
+      ...overrides,
+    };
+  }
+
+  it("computes overall and per-day MTTA/MTTR averages in minutes", async () => {
+    const { service } = makeService({
+      incidents: [
+        trendIncident({
+          acknowledgedAt: new Date(yesterday.getTime() + 10 * 60_000), // 10 min ack
+          restoredAt: new Date(yesterday.getTime() + 60 * 60_000), // 60 min restore
+        }),
+        trendIncident({
+          acknowledgedAt: new Date(yesterday.getTime() + 30 * 60_000), // 30 min ack
+          restoredAt: null, // not yet restored — excluded from restore average
+        }),
+      ] as never,
+    });
+
+    const result = await service.getResponseTrend(null, 7);
+
+    expect(result.overall.incidentCount).toBe(2);
+    expect(result.overall.avgAckMinutes).toBe(20); // (10 + 30) / 2
+    expect(result.overall.avgRestoreMinutes).toBe(60); // only the one restored incident
+
+    const day = result.daily.find((d) => d.date === dayKey);
+    expect(day?.incidentsCreated).toBe(2);
+    expect(day?.avgAckMinutes).toBe(20);
+    expect(day?.avgRestoreMinutes).toBe(60);
+  });
+
+  it("fills every day in the window, including days with zero incidents", async () => {
+    const { service } = makeService({ incidents: [] });
+    const result = await service.getResponseTrend(null, 7);
+    expect(result.daily).toHaveLength(8); // inclusive of both endpoints
+    expect(result.daily.every((d) => d.incidentsCreated === 0)).toBe(true);
+    expect(result.daily.every((d) => d.avgAckMinutes === null)).toBe(true);
+  });
+
+  it("breaks the window down by priority", async () => {
+    const { service } = makeService({
+      incidents: [
+        trendIncident({
+          priority: Priority.P1,
+          acknowledgedAt: new Date(yesterday.getTime() + 5 * 60_000),
+        }),
+        trendIncident({
+          priority: Priority.P4,
+          acknowledgedAt: new Date(yesterday.getTime() + 20 * 60_000),
+        }),
+      ] as never,
+    });
+    const result = await service.getResponseTrend(null, 7);
+    const p1 = result.byPriority.find((p) => p.priority === Priority.P1);
+    const p4 = result.byPriority.find((p) => p.priority === Priority.P4);
+    expect(p1?.incidentCount).toBe(1);
+    expect(p1?.avgAckMinutes).toBe(5);
+    expect(p4?.incidentCount).toBe(1);
+    expect(p4?.avgAckMinutes).toBe(20);
+  });
+
+  it("passes the site filter and date window through to the query", async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const prisma = {
+      incident: { findMany },
+    } as unknown as PrismaService;
+    const service = new ReportsService(prisma);
+
+    await service.getResponseTrend(["site-9"], 30);
+    const arg = findMany.mock.calls[0][0];
+    expect(arg.where.siteId).toEqual({ in: ["site-9"] });
+    expect(arg.where.createdAt.gte).toBeInstanceOf(Date);
+    expect(arg.where.createdAt.lte).toBeInstanceOf(Date);
+  });
+});
+
 describe("ReportsService.getCommandCenterSummary — site scoping", () => {
   it("passes accessibleSiteIds through to the site query", async () => {
     const { service, prisma } = makeService({
