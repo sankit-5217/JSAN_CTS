@@ -66,7 +66,7 @@ describe("AlertsService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
   let notifications: { enqueue: jest.Mock };
-  let incidents: { findOpenByCi: jest.Mock; linkAlert: jest.Mock };
+  let incidents: { findOpenByCi: jest.Mock; linkAlert: jest.Mock; notifyAlertRecovered: jest.Mock };
   let alertRules: { resolveRule: jest.Mock };
   let changes: { getActiveMaintenanceWindows: jest.Mock };
   let service: AlertsService;
@@ -78,6 +78,7 @@ describe("AlertsService", () => {
     incidents = {
       findOpenByCi: jest.fn().mockResolvedValue(null),
       linkAlert: jest.fn().mockResolvedValue({ linked: true }),
+      notifyAlertRecovered: jest.fn().mockResolvedValue({ notified: false }),
     };
     alertRules = { resolveRule: jest.fn().mockResolvedValue({ ...DEFAULT_ALERT_RULE }) };
     changes = { getActiveMaintenanceWindows: jest.fn().mockResolvedValue([]) };
@@ -413,6 +414,95 @@ describe("AlertsService", () => {
     });
   });
 
+  describe("alert-recovered-after-resolve notify", () => {
+    it("tells IncidentsService when a correlated alert recovers", async () => {
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-c",
+        state: "OPEN",
+        siteId: "site-1",
+        ciId: "ci-1",
+        correlatedIncidentId: "inc-3",
+        lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+      });
+      prisma.alert.update.mockResolvedValue({
+        id: "alert-c",
+        state: "RECOVERED",
+        correlatedIncidentId: "inc-3",
+      });
+
+      await service.ingest(baseDto({ state: "RECOVERED" }), ACTOR);
+
+      expect(incidents.notifyAlertRecovered).toHaveBeenCalledWith(
+        "inc-3",
+        expect.objectContaining({
+          id: "alert-c",
+          alertType: "disk.predictive_failure",
+          severity: "HIGH",
+          source: "ZABBIX",
+        }),
+        ACTOR,
+      );
+    });
+
+    it("does not call it when the alert was never correlated to an incident", async () => {
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-c",
+        state: "OPEN",
+        siteId: "site-1",
+        ciId: "ci-1",
+        correlatedIncidentId: null,
+        lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+      });
+      prisma.alert.update.mockResolvedValue({ id: "alert-c", state: "RECOVERED" });
+
+      await service.ingest(baseDto({ state: "RECOVERED" }), ACTOR);
+
+      expect(incidents.notifyAlertRecovered).not.toHaveBeenCalled();
+    });
+
+    it("does not call it on a repeat RECOVERED delivery that changes nothing", async () => {
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-c",
+        state: "RECOVERED",
+        siteId: "site-1",
+        ciId: "ci-1",
+        correlatedIncidentId: "inc-3",
+        lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+      });
+      prisma.alert.update.mockResolvedValue({
+        id: "alert-c",
+        state: "RECOVERED",
+        correlatedIncidentId: "inc-3",
+      });
+
+      await service.ingest(baseDto({ state: "RECOVERED" }), ACTOR);
+
+      expect(incidents.notifyAlertRecovered).not.toHaveBeenCalled();
+    });
+
+    it("never fails ingestion when notifyAlertRecovered throws", async () => {
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-c",
+        state: "OPEN",
+        siteId: "site-1",
+        ciId: "ci-1",
+        correlatedIncidentId: "inc-3",
+        lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+      });
+      prisma.alert.update.mockResolvedValue({
+        id: "alert-c",
+        state: "RECOVERED",
+        correlatedIncidentId: "inc-3",
+      });
+      incidents.notifyAlertRecovered.mockRejectedValue(new Error("incidents service down"));
+
+      const result = await service.ingest(baseDto({ state: "RECOVERED" }), ACTOR);
+
+      expect(result.alertId).toBe("alert-c");
+      expect(result.stateChanged).toBe(true);
+    });
+  });
+
   describe("alert rules drive ingest behaviour", () => {
     it("uses the rule's flapping threshold, not a constant", async () => {
       alertRules.resolveRule.mockResolvedValue({ ...DEFAULT_ALERT_RULE, flappingThreshold: 10 });
@@ -475,7 +565,7 @@ describe("AlertsService", () => {
         }),
         recipients: { to: [{ name: "NOC Desk", email: "noc@corp.example" }] },
       }),
-      "ALERT_RAISED:alert-crit",
+      "ALERT_RAISED:alert-crit:paged",
     );
   });
 

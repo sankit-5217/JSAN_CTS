@@ -260,6 +260,17 @@ export class AlertsService {
       );
     }
 
+    // The alert genuinely cleared. If it's still linked to an incident that
+    // was already RESOLVED/CLOSED — most notably via the open-alert override
+    // in IncidentsService.createTransition() — that's the loop closing: tell
+    // the owner the real problem is now actually fixed. IncidentsService
+    // itself no-ops when the incident is still open, so this fires on every
+    // recovery of a correlated alert without needing to know the incident's
+    // status here.
+    if (finalState === "RECOVERED" && stateChanged && correlatedIncidentId) {
+      await this.notifyAlertRecoveredIfAlreadyClosed(correlatedIncidentId, alertId, dto, actor);
+    }
+
     return {
       alertId,
       fingerprint,
@@ -331,6 +342,32 @@ export class AlertsService {
   }
 
   /**
+   * Best-effort — a failure notifying that a recovered alert's incident was
+   * already closed must never fail ingestion (same posture as
+   * correlateToOpenIncident above).
+   */
+  private async notifyAlertRecoveredIfAlreadyClosed(
+    correlatedIncidentId: string,
+    alertId: string,
+    dto: IngestAlertDto,
+    actor: ActorContext,
+  ): Promise<void> {
+    try {
+      await this.incidents.notifyAlertRecovered(
+        correlatedIncidentId,
+        { id: alertId, alertType: dto.alertType, severity: dto.severity, source: dto.source },
+        actor,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `alert ${alertId} recovered-after-resolve notify skipped: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  /**
    * Best-effort: a brand-new CRITICAL alert pages the NOC roster. Only on first
    * sighting (not dedup) so a re-fired trap doesn't re-page. Fully swallowed —
    * ingestion never blocks or fails on the notification.
@@ -362,7 +399,13 @@ export class AlertsService {
           },
           recipients: { to: roster.map((u) => ({ name: u.displayName, email: u.email })) },
         },
-        `ALERT_RAISED:${alertId}`,
+        // BullMQ rejects a custom jobId containing any colon unless it splits
+        // into exactly 3 parts (job.js's legacy repeatable-job compat check) —
+        // `ALERT_RAISED:${alertId}` has only 1 colon (2 parts) and was
+        // silently failing to enqueue every NOC page this session (see the
+        // "failed to enqueue ALERT_RAISED: Custom Id cannot contain :"
+        // warnings). A trailing literal segment restores the required shape.
+        `ALERT_RAISED:${alertId}:paged`,
       );
     } catch (err) {
       this.logger.warn(

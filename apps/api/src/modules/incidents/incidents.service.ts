@@ -677,6 +677,117 @@ export class IncidentsService {
     return { linked: true };
   }
 
+  /**
+   * Recovery counterpart to `linkAlert` — called when an already-linked alert
+   * genuinely clears (monitoring reports RECOVERED). If the ticket is still
+   * open this is just the expected order (condition cleared, engineer
+   * resolves next) and needs no extra signal. If the ticket was already
+   * RESOLVED/CLOSED — most notably via the open-alert override in
+   * `createTransition()` — this closes the loop: writes an
+   * `ALERT_RECOVERED_AFTER_RESOLVE` timeline event + audit record, and
+   * best-effort emails the owner that the real problem is now actually fixed.
+   * No-ops (returns `{ notified: false }`) when the incident is still open,
+   * unknown, or has no owner to tell.
+   */
+  async notifyAlertRecovered(
+    incidentId: string,
+    alert: { id: string; alertType: string; severity: string; source: string },
+    actor: ActorContext,
+  ): Promise<{ notified: boolean }> {
+    const incident = await this.prisma.incident.findUnique({ where: { id: incidentId } });
+    if (!incident) {
+      return { notified: false };
+    }
+    if (incident.status !== IncidentStatus.RESOLVED && incident.status !== IncidentStatus.CLOSED) {
+      return { notified: false };
+    }
+
+    const recoveredAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.incidentEvent.create({
+        data: {
+          incidentId,
+          eventType: "ALERT_RECOVERED_AFTER_RESOLVE",
+          actorId: actor.actorId,
+          payload: {
+            alertId: alert.id,
+            alertType: alert.alertType,
+            severity: alert.severity,
+            source: alert.source,
+            incidentStatusAtRecovery: incident.status,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Incident",
+          entityId: incidentId,
+          action: "ALERT_RECOVERED_AFTER_RESOLVE",
+          after: {
+            alertId: alert.id,
+            alertType: alert.alertType,
+            severity: alert.severity,
+            incidentStatusAtRecovery: incident.status,
+          },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+    });
+
+    await this.notifyAlertRecoveredEmail(
+      incident,
+      { id: alert.id, alertType: alert.alertType, severity: alert.severity },
+      recoveredAt,
+    );
+    return { notified: true };
+  }
+
+  /** Best-effort — same posture as notifyAssignment/notifyStatusChange: a
+   *  failed email must never undo the timeline/audit write that already
+   *  landed. No-ops silently if the ticket has no owner on file. */
+  private async notifyAlertRecoveredEmail(
+    incident: Incident,
+    alert: { id: string; alertType: string; severity: string },
+    recoveredAt: Date,
+  ): Promise<void> {
+    try {
+      if (!incident.ownerUserId) {
+        return;
+      }
+      const owner = await this.prisma.user.findUnique({ where: { id: incident.ownerUserId } });
+      if (!owner?.email) {
+        return;
+      }
+      await this.notifications.enqueue(
+        {
+          event: {
+            kind: "INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE",
+            entity: this.toEntityRef(incident),
+            alertType: alert.alertType,
+            severity: alert.severity,
+            recoveredAt: recoveredAt.toISOString(),
+          },
+          recipients: { to: [{ name: owner.displayName, email: owner.email }] },
+        },
+        // Exactly 2 colons (3 parts split on ":") — BullMQ rejects a custom
+        // jobId with any other colon count (job.js's legacy repeatable-job
+        // compat check), so this must NOT also fold in a colon-bearing ISO
+        // timestamp the way the timeline event's own payload does. Keyed on
+        // the alert row's id, not alertType, so a genuinely later, distinct
+        // recovery for the same alert type still gets its own notification.
+        `INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE:${incident.id}:${alert.id}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `alert-recovered-after-resolve notification skipped for incident ${incident.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   // --- Comments + timeline reads (spec §19, §29) -----------------------
 
   async createComment(

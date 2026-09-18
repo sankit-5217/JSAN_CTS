@@ -66,6 +66,13 @@ export type NotificationEvent =
       windowEnd: string;
     }
   | { kind: "ALERT_RAISED"; entity: EntityRef; alertType: string; state: string }
+  | {
+      kind: "INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE";
+      entity: EntityRef;
+      alertType: string;
+      severity: string;
+      recoveredAt: string;
+    }
   | { kind: "VENDOR_CASE_UPDATE"; entity: EntityRef; note: string; author?: Party }
   | {
       kind: "RISK_STATUS_CHANGED";

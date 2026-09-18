@@ -1569,3 +1569,113 @@ describe("IncidentsService alert correlation", () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
+
+describe("IncidentsService.notifyAlertRecovered", () => {
+  const recoveredAlert = {
+    id: "alert-9",
+    alertType: "hardware.health_degraded",
+    severity: "CRITICAL",
+    source: "REDFISH",
+  };
+
+  it("no-ops when the incident is still open — the expected order needs no extra signal", async () => {
+    const { service, tx, auditService, notifications } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.IN_PROGRESS })),
+    });
+
+    const result = await service.notifyAlertRecovered("incident-1", recoveredAlert, {
+      actorId: "collector-svc",
+    });
+
+    expect(result).toEqual({ notified: false });
+    expect(tx.incidentEvent.create).not.toHaveBeenCalled();
+    expect(auditService.record).not.toHaveBeenCalled();
+    expect(notifications.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("no-ops when the incident is unknown", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(null),
+    });
+    const result = await service.notifyAlertRecovered("missing", recoveredAlert, {
+      actorId: "collector-svc",
+    });
+    expect(result).toEqual({ notified: false });
+    expect(tx.incidentEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("writes the timeline event + audit record and emails the owner when RESOLVED", async () => {
+    const { service, tx, auditService, notifications } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(
+        baseIncident({ status: IncidentStatus.RESOLVED, ownerUserId: engineer.id }),
+      ),
+      userFindUnique: jest.fn().mockResolvedValue({
+        id: engineer.id,
+        email: "engineer@example.com",
+        displayName: "Engineer One",
+      }),
+    });
+
+    const result = await service.notifyAlertRecovered("incident-1", recoveredAlert, {
+      actorId: "collector-svc",
+    });
+
+    expect(result).toEqual({ notified: true });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          incidentId: "incident-1",
+          eventType: "ALERT_RECOVERED_AFTER_RESOLVE",
+          payload: expect.objectContaining({
+            alertId: "alert-9",
+            severity: "CRITICAL",
+            incidentStatusAtRecovery: IncidentStatus.RESOLVED,
+          }),
+        }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "Incident", action: "ALERT_RECOVERED_AFTER_RESOLVE" }),
+      tx,
+    );
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE",
+          alertType: "hardware.health_degraded",
+        }),
+        recipients: { to: [{ name: "Engineer One", email: "engineer@example.com" }] },
+      }),
+      expect.any(String),
+    );
+  });
+
+  it("also notifies when the incident is CLOSED, not just RESOLVED", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.CLOSED })),
+    });
+    const result = await service.notifyAlertRecovered("incident-1", recoveredAlert, {
+      actorId: "collector-svc",
+    });
+    expect(result).toEqual({ notified: true });
+    expect(tx.incidentEvent.create).toHaveBeenCalled();
+  });
+
+  it("still writes the timeline/audit record when the ticket has no owner to email", async () => {
+    const { service, tx, notifications } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.RESOLVED, ownerUserId: null })),
+    });
+    const result = await service.notifyAlertRecovered("incident-1", recoveredAlert, {
+      actorId: "collector-svc",
+    });
+    expect(result).toEqual({ notified: true });
+    expect(tx.incidentEvent.create).toHaveBeenCalled();
+    expect(notifications.enqueue).not.toHaveBeenCalled();
+  });
+});

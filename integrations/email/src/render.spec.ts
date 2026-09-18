@@ -152,6 +152,23 @@ describe("renderNotification", () => {
     expect(mail.text).toContain("Can you confirm the server's asset tag?");
   });
 
+  it("renders an alert recovering after the ticket was already resolved", () => {
+    const event: NotificationEvent = {
+      kind: "INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE",
+      entity: incident(),
+      alertType: "hardware.health_degraded",
+      severity: "CRITICAL",
+      recoveredAt: "2026-09-18T08:31:00.000Z",
+    };
+
+    const mail = renderNotification(event, { to: [JANE] });
+
+    expect(mail.subject).toBe("[SITE01] INC-1042 — hardware.health_degraded recovered");
+    expect(mail.headers["X-OpsDesk-Event"]).toBe("INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE");
+    expect(mail.text).toContain("was just reported RECOVERED by monitoring");
+    expect(mail.text).toContain("already resolved/closed before that happened");
+  });
+
   it("throws EmailRenderError when there are no recipients or no entity key", () => {
     const event: NotificationEvent = {
       kind: "INCIDENT_ASSIGNED",

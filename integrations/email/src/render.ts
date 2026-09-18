@@ -121,6 +121,16 @@ function renderBody(event: NotificationEvent): Rendered {
         urgent: (event.entity.severity ?? "").toUpperCase() === "CRITICAL",
         lines: [`Alert ${event.alertType} is ${event.state} on ${event.entity.key}.`],
       };
+    case "INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE":
+      return {
+        phrase: `${event.alertType} recovered`,
+        lines: [
+          `The ${event.alertType} (${event.severity}) alert linked to ${event.entity.key} was ` +
+            `just reported RECOVERED by monitoring, at ${event.recoveredAt}.`,
+          `This ticket was already resolved/closed before that happened — the underlying ` +
+            `condition has now genuinely cleared.`,
+        ],
+      };
     case "VENDOR_CASE_UPDATE":
       return {
         phrase: "vendor update",
