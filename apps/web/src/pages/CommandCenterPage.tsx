@@ -3,6 +3,7 @@ import { Link as RouterLink } from "react-router-dom";
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardActionArea,
   CardContent,
@@ -15,9 +16,10 @@ import SensorsOutlinedIcon from "@mui/icons-material/SensorsOutlined";
 import HubOutlinedIcon from "@mui/icons-material/HubOutlined";
 import AssignmentTurnedInOutlinedIcon from "@mui/icons-material/AssignmentTurnedInOutlined";
 import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
+import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import { BarChart } from "@mui/x-charts/BarChart";
 import { PieChart } from "@mui/x-charts/PieChart";
-import { apiGet } from "../api/client";
+import { apiDownload, apiGet } from "../api/client";
 
 type HealthLevel = "HEALTHY" | "WARNING" | "CRITICAL" | "UNKNOWN";
 
@@ -30,6 +32,8 @@ interface SiteCard {
   serversTotal: number;
   openIncidents: number;
   oldestOpenIncidentAgeMinutes: number | null;
+  p1p2OpenIncidents: number;
+  slaAtRiskIncidents: number;
 }
 
 interface CommandCenterSummary {
@@ -366,6 +370,8 @@ function LinkedCounterTile({
 export function CommandCenterPage() {
   const [summary, setSummary] = useState<CommandCenterSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     apiGet<CommandCenterSummary>("/reports/command-center")
@@ -373,16 +379,53 @@ export function CommandCenterPage() {
       .catch((err: Error) => setError(err.message));
   }, []);
 
+  async function handleDownloadReport() {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const date = new Date().toISOString().slice(0, 10);
+      await apiDownload(
+        "/reports/operational-health.csv",
+        `operational-health-report-${date}.csv`,
+      );
+    } catch (err) {
+      setDownloadError((err as Error).message);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <>
-      <Typography variant="h4" gutterBottom>
-        Command Center
-      </Typography>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ sm: "center" }}
+        spacing={1}
+        sx={{ mb: 1 }}
+      >
+        <Typography variant="h4" gutterBottom sx={{ mb: { xs: 0, sm: 1 } }}>
+          Command Center
+        </Typography>
+        <Button
+          variant="outlined"
+          startIcon={<DownloadOutlinedIcon />}
+          onClick={handleDownloadReport}
+          disabled={downloading}
+        >
+          {downloading ? "Preparing report..." : "Download report (CSV)"}
+        </Button>
+      </Stack>
       <OperationsFlow />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           Could not load the Command Center summary: {error}. Is `pnpm dev:api` running?
+        </Alert>
+      )}
+      {downloadError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setDownloadError(null)}>
+          Could not generate the report: {downloadError}
         </Alert>
       )}
 

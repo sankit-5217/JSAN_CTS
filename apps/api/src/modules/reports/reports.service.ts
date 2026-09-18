@@ -48,6 +48,8 @@ export interface SiteCard {
   serversTotal: number;
   openIncidents: number;
   oldestOpenIncidentAgeMinutes: number | null;
+  p1p2OpenIncidents: number;
+  slaAtRiskIncidents: number;
 }
 
 export interface CommandCenterSummary {
@@ -174,6 +176,12 @@ export class ReportsService {
         oldestOpenIncidentAgeMinutes: oldestOpen
           ? Math.round((now - oldestOpen.getTime()) / 60_000)
           : null,
+        p1p2OpenIncidents: openSiteIncidents.filter(
+          (i) => i.priority === Priority.P1 || i.priority === Priority.P2,
+        ).length,
+        slaAtRiskIncidents: openSiteIncidents.filter((i) =>
+          i.slaInstances.some((inst) => this.isSlaAtRisk(inst)),
+        ).length,
       };
     });
 
@@ -206,5 +214,73 @@ export class ReportsService {
         reopened: openIncidents.filter((i) => i.status === IncidentStatus.REOPENED).length,
       },
     };
+  }
+
+  /** Quotes a field only when it actually needs it, per RFC 4180. */
+  private csvField(value: string | number): string {
+    const str = String(value);
+    return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  }
+
+  /**
+   * The same snapshot as {@link getCommandCenterSummary}, flattened into a
+   * downloadable CSV — the "is everything working fine" check admins and
+   * managers can pull without opening the app (spec §12: reports owns
+   * read-model output, not just live UI). Point-in-time only; no historical
+   * trend data is stored for this yet.
+   */
+  async generateOperationalHealthCsv(accessibleSiteIds: string[] | null): Promise<string> {
+    const summary = await this.getCommandCenterSummary(accessibleSiteIds);
+    const generatedAt = new Date().toISOString();
+
+    const lines: string[] = [
+      "JSAN Data Center OpsDesk - Operational Health Report",
+      `Generated At,${generatedAt}`,
+      `Sites In Scope,${summary.siteCards.length}`,
+      "",
+      "Summary",
+      "Metric,Value",
+      `Sites Healthy,${summary.counters.sitesHealthy}`,
+      `Sites Warning,${summary.counters.sitesWarning}`,
+      `Sites Critical,${summary.counters.sitesCritical}`,
+      `Servers Reachable,${summary.counters.serversReachable}`,
+      `Servers Total,${summary.counters.serversTotal}`,
+      `Critical Alerts Open,${summary.counters.criticalAlertsOpen}`,
+      `P1/P2 Open Incidents,${summary.counters.p1p2OpenIncidents}`,
+      `SLA At-Risk Incidents,${summary.counters.slaAtRiskIncidents}`,
+      `Unassigned Queue,${summary.queues.unassigned}`,
+      `Awaiting Ack Queue,${summary.queues.awaitingAck}`,
+      `SLA Breach Risk Queue,${summary.queues.slaBreachRisk}`,
+      `Vendor Waiting Queue,${summary.queues.vendorWaiting}`,
+      `Reopened Queue,${summary.queues.reopened}`,
+      "",
+      "Site Breakdown",
+      [
+        "Site Code",
+        "Site Name",
+        "Health",
+        "Servers Reachable",
+        "Servers Total",
+        "Open Incidents",
+        "Oldest Open Incident (min)",
+        "P1/P2 Open Incidents",
+        "SLA At-Risk Incidents",
+      ].join(","),
+      ...summary.siteCards.map((site) =>
+        [
+          this.csvField(site.code),
+          this.csvField(site.name),
+          site.health,
+          site.serversReachable,
+          site.serversTotal,
+          site.openIncidents,
+          site.oldestOpenIncidentAgeMinutes ?? "",
+          site.p1p2OpenIncidents,
+          site.slaAtRiskIncidents,
+        ].join(","),
+      ),
+    ];
+
+    return lines.join("\n");
   }
 }

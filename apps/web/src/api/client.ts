@@ -64,3 +64,28 @@ export function apiUpload<T>(path: string, file: File): Promise<T> {
   formData.append("file", file);
   return request<T>(path, { method: "POST", body: formData });
 }
+
+/**
+ * Fetches a file endpoint (e.g. a CSV report) with the auth header attached
+ * and saves it client-side — a plain `<a href>` can't carry the Bearer
+ * token, so this does the fetch itself and triggers the save via a
+ * throwaway object URL.
+ */
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const token = getStoredToken();
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    throw new Error(`GET ${path} failed: ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}

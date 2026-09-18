@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from "@nestjs/common";
+import { Controller, Get, Header, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { AuthzService } from "../auth/authz.service";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
@@ -24,5 +24,15 @@ export class ReportsController {
   async getCommandCenter(@CurrentUser() user: AuthenticatedUser) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
     return this.reportsService.getCommandCenterSummary(accessibleSiteIds);
+  }
+
+  // Same audience/scope as command-center above — a downloadable snapshot
+  // of the same read model, not a separate authorization surface.
+  @Get("operational-health.csv")
+  @Header("Content-Type", "text/csv; charset=utf-8")
+  @Header("Content-Disposition", 'attachment; filename="operational-health-report.csv"')
+  async downloadOperationalHealthCsv(@CurrentUser() user: AuthenticatedUser): Promise<string> {
+    const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
+    return this.reportsService.generateOperationalHealthCsv(accessibleSiteIds);
   }
 }

@@ -178,6 +178,58 @@ describe("ReportsService.getCommandCenterSummary — incident counters and queue
   });
 });
 
+describe("ReportsService.getCommandCenterSummary — per-site incident counters", () => {
+  it("scopes P1/P2 and SLA-at-risk counts to each site, not the global total", async () => {
+    const { service } = makeService({
+      sites: [
+        { id: "site-a", code: "SITE01", name: "Demo 1" },
+        { id: "site-b", code: "SITE02", name: "Demo 2" },
+      ],
+      incidents: [
+        incident({ siteId: "site-a", priority: Priority.P1, status: IncidentStatus.NEW }),
+        incident({
+          siteId: "site-a",
+          slaInstances: [{ breached: false, firedMilestones: ["ACK_75"] }],
+        }),
+        incident({ siteId: "site-b", priority: Priority.P3, status: IncidentStatus.NEW }),
+      ],
+    });
+    const result = await service.getCommandCenterSummary(null);
+    const siteA = result.siteCards.find((s) => s.code === "SITE01")!;
+    const siteB = result.siteCards.find((s) => s.code === "SITE02")!;
+    expect(siteA.p1p2OpenIncidents).toBe(1);
+    expect(siteA.slaAtRiskIncidents).toBe(1);
+    expect(siteB.p1p2OpenIncidents).toBe(0);
+    expect(siteB.slaAtRiskIncidents).toBe(0);
+  });
+});
+
+describe("ReportsService.generateOperationalHealthCsv", () => {
+  it("includes a summary section and a per-site breakdown row", async () => {
+    const { service } = makeService({
+      sites: [{ id: "site-a", code: "SITE01", name: "Demo Data Center 1" }],
+      cis: [ci({ healthSnapshot: { overallHealth: "HEALTHY" } })],
+      incidents: [incident({ priority: Priority.P1, status: IncidentStatus.NEW })],
+      criticalAlertsOpen: 2,
+    });
+    const csv = await service.generateOperationalHealthCsv(null);
+
+    expect(csv).toContain("Operational Health Report");
+    expect(csv).toContain("Sites Healthy,1");
+    expect(csv).toContain("Critical Alerts Open,2");
+    expect(csv).toContain("Site Breakdown");
+    expect(csv).toContain("SITE01,Demo Data Center 1,HEALTHY");
+  });
+
+  it("quotes a site name that contains a comma", async () => {
+    const { service } = makeService({
+      sites: [{ id: "site-a", code: "SITE01", name: "Demo, Data Center 1" }],
+    });
+    const csv = await service.generateOperationalHealthCsv(null);
+    expect(csv).toContain('"Demo, Data Center 1"');
+  });
+});
+
 describe("ReportsService.getCommandCenterSummary — site scoping", () => {
   it("passes accessibleSiteIds through to the site query", async () => {
     const { service, prisma } = makeService({
