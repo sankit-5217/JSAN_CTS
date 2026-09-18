@@ -81,6 +81,7 @@ function makeService(
     userFindUnique?: jest.Mock;
     userFindMany?: jest.Mock;
     supportGroupFindUnique?: jest.Mock;
+    alertFindMany?: jest.Mock;
   } = {},
 ) {
   const txIncident = {
@@ -138,6 +139,9 @@ function makeService(
     },
     supportGroup: {
       findUnique: overrides.supportGroupFindUnique ?? jest.fn().mockResolvedValue(null),
+    },
+    alert: {
+      findMany: overrides.alertFindMany ?? jest.fn().mockResolvedValue([]),
     },
   } as unknown as PrismaService;
 
@@ -791,6 +795,94 @@ describe("IncidentsService.createTransition", () => {
     });
   });
 
+  it("blocks RESOLVED when a linked alert is still OPEN and no reason is given", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
+        ),
+      alertFindMany: jest
+        .fn()
+        .mockResolvedValue([
+          { id: "alert-1", alertType: "hardware.health_degraded", severity: "CRITICAL", state: "OPEN" },
+        ]),
+    });
+    await expect(
+      service.createTransition(
+        "incident-1",
+        {
+          toStatus: IncidentStatus.RESOLVED,
+          resolutionCategory: "HARDWARE_REPLACED",
+          rootCauseSummary: "Faulty PSU replaced",
+        },
+        { actorId: engineer.id },
+        engineer,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("allows RESOLVED with an open linked alert when a reason overrides it, and records the override on the timeline", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
+        ),
+      alertFindMany: jest
+        .fn()
+        .mockResolvedValue([
+          { id: "alert-1", alertType: "hardware.health_degraded", severity: "CRITICAL", state: "OPEN" },
+        ]),
+    });
+    const result = await service.createTransition(
+      "incident-1",
+      {
+        toStatus: IncidentStatus.RESOLVED,
+        resolutionCategory: "HARDWARE_REPLACED",
+        rootCauseSummary: "Faulty PSU replaced",
+        reason: "Redundant PSU covers load; vendor RMA already in flight",
+      },
+      { actorId: engineer.id },
+      engineer,
+    );
+    expect(result).toMatchObject({ status: IncidentStatus.RESOLVED });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "STATUS_CHANGE",
+          payload: expect.objectContaining({
+            resolvedWithOpenAlerts: [
+              expect.objectContaining({ id: "alert-1", severity: "CRITICAL", state: "OPEN" }),
+            ],
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("allows RESOLVED without a reason when no linked alert is still open", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
+        ),
+      alertFindMany: jest.fn().mockResolvedValue([]),
+    });
+    const result = await service.createTransition(
+      "incident-1",
+      {
+        toStatus: IncidentStatus.RESOLVED,
+        resolutionCategory: "HARDWARE_REPLACED",
+        rootCauseSummary: "Faulty PSU replaced",
+      },
+      { actorId: engineer.id },
+      engineer,
+    );
+    expect(result).toMatchObject({ status: IncidentStatus.RESOLVED });
+  });
+
   it("calls SlaService.onPaused when transitioning to PENDING_VENDOR", async () => {
     const { service, tx, slaService } = makeService({
       incidentFindUnique: jest
@@ -1073,6 +1165,26 @@ describe("IncidentsService.getAvailableTransitions", () => {
         hint: undefined,
       },
     ]);
+  });
+
+  it("hints that a RESOLVED move needs a reason while a linked alert is still OPEN", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
+        ),
+      alertFindMany: jest
+        .fn()
+        .mockResolvedValue([
+          { id: "alert-1", alertType: "hardware.health_degraded", severity: "CRITICAL", state: "OPEN" },
+        ]),
+    });
+    const result = await service.getAvailableTransitions("incident-1", engineer);
+    const resolved = result.find((r) => r.toStatus === IncidentStatus.RESOLVED);
+    expect(resolved?.allowed).toBe(true);
+    expect(resolved?.hint).toMatch(/still OPEN/);
+    expect(resolved?.hint).toMatch(/hardware.health_degraded/);
   });
 
   it("lists every candidate when multiple rules share the same (from, role)", async () => {

@@ -405,6 +405,19 @@ export class IncidentsService {
       throw new BadRequestException(validationError);
     }
 
+    let openAlertsAtResolve: Awaited<ReturnType<typeof this.findOpenAlertsForIncident>> = [];
+    if (dto.toStatus === "RESOLVED") {
+      openAlertsAtResolve = await this.findOpenAlertsForIncident(id);
+      if (openAlertsAtResolve.length > 0 && !dto.reason) {
+        throw new BadRequestException(
+          `${openAlertsAtResolve.length} linked alert(s) are still OPEN — monitoring hasn't ` +
+            `reported the underlying condition as cleared (${this.summarizeAlerts(
+              openAlertsAtResolve,
+            )}). Provide "reason" to resolve anyway.`,
+        );
+      }
+    }
+
     const after = await this.prisma.$transaction(async (tx) => {
       const data: Prisma.IncidentUncheckedUpdateInput = { status: dto.toStatus };
       if (dto.ownerGroupId !== undefined) {
@@ -438,6 +451,16 @@ export class IncidentsService {
             reason: dto.reason,
             resolutionCategory: dto.resolutionCategory,
             rootCauseSummary: dto.rootCauseSummary,
+            ...(openAlertsAtResolve.length > 0
+              ? {
+                  resolvedWithOpenAlerts: openAlertsAtResolve.map((a) => ({
+                    id: a.id,
+                    alertType: a.alertType,
+                    severity: a.severity,
+                    state: a.state,
+                  })),
+                }
+              : {}),
           } as Prisma.InputJsonValue,
         },
       });
@@ -508,21 +531,55 @@ export class IncidentsService {
   ): Promise<AvailableTransition[]> {
     const incident = await this.findOneScoped(id, user);
 
-    return TRANSITION_RULES.filter(
-      (rule) => rule.from.includes(incident.status) && rule.allowedRoles.includes(user.role),
-    ).map((rule) => {
-      const allowed =
-        !rule.requiresOwnerOrElevated || isOwnerOrElevated(user.id, user.role, incident);
-      return {
-        toStatus: rule.to,
-        requiredFields: rule.requiredFields ?? [],
-        allowed,
-        blockedReason: allowed
-          ? undefined
-          : "Only the assigned owner or an elevated role can perform this transition",
-        hint: rule.validate?.(incident, { toStatus: rule.to }),
-      };
+    return Promise.all(
+      TRANSITION_RULES.filter(
+        (rule) => rule.from.includes(incident.status) && rule.allowedRoles.includes(user.role),
+      ).map(async (rule) => {
+        const allowed =
+          !rule.requiresOwnerOrElevated || isOwnerOrElevated(user.id, user.role, incident);
+        let hint = rule.validate?.(incident, { toStatus: rule.to });
+        if (rule.to === "RESOLVED") {
+          const openAlerts = await this.findOpenAlertsForIncident(incident.id);
+          if (openAlerts.length > 0) {
+            hint =
+              `${openAlerts.length} linked alert(s) still OPEN — monitoring hasn't reported ` +
+              `the underlying condition as cleared (${this.summarizeAlerts(openAlerts)}). ` +
+              `A "reason" will be required to resolve anyway.`;
+          }
+        }
+        return {
+          toStatus: rule.to,
+          requiredFields: rule.requiredFields ?? [],
+          allowed,
+          blockedReason: allowed
+            ? undefined
+            : "Only the assigned owner or an elevated role can perform this transition",
+          hint,
+        };
+      }),
+    );
+  }
+
+  /**
+   * Alerts linked to this incident (Alert.correlatedIncidentId) that monitoring
+   * hasn't reported as RECOVERED yet — i.e. the real condition, not just the
+   * ticket, still looks broken. Scalar read only, same as `linkAlert` below
+   * reads/writes this incident's own table for alerts to call; the alerts
+   * module owns the Alert row, this is a read-only cross-reference.
+   *
+   * Used to gate/hint a RESOLVED transition (CLAUDE.md: state transitions are
+   * backend rules — an engineer clicking "Resolve" must not be able to make a
+   * still-alerting CI read as fixed without at least explaining why).
+   */
+  private async findOpenAlertsForIncident(incidentId: string) {
+    return this.prisma.alert.findMany({
+      where: { correlatedIncidentId: incidentId, state: { not: "RECOVERED" } },
+      orderBy: { lastSeenAt: "desc" },
     });
+  }
+
+  private summarizeAlerts(alerts: Array<{ alertType: string; severity: string }>): string {
+    return alerts.map((a) => `${a.alertType} (${a.severity})`).join(", ");
   }
 
   // --- Cross-module: alert correlation (spec §10.10) ------------------

@@ -132,7 +132,13 @@ export const TRANSITION_RULES: TransitionRule[] = [
     requiresOwnerOrElevated: true,
   },
   {
-    // CI health-check validation deferred (alerts/health module, Dev B).
+    // CI health-check validation: IncidentsService.createTransition() blocks
+    // this move (and getAvailableTransitions() surfaces it as a hint) when any
+    // alert still linked to this incident hasn't been reported RECOVERED by
+    // monitoring yet — unless `reason` explicitly overrides it. Not expressed
+    // as `validate()` here because it needs a DB read (open alerts for this
+    // incident) and this table is deliberately pure/sync data, not a place for
+    // service calls.
     from: [IncidentStatus.IN_PROGRESS],
     to: IncidentStatus.RESOLVED,
     allowedRoles: [UserRole.SITE_ENGINEER, UserRole.INFRASTRUCTURE_LEAD, UserRole.SUPER_ADMIN],
