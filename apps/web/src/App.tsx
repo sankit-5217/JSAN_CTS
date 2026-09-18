@@ -16,6 +16,7 @@ import {
   Typography,
 } from "@mui/material";
 import { alpha, darken } from "@mui/material/styles";
+import AccessTimeOutlinedIcon from "@mui/icons-material/AccessTimeOutlined";
 import ApartmentOutlinedIcon from "@mui/icons-material/ApartmentOutlined";
 import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
 import ChangeCircleOutlinedIcon from "@mui/icons-material/ChangeCircleOutlined";
@@ -58,6 +59,7 @@ import { ProblemDetailPage } from "./pages/ProblemDetailPage";
 import { ProblemsPage } from "./pages/ProblemsPage";
 import { RiskDetailPage } from "./pages/RiskDetailPage";
 import { RisksPage } from "./pages/RisksPage";
+import { ShiftsPage } from "./pages/ShiftsPage";
 import { SiteDetailPage } from "./pages/SiteDetailPage";
 import { SitesPage } from "./pages/SitesPage";
 import { SlaPoliciesPage } from "./pages/SlaPoliciesPage";
@@ -114,6 +116,11 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Support groups",
         to: "/support-groups",
         icon: <GroupsOutlinedIcon fontSize="small" />,
+      },
+      {
+        label: "Team & Shifts",
+        to: "/shifts",
+        icon: <AccessTimeOutlinedIcon fontSize="small" />,
       },
     ],
   },
@@ -372,6 +379,7 @@ export function App() {
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
         <Route path="/sla-policies" element={<SlaPoliciesPage />} />
         <Route path="/support-groups" element={<SupportGroupsPage />} />
+        <Route path="/shifts" element={<ShiftsPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/alerts/:id" element={<AlertDetailPage />} />
         <Route path="/alert-rules" element={<AlertRulesPage />} />

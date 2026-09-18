@@ -164,6 +164,7 @@ model User {
   attachments         Attachment[]
   deletedAttachments  Attachment[]         @relation("AttachmentDeletedBy")
   supportGroupMembers SupportGroupMember[]
+  engineerShifts      EngineerShift[]
 
   @@map("users")
 }
@@ -205,6 +206,7 @@ model Site {
   incidents          Incident[]
   userAccess         UserSiteAccess[]
   racks              Rack[]
+  engineerShifts     EngineerShift[]
 
   @@map("sites")
 }
@@ -268,6 +270,36 @@ model SupportGroupMember {
   @@unique([groupId, userId])
   @@index([userId])
   @@map("support_group_members")
+}
+
+/// A recurring weekly duty window for one engineer at one site — e.g. "Sam,
+/// SITE01, Mon-Fri 06:00-14:00". `daysOfWeek` uses the same 0=Sun..6=Sat
+/// convention as SupportCalendar.workdays (calendar.util.ts's `weekday % 7`).
+/// `startTime`/`endTime` are "HH:MM" local to the site's own timezone, same
+/// representation as SupportCalendar.businessStart/businessEnd — interpreted
+/// as an overnight wrap (e.g. 22:00-06:00) whenever startTime > endTime.
+/// `isOnCall` distinguishes a normal working shift from an on-call/escalation
+/// window; `isActive` retires a shift without losing its history (no hard
+/// delete, same posture as AlertRule/SlaPolicy — deactivate, don't delete).
+model EngineerShift {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  siteId     String   @map("site_id")
+  label      String
+  daysOfWeek Int[]    @map("days_of_week")
+  startTime  String   @map("start_time")
+  endTime    String   @map("end_time")
+  isOnCall   Boolean  @default(false) @map("is_on_call")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@index([userId])
+  @@index([siteId])
+  @@map("engineer_shifts")
 }
 
 // ---------------------------------------------------------------------------

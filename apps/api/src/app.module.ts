@@ -12,6 +12,7 @@ import { IncidentsModule } from "./modules/incidents/incidents.module";
 import { SlaModule } from "./modules/sla/sla.module";
 import { AlertsModule } from "./modules/alerts/alerts.module";
 import { WorklogsModule } from "./modules/worklogs/worklogs.module";
+import { ShiftsModule } from "./modules/shifts/shifts.module";
 import { VendorsModule } from "./modules/vendors/vendors.module";
 import { KnowledgeModule } from "./modules/knowledge/knowledge.module";
 import { ChangesModule } from "./modules/changes/changes.module";
@@ -39,6 +40,7 @@ import { AuditModule } from "./modules/audit/audit.module";
     CmdbModule,
     IncidentsModule,
     WorklogsModule,
+    ShiftsModule,
     SlaModule,
     AuditModule,
     ReportsModule,
