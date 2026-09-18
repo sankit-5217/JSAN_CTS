@@ -348,6 +348,12 @@ model HealthSnapshot {
   details         Json?
   lastHeartbeatAt DateTime? @map("last_heartbeat_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
+  // Alert.externalEventId of the currently-open hardware-health alert this CI's
+  // WARNING/CRITICAL streak opened (see MonitoringService.syncHealthAlert) — null
+  // when the CI is HEALTHY/UNKNOWN/MAINTENANCE with no open episode. Lets repeated
+  // bad polls update the same alert row and the eventual HEALTHY poll close it,
+  // instead of a fresh alert per poll.
+  openAlertEventId String? @map("open_alert_event_id")
 
   ci ConfigurationItem @relation(fields: [ciId], references: [id])
 
