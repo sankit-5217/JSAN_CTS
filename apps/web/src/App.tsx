@@ -57,6 +57,7 @@ import { InsightsPage } from "./pages/InsightsPage";
 import { KnowledgeDetailPage } from "./pages/KnowledgeDetailPage";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { LoginPage } from "./pages/LoginPage";
+import { MonitoringPage } from "./pages/MonitoringPage";
 import { ProblemDetailPage } from "./pages/ProblemDetailPage";
 import { ProblemsPage } from "./pages/ProblemsPage";
 import { RiskDetailPage } from "./pages/RiskDetailPage";
@@ -136,6 +137,11 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <NotificationsActiveOutlinedIcon fontSize="small" />,
       },
       { label: "Alert rules", to: "/alert-rules", icon: <TuneOutlinedIcon fontSize="small" /> },
+      {
+        label: "Alert insights",
+        to: "/alert-insights",
+        icon: <InsightsOutlinedIcon fontSize="small" />,
+      },
     ],
   },
   {
@@ -387,6 +393,7 @@ export function App() {
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/alerts/:id" element={<AlertDetailPage />} />
         <Route path="/alert-rules" element={<AlertRulesPage />} />
+        <Route path="/alert-insights" element={<MonitoringPage />} />
         <Route path="/changes" element={<ChangesPage />} />
         <Route path="/changes/:id" element={<ChangeDetailPage />} />
         <Route path="/vendors" element={<VendorsPage />} />

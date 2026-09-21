@@ -37,7 +37,7 @@ export class ReportsController {
     return this.reportsService.generateOperationalHealthCsv(accessibleSiteIds);
   }
 
-  // Same audience/scope as the other two reports above.
+  // Same audience/scope as the other reports above.
   @Get("response-trend")
   async getResponseTrend(
     @CurrentUser() user: AuthenticatedUser,
@@ -45,5 +45,17 @@ export class ReportsController {
   ) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
     return this.reportsService.getResponseTrend(accessibleSiteIds, query.windowDays ?? 30);
+  }
+
+  // Same audience/scope as the other reports above. Reuses
+  // QueryResponseTrendDto — same windowDays shape as response-trend, no
+  // reason to duplicate the DTO for an identical query contract.
+  @Get("alert-insights")
+  async getAlertInsights(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: QueryResponseTrendDto,
+  ) {
+    const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
+    return this.reportsService.getAlertInsights(accessibleSiteIds, query.windowDays ?? 30);
   }
 }

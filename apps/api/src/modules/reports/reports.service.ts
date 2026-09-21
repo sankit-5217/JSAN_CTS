@@ -117,6 +117,38 @@ interface ResponseTrendRow {
   restoredAt: Date | null;
 }
 
+export interface AlertSeverityCount {
+  severity: AlertSeverity;
+  count: number;
+}
+
+export interface AlertStateCount {
+  state: AlertState;
+  count: number;
+}
+
+export interface DailyAlertVolumePoint {
+  date: string; // YYYY-MM-DD, UTC calendar day
+  bySeverity: Record<AlertSeverity, number>;
+  total: number;
+}
+
+export interface AlertInsightsReport {
+  windowDays: ResponseTrendWindow;
+  from: string;
+  to: string;
+  totalNewAlerts: number;
+  bySeverity: AlertSeverityCount[];
+  byState: AlertStateCount[];
+  daily: DailyAlertVolumePoint[];
+}
+
+interface AlertInsightRow {
+  severity: AlertSeverity;
+  state: AlertState;
+  firstSeenAt: Date;
+}
+
 /**
  * Owns: read models/aggregations for the Command Center (spec §10.1, §12).
  * Must not own source-of-truth mutations.
@@ -433,6 +465,73 @@ export class ReportsService {
       },
       daily,
       byPriority,
+    };
+  }
+
+  /**
+   * Alert volume + severity/state mix over a rolling window (spec §10.16,
+   * Insights) — everything scoped to the SAME window (alerts first seen in
+   * [from, to]), so the severity/state breakdown and the daily trend always
+   * describe the same slice of alerts rather than mixing a live count with a
+   * historical one.
+   */
+  async getAlertInsights(
+    accessibleSiteIds: string[] | null,
+    windowDays: ResponseTrendWindow,
+  ): Promise<AlertInsightsReport> {
+    const to = new Date();
+    const from = new Date(to.getTime() - windowDays * 24 * 60 * 60_000);
+
+    const alerts: AlertInsightRow[] = await this.prisma.alert.findMany({
+      where: {
+        siteId: accessibleSiteIds ? { in: accessibleSiteIds } : undefined,
+        firstSeenAt: { gte: from, lte: to },
+      },
+      select: { severity: true, state: true, firstSeenAt: true },
+    });
+
+    const severities = Object.values(AlertSeverity) as AlertSeverity[];
+    const states = Object.values(AlertState) as AlertState[];
+
+    const bySeverity: AlertSeverityCount[] = severities.map((severity) => ({
+      severity,
+      count: alerts.filter((a) => a.severity === severity).length,
+    }));
+    const byState: AlertStateCount[] = states.map((state) => ({
+      state,
+      count: alerts.filter((a) => a.state === state).length,
+    }));
+
+    const byDay = new Map<string, AlertInsightRow[]>();
+    for (let cursor = new Date(from); cursor <= to; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      byDay.set(ReportsService.dayKey(cursor), []);
+    }
+    for (const alert of alerts) {
+      const key = ReportsService.dayKey(alert.firstSeenAt);
+      const bucket = byDay.get(key);
+      if (bucket) {
+        bucket.push(alert);
+      }
+    }
+
+    const daily: DailyAlertVolumePoint[] = [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, rows]) => ({
+        date,
+        bySeverity: Object.fromEntries(
+          severities.map((s) => [s, rows.filter((r) => r.severity === s).length]),
+        ) as Record<AlertSeverity, number>,
+        total: rows.length,
+      }));
+
+    return {
+      windowDays,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      totalNewAlerts: alerts.length,
+      bySeverity,
+      byState,
+      daily,
     };
   }
 }
