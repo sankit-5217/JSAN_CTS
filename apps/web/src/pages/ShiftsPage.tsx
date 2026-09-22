@@ -140,6 +140,13 @@ export function ShiftsPage() {
 
   const sitesById = new Map(sites.map((s) => [s.id, s]));
   const staffById = new Map(staff.map((u) => [u.id, u]));
+  // The live roster is the backend's own authoritative "is this shift's
+  // window open right now" computation (GET /shifts/live already applies
+  // isShiftActiveAt in the site's timezone) — reuse it here instead of
+  // reimplementing that time/timezone math client-side.
+  const activeNowShiftIds = new Set(
+    [...(roster?.working ?? []), ...(roster?.onCall ?? [])].map((e) => e.shiftId),
+  );
 
   const refetchShifts = useCallback(() => {
     apiGet<Shift[]>("/shifts")
@@ -348,12 +355,20 @@ export function ShiftsPage() {
                     <TableCell>Days</TableCell>
                     <TableCell>Window</TableCell>
                     <TableCell>Type</TableCell>
-                    {canWrite && <TableCell>Active</TableCell>}
+                    <TableCell>In window now</TableCell>
+                    {canWrite && (
+                      <TableCell>
+                        <Tooltip title="Turn off to permanently retire this shift schedule — it stops counting toward Working now / On call now regardless of the clock.">
+                          <span>Enabled</span>
+                        </Tooltip>
+                      </TableCell>
+                    )}
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {shifts.map((s) => {
                     const engineer = staffById.get(s.userId);
+                    const inWindowNow = s.isActive && activeNowShiftIds.has(s.id);
                     return (
                       <TableRow key={s.id} sx={{ opacity: s.isActive ? 1 : 0.5 }}>
                         <TableCell>{engineer?.displayName ?? s.userId}</TableCell>
@@ -370,13 +385,33 @@ export function ShiftsPage() {
                             color={s.isOnCall ? "warning" : "default"}
                           />
                         </TableCell>
+                        <TableCell>
+                          {!s.isActive ? (
+                            <Typography variant="caption" color="text.secondary">
+                              Disabled
+                            </Typography>
+                          ) : (
+                            <Chip
+                              size="small"
+                              label={inWindowNow ? "In window" : "Outside window"}
+                              sx={
+                                inWindowNow
+                                  ? { bgcolor: severityColors.healthy, color: "#fff" }
+                                  : undefined
+                              }
+                              variant={inWindowNow ? "filled" : "outlined"}
+                            />
+                          )}
+                        </TableCell>
                         {canWrite && (
                           <TableCell>
-                            <Switch
-                              size="small"
-                              checked={s.isActive}
-                              onChange={() => toggleActive(s)}
-                            />
+                            <Tooltip title="Manual enable/disable only — does not track the clock. Live coverage above is always automatic.">
+                              <Switch
+                                size="small"
+                                checked={s.isActive}
+                                onChange={() => toggleActive(s)}
+                              />
+                            </Tooltip>
                           </TableCell>
                         )}
                       </TableRow>
@@ -384,7 +419,7 @@ export function ShiftsPage() {
                   })}
                   {shifts.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={canWrite ? 7 : 6}>
+                      <TableCell colSpan={canWrite ? 8 : 7}>
                         <Typography variant="body2" color="text.secondary">
                           No shifts configured yet.
                         </Typography>
