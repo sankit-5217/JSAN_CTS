@@ -23,7 +23,7 @@ import {
   Typography,
 } from "@mui/material";
 import { keyframes } from "@mui/material/styles";
-import { apiGet, apiPatch, apiPost } from "../api/client";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
 import { severityColors } from "../theme/theme";
 
@@ -84,6 +84,19 @@ interface UserOption {
   role: string;
 }
 
+interface Skill {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
+interface SkillAssignment {
+  id: string;
+  userId: string;
+  skillId: string;
+  skill: Skill;
+}
+
 function daysSummary(days: number[]): string {
   return [...days]
     .sort((a, b) => a - b)
@@ -135,6 +148,9 @@ export function ShiftsPage() {
   const [sites, setSites] = useState<SiteOption[]>([]);
   const [staff, setStaff] = useState<UserOption[]>([]);
   const [roster, setRoster] = useState<LiveRoster | null>(null);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [assignments, setAssignments] = useState<SkillAssignment[]>([]);
+  const [newSkillName, setNewSkillName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -162,6 +178,14 @@ export function ShiftsPage() {
       });
   }, []);
 
+  const refetchSkills = useCallback(() => {
+    apiGet<Skill[]>("/skills").then(setSkills).catch(() => undefined);
+  }, []);
+
+  const refetchAssignments = useCallback(() => {
+    apiGet<SkillAssignment[]>("/skills/assignments").then(setAssignments).catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     apiGet<Paginated<SiteOption>>("/sites?limit=200")
       .then((res) => setSites(res.items))
@@ -175,7 +199,9 @@ export function ShiftsPage() {
       .catch(() => undefined);
     refetchShifts();
     refetchRoster();
-  }, [refetchShifts, refetchRoster]);
+    refetchSkills();
+    refetchAssignments();
+  }, [refetchShifts, refetchRoster, refetchSkills, refetchAssignments]);
 
   useEffect(() => {
     const ROSTER_POLL_MS = 20_000;
@@ -249,6 +275,50 @@ export function ShiftsPage() {
       await apiPatch(`/shifts/${shift.id}`, { isActive: !shift.isActive });
       refetchShifts();
       refetchRoster();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  // --- Skills --------------------------------------------------------------
+  const createSkillTag = async () => {
+    const name = newSkillName.trim();
+    if (!name) return;
+    setActionError(null);
+    try {
+      await apiPost("/skills", { name });
+      setNewSkillName("");
+      refetchSkills();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const toggleSkillActive = async (skill: Skill) => {
+    setActionError(null);
+    try {
+      await apiPatch(`/skills/${skill.id}`, { isActive: !skill.isActive });
+      refetchSkills();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const assignSkillToEngineer = async (userId: string, skillId: string) => {
+    setActionError(null);
+    try {
+      await apiPost(`/skills/${skillId}/engineers`, { userId });
+      refetchAssignments();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const unassignSkillFromEngineer = async (userId: string, skillId: string) => {
+    setActionError(null);
+    try {
+      await apiDelete(`/skills/${skillId}/engineers/${userId}`);
+      refetchAssignments();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     }
@@ -381,7 +451,7 @@ export function ShiftsPage() {
                         <TableCell>
                           <Chip
                             size="small"
-                            label={s.isOnCall ? "On-call" : "Working"}
+                            label={s.isOnCall ? "On-call" : inWindowNow ? "Working" : "Non-working"}
                             color={s.isOnCall ? "warning" : "default"}
                           />
                         </TableCell>
@@ -396,7 +466,7 @@ export function ShiftsPage() {
                               label={inWindowNow ? "In window" : "Outside window"}
                               sx={
                                 inWindowNow
-                                  ? { bgcolor: severityColors.healthy, color: "#fff" }
+                                  ? { bgcolor: severityColors.healthy, color: "#fffcfc" }
                                   : undefined
                               }
                               variant={inWindowNow ? "filled" : "outlined"}
@@ -536,6 +606,153 @@ export function ShiftsPage() {
             </Paper>
           </Grid>
         )}
+      </Grid>
+
+      <Grid container spacing={3} sx={{ mt: 0.5 }}>
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Skills
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              The skill tags engineers can be assigned. Foundation for skill-based incident
+              routing — nothing routes automatically yet.
+            </Typography>
+
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+              {skills
+                .filter((sk) => sk.isActive)
+                .map((sk) => (
+                  <Chip
+                    key={sk.id}
+                    label={sk.name}
+                    color="primary"
+                    variant="filled"
+                    onDelete={canWrite ? () => toggleSkillActive(sk) : undefined}
+                  />
+                ))}
+              {skills.every((sk) => !sk.isActive) && (
+                <Typography variant="body2" color="text.secondary">
+                  No skill tags yet.
+                </Typography>
+              )}
+            </Stack>
+            {skills.some((sk) => !sk.isActive) && (
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Retired:
+                </Typography>
+                {skills
+                  .filter((sk) => !sk.isActive)
+                  .map((sk) => (
+                    <Chip
+                      key={sk.id}
+                      size="small"
+                      label={sk.name}
+                      variant="outlined"
+                      onClick={canWrite ? () => toggleSkillActive(sk) : undefined}
+                      title={canWrite ? "Click to restore" : undefined}
+                    />
+                  ))}
+              </Stack>
+            )}
+
+            {canWrite && (
+              <Stack direction="row" spacing={1} sx={{ mb: 3 }}>
+                <TextField
+                  size="small"
+                  label="New skill tag"
+                  placeholder="Windows, Storage, Backup…"
+                  value={newSkillName}
+                  onChange={(e) => setNewSkillName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") createSkillTag();
+                  }}
+                />
+                <Button
+                  variant="outlined"
+                  onClick={createSkillTag}
+                  disabled={!newSkillName.trim()}
+                >
+                  Add tag
+                </Button>
+              </Stack>
+            )}
+
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Engineer</TableCell>
+                    <TableCell>Skills</TableCell>
+                    {canWrite && <TableCell>Add skill</TableCell>}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {staff
+                    .filter((u) => u.role !== "CLIENT_MANAGER_VIEWER")
+                    .sort((a, b) => a.displayName.localeCompare(b.displayName))
+                    .map((u) => {
+                      const userAssignments = assignments.filter((a) => a.userId === u.id);
+                      const assignableSkills = skills.filter(
+                        (sk) => sk.isActive && !userAssignments.some((a) => a.skillId === sk.id),
+                      );
+                      return (
+                        <TableRow key={u.id}>
+                          <TableCell>{u.displayName}</TableCell>
+                          <TableCell>
+                            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                              {userAssignments.map((a) => (
+                                <Chip
+                                  key={a.id}
+                                  size="small"
+                                  label={a.skill.name}
+                                  onDelete={
+                                    canWrite
+                                      ? () => unassignSkillFromEngineer(u.id, a.skillId)
+                                      : undefined
+                                  }
+                                />
+                              ))}
+                              {userAssignments.length === 0 && (
+                                <Typography variant="caption" color="text.secondary">
+                                  No skills assigned
+                                </Typography>
+                              )}
+                            </Stack>
+                          </TableCell>
+                          {canWrite && (
+                            <TableCell sx={{ minWidth: 180 }}>
+                              <Autocomplete
+                                size="small"
+                                options={assignableSkills}
+                                getOptionLabel={(sk) => sk.name}
+                                value={null}
+                                onChange={(_, v) => v && assignSkillToEngineer(u.id, v.id)}
+                                noOptionsText="No more skills to add"
+                                renderInput={(params) => (
+                                  <TextField {...params} placeholder="Add skill…" />
+                                )}
+                              />
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    })}
+                  {staff.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={canWrite ? 3 : 2}>
+                        <Typography variant="body2" color="text.secondary">
+                          No staff loaded yet.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+        </Grid>
       </Grid>
     </Box>
   );
