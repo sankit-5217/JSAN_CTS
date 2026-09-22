@@ -20,6 +20,7 @@ import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { AssignSkillDto } from "./dto/assign-skill.dto";
+import { CreateCategorySkillRequirementDto } from "./dto/create-category-skill-requirement.dto";
 import { CreateSkillDto } from "./dto/create-skill.dto";
 import { UpdateSkillDto } from "./dto/update-skill.dto";
 import { SkillsService } from "./skills.service";
@@ -91,5 +92,36 @@ export class SkillsController {
     @CorrelationId() correlationId?: string,
   ) {
     await this.skillsService.unassignSkill(id, userId, { actorId: user.id, correlationId });
+  }
+
+  // Phase 2 of skill-based routing — config only, nothing routes on this
+  // yet. Same write tier as the rest of the skills domain.
+  @Get("category-requirements")
+  findAllCategoryRequirements() {
+    return this.skillsService.findAllCategoryRequirements();
+  }
+
+  @Post("category-requirements")
+  @Roles(...SKILL_WRITE_ROLES)
+  createCategoryRequirement(
+    @Body() dto: CreateCategorySkillRequirementDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.skillsService.createCategoryRequirement(dto, {
+      actorId: user.id,
+      correlationId,
+    });
+  }
+
+  @Delete("category-requirements/:id")
+  @Roles(...SKILL_WRITE_ROLES)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteCategoryRequirement(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    await this.skillsService.deleteCategoryRequirement(id, { actorId: user.id, correlationId });
   }
 }

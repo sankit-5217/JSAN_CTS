@@ -315,7 +315,8 @@ model Skill {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  userSkills UserSkill[]
+  userSkills           UserSkill[]
+  categoryRequirements CategorySkillRequirement[]
 
   @@map("skills")
 }
@@ -336,6 +337,25 @@ model UserSkill {
   @@unique([userId, skillId])
   @@index([skillId])
   @@map("user_skills")
+}
+
+/// Phase 2 of skill-based routing: which skill(s) an incident category
+/// requires — admin-configured, never hard-coded (CLAUDE.md: config over
+/// hard-code). `category` mirrors Incident.category's own free-text field
+/// (no enum exists there either); matched case-insensitively by the
+/// routing engine that will read this table (not yet built — this is
+/// config only, nothing routes on it yet).
+model CategorySkillRequirement {
+  id        String   @id @default(uuid())
+  category  String
+  skillId   String   @map("skill_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  skill Skill @relation(fields: [skillId], references: [id])
+
+  @@unique([category, skillId])
+  @@index([skillId])
+  @@map("category_skill_requirements")
 }
 
 // ---------------------------------------------------------------------------

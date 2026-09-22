@@ -1,9 +1,10 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { Skill, UserSkill } from "@prisma/client";
+import { CategorySkillRequirement, Skill, UserSkill } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import { AssignSkillDto } from "./dto/assign-skill.dto";
+import { CreateCategorySkillRequirementDto } from "./dto/create-category-skill-requirement.dto";
 import { CreateSkillDto } from "./dto/create-skill.dto";
 import { UpdateSkillDto } from "./dto/update-skill.dto";
 
@@ -11,13 +12,17 @@ export interface AssignmentWithSkill extends UserSkill {
   skill: Skill;
 }
 
+export interface CategoryRequirementWithSkill extends CategorySkillRequirement {
+  skill: Skill;
+}
+
 /**
- * Owns: the skill taxonomy and which engineers have which skills (Phase 1
- * of skill-based routing — see docs/monitoring-alert-pipeline.pdf's sibling
- * routing design, not yet built). Must not own: incident assignment itself
- * (incidents module's job) or which skill an alert/category requires (a
- * later routing-engine phase) — this module only tracks the raw taxonomy
- * and membership.
+ * Owns: the skill taxonomy, which engineers have which skills (Phase 1),
+ * and which skill(s) an incident category requires (Phase 2) — all pure
+ * configuration data. Must not own: incident assignment itself (incidents
+ * module's job) or the actual routing/matching algorithm that will read
+ * this data — that's a later routing-engine phase, a consumer of this
+ * module, not part of it.
  */
 @Injectable()
 export class SkillsService {
@@ -166,6 +171,73 @@ export class SkillsService {
           actorId: actor.actorId,
           entityType: "UserSkill",
           entityId: existing.id,
+          action: "DELETE",
+          before: existing,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+    });
+  }
+
+  /** Every category → skill requirement, newest first — small config table,
+   * no pagination needed at this scale. */
+  async findAllCategoryRequirements(): Promise<CategoryRequirementWithSkill[]> {
+    return this.prisma.categorySkillRequirement.findMany({
+      include: { skill: true },
+      orderBy: [{ category: "asc" }, { createdAt: "asc" }],
+    });
+  }
+
+  async createCategoryRequirement(
+    dto: CreateCategorySkillRequirementDto,
+    actor: ActorContext,
+  ): Promise<CategorySkillRequirement> {
+    const category = dto.category.trim();
+    const skill = await this.findSkillOrThrow(dto.skillId);
+    if (!skill.isActive) {
+      throw new BadRequestException(`Skill "${skill.name}" is retired and can't be required`);
+    }
+
+    const existing = await this.prisma.categorySkillRequirement.findFirst({
+      where: { category: { equals: category, mode: "insensitive" }, skillId: dto.skillId },
+    });
+    if (existing) {
+      throw new ConflictException(`"${category}" already requires the "${skill.name}" skill`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const requirement = await tx.categorySkillRequirement.create({
+        data: { category, skillId: dto.skillId },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "CategorySkillRequirement",
+          entityId: requirement.id,
+          action: "CREATE",
+          after: { category, skillId: dto.skillId, skillName: skill.name },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return requirement;
+    });
+  }
+
+  async deleteCategoryRequirement(id: string, actor: ActorContext): Promise<void> {
+    const existing = await this.prisma.categorySkillRequirement.findUnique({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException(`Category skill requirement ${id} not found`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.categorySkillRequirement.delete({ where: { id } });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "CategorySkillRequirement",
+          entityId: id,
           action: "DELETE",
           before: existing,
           correlationId: actor.correlationId,

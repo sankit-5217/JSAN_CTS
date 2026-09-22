@@ -22,6 +22,9 @@ function makeService(
     userFindUnique?: jest.Mock;
     userSkillFindUnique?: jest.Mock;
     userSkillFindMany?: jest.Mock;
+    categoryReqFindMany?: jest.Mock;
+    categoryReqFindFirst?: jest.Mock;
+    categoryReqFindUnique?: jest.Mock;
   } = {},
 ) {
   const txSkill = {
@@ -38,7 +41,13 @@ function makeService(
     ),
     delete: jest.fn().mockResolvedValue(undefined),
   };
-  const tx = { skill: txSkill, userSkill: txUserSkill };
+  const txCategoryReq = {
+    create: jest.fn().mockImplementation(({ data }) =>
+      Promise.resolve({ id: "requirement-1", createdAt: new Date(), ...data }),
+    ),
+    delete: jest.fn().mockResolvedValue(undefined),
+  };
+  const tx = { skill: txSkill, userSkill: txUserSkill, categorySkillRequirement: txCategoryReq };
 
   const prisma = {
     $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
@@ -56,6 +65,13 @@ function makeService(
     userSkill: {
       findUnique: overrides.userSkillFindUnique ?? jest.fn().mockResolvedValue(null),
       findMany: overrides.userSkillFindMany ?? jest.fn().mockResolvedValue([]),
+    },
+    categorySkillRequirement: {
+      findMany: overrides.categoryReqFindMany ?? jest.fn().mockResolvedValue([]),
+      findFirst: overrides.categoryReqFindFirst ?? jest.fn().mockResolvedValue(null),
+      findUnique:
+        overrides.categoryReqFindUnique ??
+        jest.fn().mockResolvedValue({ id: "requirement-1", category: "DATABASE", skillId: "skill-1" }),
     },
   } as unknown as PrismaService;
 
@@ -203,5 +219,89 @@ describe("SkillsService.findAllSkills", () => {
     const { service } = makeService({ skillFindMany: findMany });
     await service.findAllSkills(false);
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: undefined }));
+  });
+});
+
+describe("SkillsService.createCategoryRequirement", () => {
+  it("creates a requirement and audits it", async () => {
+    const { service, tx, auditService } = makeService();
+    await service.createCategoryRequirement({ category: "DATABASE", skillId: "skill-1" }, ACTOR);
+    expect(tx.categorySkillRequirement.create).toHaveBeenCalledWith({
+      data: { category: "DATABASE", skillId: "skill-1" },
+    });
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "CategorySkillRequirement", action: "CREATE" }),
+      tx,
+    );
+  });
+
+  it("trims whitespace from the category", async () => {
+    const { service, tx } = makeService();
+    await service.createCategoryRequirement({ category: "  Storage  ", skillId: "skill-1" }, ACTOR);
+    expect(tx.categorySkillRequirement.create).toHaveBeenCalledWith({
+      data: { category: "Storage", skillId: "skill-1" },
+    });
+  });
+
+  it("rejects an unknown skill", async () => {
+    const { service } = makeService({ skillFindUnique: jest.fn().mockResolvedValue(null) });
+    await expect(
+      service.createCategoryRequirement({ category: "DATABASE", skillId: "ghost" }, ACTOR),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("rejects requiring a retired skill", async () => {
+    const { service } = makeService({
+      skillFindUnique: jest.fn().mockResolvedValue(baseSkill({ isActive: false })),
+    });
+    await expect(
+      service.createCategoryRequirement({ category: "DATABASE", skillId: "skill-1" }, ACTOR),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects a case-insensitive duplicate (category, skill) pair", async () => {
+    const { service } = makeService({
+      categoryReqFindFirst: jest
+        .fn()
+        .mockResolvedValue({ id: "existing", category: "database", skillId: "skill-1" }),
+    });
+    await expect(
+      service.createCategoryRequirement({ category: "DATABASE", skillId: "skill-1" }, ACTOR),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe("SkillsService.deleteCategoryRequirement", () => {
+  it("404s an unknown requirement", async () => {
+    const { service } = makeService({ categoryReqFindUnique: jest.fn().mockResolvedValue(null) });
+    await expect(service.deleteCategoryRequirement("missing", ACTOR)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it("removes the requirement and audits the deletion", async () => {
+    const { service, tx, auditService } = makeService();
+    await service.deleteCategoryRequirement("requirement-1", ACTOR);
+    expect(tx.categorySkillRequirement.delete).toHaveBeenCalledWith({
+      where: { id: "requirement-1" },
+    });
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "CategorySkillRequirement", action: "DELETE" }),
+      tx,
+    );
+  });
+});
+
+describe("SkillsService.findAllCategoryRequirements", () => {
+  it("orders by category then creation time", async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const { service } = makeService({ categoryReqFindMany: findMany });
+    await service.findAllCategoryRequirements();
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: { skill: true },
+        orderBy: [{ category: "asc" }, { createdAt: "asc" }],
+      }),
+    );
   });
 });
