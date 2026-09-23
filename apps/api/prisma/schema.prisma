@@ -208,6 +208,7 @@ model Site {
   userAccess         UserSiteAccess[]
   racks              Rack[]
   engineerShifts     EngineerShift[]
+  routingPolicy      RoutingPolicy?
 
   @@map("sites")
 }
@@ -355,6 +356,23 @@ model CategorySkillRequirement {
   @@unique([category, skillId])
   @@index([skillId])
   @@map("category_skill_requirements")
+}
+
+/// Phase 4 of skill-based routing: per-site switch for auto-assigning a
+/// newly created incident to the top routing suggestion (NEW -> ASSIGNED).
+/// Owned by the routing module; one row per site, created on first write —
+/// a site with no row is treated as autoAssignEnabled = false, so the
+/// feature is opt-in per site (config over hard-code, CLAUDE.md).
+model RoutingPolicy {
+  id                String   @id @default(uuid())
+  siteId            String   @unique @map("site_id")
+  autoAssignEnabled Boolean  @default(false) @map("auto_assign_enabled")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@map("routing_policies")
 }
 
 // ---------------------------------------------------------------------------

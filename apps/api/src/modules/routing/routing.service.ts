@@ -1,9 +1,17 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { OnEvent } from "@nestjs/event-emitter";
+import { Incident } from "@prisma/client";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { ActorContext } from "../../common/types/actor-context.type";
+import { AuditService } from "../audit/audit.service";
+import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { INCIDENT_CREATED_EVENT, IncidentCreatedEvent } from "../incidents/incident-events";
 import { OPEN_STATUSES } from "../incidents/incident-transitions";
 import { IncidentsService } from "../incidents/incidents.service";
 import { RosterEntry, ShiftsService } from "../shifts/shifts.service";
 import { SkillsService } from "../skills/skills.service";
+import { UpdateRoutingPolicyDto } from "./dto/update-routing-policy.dto";
 
 /** Why `candidates` is empty — null whenever there is at least one. */
 export type RoutingEmptyReason =
@@ -36,8 +44,14 @@ export interface RoutingSuggestions {
   uncoveredSkills: RoutingSkillRef[];
 }
 
+/** A site with no RoutingPolicy row reads as this (auto-assign off). */
+export interface RoutingPolicyView {
+  siteId: string;
+  autoAssignEnabled: boolean;
+}
+
 /**
- * Skill-based routing, Phase 3 (suggest only). Rules:
+ * Skill-based routing. Rules (shared by suggestions and auto-assign):
  *  1. Pool = engineers whose shift is live right now at the incident's site
  *     (shifts module's live roster, same timezone logic as GET /shifts/live).
  *  2. A candidate must hold EVERY active skill the incident's category
@@ -47,12 +61,20 @@ export interface RoutingSuggestions {
  *  4. Ranked by fewest open incidents currently owned, then name.
  * Empty results always carry a `reason` instead of silently widening the
  * pool — the desk assigns manually or to a group queue from there.
+ *
+ * Phase 4: when a site's RoutingPolicy.autoAssignEnabled is on, a newly
+ * created incident there is moved NEW -> ASSIGNED to the top candidate
+ * (via IncidentsService.autoAssign, which audits it). No candidate means
+ * no change — the ticket stays NEW for the desk, same as with it off.
  */
 @Injectable()
 export class RoutingService {
   private readonly logger = new Logger(RoutingService.name);
 
   constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+    private readonly authzService: AuthzService,
     private readonly incidentsService: IncidentsService,
     private readonly shiftsService: ShiftsService,
     private readonly skillsService: SkillsService,
@@ -65,7 +87,101 @@ export class RoutingService {
   ): Promise<RoutingSuggestions> {
     // Scoped fetch — enforces the caller's site access (403 otherwise).
     const incident = await this.incidentsService.findOneScoped(incidentId, user);
+    return this.rank(incident, now);
+  }
 
+  /**
+   * Listener for INCIDENT_CREATED_EVENT. Runs after the create has
+   * committed and returned; any failure here is logged and swallowed — a
+   * routing problem must never surface as a failed incident creation, and
+   * the ticket simply stays NEW for the desk.
+   */
+  @OnEvent(INCIDENT_CREATED_EVENT, { async: true })
+  async onIncidentCreated(event: IncidentCreatedEvent, now: Date = new Date()): Promise<void> {
+    try {
+      const policy = await this.prisma.routingPolicy.findUnique({
+        where: { siteId: event.siteId },
+      });
+      if (!policy?.autoAssignEnabled) {
+        return;
+      }
+
+      const incident = await this.incidentsService.findOne(event.incidentId);
+      const suggestions = await this.rank(incident, now);
+      const top = suggestions.candidates[0];
+      if (!top) {
+        this.logger.log(
+          `auto-assign skipped for incident ${incident.id}: ${suggestions.reason ?? "no candidates"}`,
+        );
+        return;
+      }
+
+      const assigned = await this.incidentsService.autoAssign(
+        incident.id,
+        top.userId,
+        event.correlationId,
+      );
+      this.logger.log(
+        assigned
+          ? `auto-assigned incident ${incident.id} to ${top.userId}`
+          : `auto-assign skipped for incident ${incident.id}: no longer NEW and unowned`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `auto-assign failed for incident ${event.incidentId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  async getPolicy(siteId: string, user: AuthenticatedUser): Promise<RoutingPolicyView> {
+    await this.assertSiteAccess(user, siteId);
+    const policy = await this.prisma.routingPolicy.findUnique({ where: { siteId } });
+    return { siteId, autoAssignEnabled: policy?.autoAssignEnabled ?? false };
+  }
+
+  async setPolicy(
+    siteId: string,
+    dto: UpdateRoutingPolicyDto,
+    user: AuthenticatedUser,
+    actor: ActorContext,
+  ): Promise<RoutingPolicyView> {
+    await this.assertSiteAccess(user, siteId);
+    const site = await this.prisma.site.findUnique({ where: { id: siteId } });
+    if (!site) {
+      throw new NotFoundException(`Site ${siteId} not found`);
+    }
+
+    const before = await this.prisma.routingPolicy.findUnique({ where: { siteId } });
+    const after = await this.prisma.$transaction(async (tx) => {
+      const after = await tx.routingPolicy.upsert({
+        where: { siteId },
+        update: { autoAssignEnabled: dto.autoAssignEnabled },
+        create: { siteId, autoAssignEnabled: dto.autoAssignEnabled },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "RoutingPolicy",
+          entityId: after.id,
+          action: before ? "UPDATE" : "CREATE",
+          before: before ?? undefined,
+          after,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return after;
+    });
+    return { siteId, autoAssignEnabled: after.autoAssignEnabled };
+  }
+
+  private async assertSiteAccess(user: AuthenticatedUser, siteId: string): Promise<void> {
+    if (!(await this.authzService.canAccessSite(user, siteId))) {
+      throw new ForbiddenException("You do not have access to this site");
+    }
+  }
+
+  private async rank(incident: Incident, now: Date): Promise<RoutingSuggestions> {
     const result: RoutingSuggestions = {
       incidentId: incident.id,
       category: incident.category,
@@ -88,8 +204,9 @@ export class RoutingService {
       return this.empty(result, "NO_SKILL_REQUIREMENTS");
     }
 
-    // Caller's site access was already checked above, so the roster read
-    // itself runs unrestricted, narrowed to just this incident's site.
+    // Callers have already established access to this incident (scoped
+    // fetch, or the system event path), so the roster read itself runs
+    // unrestricted, narrowed to just this incident's site.
     const roster = await this.shiftsService.getLiveRoster({ siteId: incident.siteId }, null, now);
     const onShift = this.dedupeByEngineer([...roster.working, ...roster.onCall]);
     if (onShift.length === 0) {

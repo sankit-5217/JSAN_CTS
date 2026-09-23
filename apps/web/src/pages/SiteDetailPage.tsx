@@ -13,10 +13,12 @@ import {
   Grid,
   Paper,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from "@mui/material";
-import { apiGet, apiPost } from "../api/client";
+import AltRouteOutlinedIcon from "@mui/icons-material/AltRouteOutlined";
+import { apiGet, apiPatch, apiPost } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
 
 // Mirrors SitesController's SITE_MASTER_WRITE_ROLES — UI-only gate (plan
@@ -51,6 +53,112 @@ interface SupportCalendar {
   workdays: number[];
   holidays: string[];
   is247: boolean;
+}
+
+interface RoutingPolicy {
+  siteId: string;
+  autoAssignEnabled: boolean;
+}
+
+/**
+ * Per-site skill-based routing switch (GET/PATCH /routing/policies/:siteId).
+ * Loaded on its own, not in the page's Promise.all, so a failure here
+ * never blanks the rest of the site page. Write gate mirrors
+ * RoutingPoliciesController's ROUTING_POLICY_WRITE_ROLES (same set as
+ * SITE_MASTER_WRITE_ROLES) — UI-only; the backend re-checks.
+ */
+function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boolean }) {
+  const [policy, setPolicy] = useState<RoutingPolicy | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoadError(null);
+    apiGet<RoutingPolicy>(`/routing/policies/${siteId}`)
+      .then(setPolicy)
+      .catch((err: Error) => setLoadError(err.message));
+  }, [siteId]);
+
+  const toggle = async (autoAssignEnabled: boolean) => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      setPolicy(
+        await apiPatch<RoutingPolicy>(`/routing/policies/${siteId}`, { autoAssignEnabled }),
+      );
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Paper sx={{ p: 2, mb: 3 }}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        spacing={2}
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        justifyContent="space-between"
+      >
+        <Stack direction="row" spacing={1.5} alignItems="flex-start">
+          <AltRouteOutlinedIcon color="primary" sx={{ mt: 0.5 }} />
+          <Box>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography variant="h6">Auto-assign new incidents</Typography>
+              {policy && (
+                <Chip
+                  size="small"
+                  color={policy.autoAssignEnabled ? "success" : "default"}
+                  label={policy.autoAssignEnabled ? "On" : "Off"}
+                />
+              )}
+            </Stack>
+            <Typography variant="body2" color="text.secondary">
+              New incidents at this site go straight to ASSIGNED, owned by the least-busy engineer
+              who is on shift here and has every skill the incident's category requires. If nobody
+              qualifies, the incident stays NEW for the service desk.
+            </Typography>
+          </Box>
+        </Stack>
+        {policy && (
+          <FormControlLabel
+            control={
+              <Switch
+                checked={policy.autoAssignEnabled}
+                disabled={!canWrite || saving}
+                onChange={(e) => toggle(e.target.checked)}
+                inputProps={{ "aria-label": "Auto-assign new incidents" }}
+              />
+            }
+            label={saving ? "Saving…" : ""}
+            sx={{ mr: 0, flexShrink: 0 }}
+          />
+        )}
+      </Stack>
+      {!policy && !loadError && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+          Loading...
+        </Typography>
+      )}
+      {loadError && (
+        <Alert severity="error" sx={{ mt: 1 }}>
+          Could not load the routing policy: {loadError}
+        </Alert>
+      )}
+      {saveError && (
+        <Alert severity="error" sx={{ mt: 1 }} onClose={() => setSaveError(null)}>
+          {saveError}
+        </Alert>
+      )}
+      {policy && !canWrite && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          Only Super Admin, Infrastructure Lead or Delivery/Ops Manager can change this.
+        </Typography>
+      )}
+    </Paper>
+  );
 }
 
 const emptyContactForm = { name: "", role: "", email: "", phone: "", isOnCall: false };
@@ -184,6 +292,8 @@ export function SiteDetailPage() {
           {actionError}
         </Alert>
       )}
+
+      <RoutingPolicyCard siteId={site.id} canWrite={canWrite} />
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>

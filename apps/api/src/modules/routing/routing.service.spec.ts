@@ -1,5 +1,8 @@
-import { ForbiddenException } from "@nestjs/common";
+import { ForbiddenException, NotFoundException } from "@nestjs/common";
 import { UserRole } from "@prisma/client";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
+import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { IncidentsService } from "../incidents/incidents.service";
 import { RosterEntry, ShiftsService } from "../shifts/shifts.service";
@@ -45,8 +48,31 @@ function makeService(opts: {
   onCall?: RosterEntry[];
   skills?: Record<string, string[]>;
   workload?: Record<string, number>;
+  policy?: { id: string; autoAssignEnabled: boolean } | null;
+  autoAssign?: jest.Mock;
+  canAccessSite?: boolean;
 }) {
+  const tx = {
+    routingPolicy: {
+      upsert: jest
+        .fn()
+        .mockImplementation(({ create }) => Promise.resolve({ id: "policy-1", ...create })),
+    },
+  };
+  const prisma = {
+    $transaction: jest.fn((fn: (t: unknown) => unknown) => fn(tx)),
+    routingPolicy: { findUnique: jest.fn().mockResolvedValue(opts.policy ?? null) },
+    site: { findUnique: jest.fn().mockResolvedValue({ id: "site-1" }) },
+  } as unknown as PrismaService;
+  const auditService = {
+    record: jest.fn().mockResolvedValue(undefined),
+  } as unknown as AuditService;
+  const authzService = {
+    canAccessSite: jest.fn().mockResolvedValue(opts.canAccessSite ?? true),
+  } as unknown as AuthzService;
   const incidentsService = {
+    findOne: jest.fn().mockResolvedValue(opts.incident ?? incident()),
+    autoAssign: opts.autoAssign ?? jest.fn().mockResolvedValue({ id: "inc-1" }),
     findOneScoped: opts.findOneScoped ?? jest.fn().mockResolvedValue(opts.incident ?? incident()),
     countOpenOwnedBy: jest.fn().mockResolvedValue(new Map(Object.entries(opts.workload ?? {}))),
   } as unknown as IncidentsService;
@@ -67,9 +93,19 @@ function makeService(opts: {
   } as unknown as SkillsService;
 
   return {
-    service: new RoutingService(incidentsService, shiftsService, skillsService),
+    service: new RoutingService(
+      prisma,
+      auditService,
+      authzService,
+      incidentsService,
+      shiftsService,
+      skillsService,
+    ),
+    prisma,
+    auditService,
     incidentsService,
     shiftsService,
+    tx,
   };
 }
 
@@ -178,5 +214,113 @@ describe("RoutingService.suggestForIncident", () => {
       isOnCall: false,
       isCurrentOwner: true,
     });
+  });
+});
+
+const CREATED = { incidentId: "inc-1", siteId: "site-1", correlationId: "corr-1" };
+
+describe("RoutingService.onIncidentCreated (auto-assign)", () => {
+  it("does nothing when the site has no policy (auto-assign off by default)", async () => {
+    const { service, incidentsService } = makeService({ policy: null });
+    await service.onIncidentCreated(CREATED, NOW);
+    expect(incidentsService.findOne).not.toHaveBeenCalled();
+    expect(incidentsService.autoAssign).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the site's policy is switched off", async () => {
+    const { service, incidentsService } = makeService({
+      policy: { id: "policy-1", autoAssignEnabled: false },
+    });
+    await service.onIncidentCreated(CREATED, NOW);
+    expect(incidentsService.autoAssign).not.toHaveBeenCalled();
+  });
+
+  it("assigns the top-ranked candidate when enabled", async () => {
+    const { service, incidentsService } = makeService({
+      policy: { id: "policy-1", autoAssignEnabled: true },
+      working: [rosterEntry("busy"), rosterEntry("free")],
+      skills: { busy: [STORAGE.id], free: [STORAGE.id] },
+      workload: { busy: 2 },
+    });
+    await service.onIncidentCreated(CREATED, NOW);
+    expect(incidentsService.autoAssign).toHaveBeenCalledWith("inc-1", "free", "corr-1");
+  });
+
+  it("leaves the incident alone when nobody qualifies", async () => {
+    const { service, incidentsService } = makeService({
+      policy: { id: "policy-1", autoAssignEnabled: true },
+      working: [rosterEntry("eng-a")],
+      skills: {},
+    });
+    await service.onIncidentCreated(CREATED, NOW);
+    expect(incidentsService.autoAssign).not.toHaveBeenCalled();
+  });
+
+  it("swallows failures so incident creation is never affected", async () => {
+    const { service } = makeService({
+      policy: { id: "policy-1", autoAssignEnabled: true },
+      working: [rosterEntry("eng-a")],
+      skills: { "eng-a": [STORAGE.id] },
+      autoAssign: jest.fn().mockRejectedValue(new Error("db down")),
+    });
+    await expect(service.onIncidentCreated(CREATED, NOW)).resolves.toBeUndefined();
+  });
+});
+
+describe("RoutingService policy", () => {
+  it("reads an unconfigured site as auto-assign off", async () => {
+    const { service } = makeService({ policy: null });
+    await expect(service.getPolicy("site-1", USER)).resolves.toEqual({
+      siteId: "site-1",
+      autoAssignEnabled: false,
+    });
+  });
+
+  it("rejects callers without access to the site", async () => {
+    const { service } = makeService({ canAccessSite: false });
+    await expect(service.getPolicy("site-1", USER)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.setPolicy("site-1", { autoAssignEnabled: true }, USER, { actorId: "desk-1" }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("404s for an unknown site", async () => {
+    const { service, prisma } = makeService({});
+    (prisma.site.findUnique as jest.Mock).mockResolvedValue(null);
+    await expect(
+      service.setPolicy("nope", { autoAssignEnabled: true }, USER, { actorId: "desk-1" }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("upserts and audits a first-time enable as CREATE", async () => {
+    const { service, tx, auditService } = makeService({ policy: null });
+    const result = await service.setPolicy("site-1", { autoAssignEnabled: true }, USER, {
+      actorId: "admin-1",
+      correlationId: "corr-1",
+    });
+
+    expect(result).toEqual({ siteId: "site-1", autoAssignEnabled: true });
+    expect(tx.routingPolicy.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { siteId: "site-1" } }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityType: "RoutingPolicy",
+        action: "CREATE",
+        actorId: "admin-1",
+      }),
+      tx,
+    );
+  });
+
+  it("audits a change to an existing policy as UPDATE", async () => {
+    const { service, auditService, tx } = makeService({
+      policy: { id: "policy-1", autoAssignEnabled: true },
+    });
+    await service.setPolicy("site-1", { autoAssignEnabled: false }, USER, { actorId: "admin-1" });
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "UPDATE" }),
+      tx,
+    );
   });
 });

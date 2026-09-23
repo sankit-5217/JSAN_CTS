@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ConfigModule } from "@nestjs/config";
+import { EventEmitterModule } from "@nestjs/event-emitter";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { NotificationsModule } from "./common/notifications/notifications.module";
 import { PrismaModule } from "./common/prisma/prisma.module";
@@ -27,6 +28,9 @@ import { AuditModule } from "./modules/audit/audit.module";
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // In-process domain events between modules (e.g. incident.created ->
+    // routing auto-assign) — CLAUDE.md: cross-module calls via events.
+    EventEmitterModule.forRoot(),
     // Applies to every route app-wide (spec §18: "protect login, search,
     // event ingestion and webhook endpoints") — a single global default
     // covers Dev B's alerts ingestion/webhook endpoints too, without

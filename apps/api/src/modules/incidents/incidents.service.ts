@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { createHash, randomUUID } from "crypto";
 import {
   Attachment,
@@ -30,6 +31,7 @@ import {
   ALLOWED_ATTACHMENT_CONTENT_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
 } from "./attachment.constants";
+import { INCIDENT_CREATED_EVENT, IncidentCreatedEvent } from "./incident-events";
 import { CreateIncidentAsCustomerDto } from "./dto/create-incident-as-customer.dto";
 import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
@@ -93,6 +95,7 @@ export class IncidentsService {
     private readonly storageService: StorageService,
     private readonly slaService: SlaService,
     private readonly notifications: NotificationsPublisher,
+    private readonly events: EventEmitter2,
   ) {}
 
   async assertSiteAccess(user: AuthenticatedUser, siteId: string): Promise<void> {
@@ -264,6 +267,12 @@ export class IncidentsService {
     });
 
     await this.notifyServiceDeskOfNewIncident(incident);
+    const createdEvent: IncidentCreatedEvent = {
+      incidentId: incident.id,
+      siteId: incident.siteId,
+      correlationId: actor.correlationId,
+    };
+    this.events.emit(INCIDENT_CREATED_EVENT, createdEvent);
     return incident;
   }
 
@@ -537,6 +546,91 @@ export class IncidentsService {
       await this.notifyGroupAssignment(after, after.ownerGroupId);
     }
 
+    return after;
+  }
+
+  /**
+   * System-initiated NEW -> ASSIGNED for skill-based auto-routing (routing
+   * module, Phase 4). Not createTransition(): there's no authenticated
+   * caller whose role could be checked (a customer-portal ticket's creator
+   * can't assign at all) — the authorization here is the admin-enabled
+   * per-site RoutingPolicy, checked by the routing module before calling.
+   * Everything else matches a human assign: the same rule table's
+   * validate(), a STATUS_CHANGE timeline event, an audit record (actorId
+   * null — no human actor — with `source: SKILL_ROUTING` on the event), and
+   * the usual status/assignment notifications. NEW -> ASSIGNED has no SLA
+   * hook, same as the human path.
+   *
+   * Returns null (and changes nothing) when the incident is no longer NEW
+   * and unowned — e.g. the desk assigned it first. The conditional
+   * updateMany makes that check atomic with the write.
+   */
+  async autoAssign(
+    id: string,
+    ownerUserId: string,
+    correlationId?: string,
+  ): Promise<Incident | null> {
+    const incident = await this.findOne(id);
+    if (
+      incident.status !== IncidentStatus.NEW ||
+      incident.ownerUserId ||
+      incident.ownerGroupId
+    ) {
+      return null;
+    }
+
+    const dto = { toStatus: IncidentStatus.ASSIGNED, ownerUserId };
+    const rule = findTransitionRule(incident.status, dto.toStatus);
+    const validationError = rule?.validate?.(incident, dto);
+    if (!rule || validationError) {
+      throw new BadRequestException(
+        validationError ?? `Cannot transition incident from ${incident.status} to ASSIGNED`,
+      );
+    }
+
+    const after = await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.incident.updateMany({
+        where: { id, status: IncidentStatus.NEW, ownerUserId: null, ownerGroupId: null },
+        data: { status: IncidentStatus.ASSIGNED, ownerUserId },
+      });
+      if (count === 0) {
+        return null;
+      }
+      const after = await tx.incident.findUniqueOrThrow({ where: { id } });
+
+      await tx.incidentEvent.create({
+        data: {
+          incidentId: id,
+          eventType: "STATUS_CHANGE",
+          actorId: null,
+          payload: {
+            from: incident.status,
+            to: after.status,
+            ownerUserId,
+            source: "SKILL_ROUTING",
+          } as Prisma.InputJsonValue,
+        },
+      });
+      await this.auditService.record(
+        {
+          actorId: null,
+          entityType: "Incident",
+          entityId: id,
+          action: "TRANSITION",
+          before: incident,
+          after,
+          correlationId,
+        },
+        tx,
+      );
+      return after;
+    });
+
+    if (!after) {
+      return null;
+    }
+    await this.notifyStatusChange(incident, after, "Auto-assigned by skill-based routing");
+    await this.notifyAssignment(after, ownerUserId);
     return after;
   }
 

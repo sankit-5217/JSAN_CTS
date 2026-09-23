@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { IncidentStatus, Priority, UserRole } from "@prisma/client";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { StorageService } from "../../common/storage/storage.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -84,6 +85,7 @@ function makeService(
     supportGroupFindUnique?: jest.Mock;
     alertFindMany?: jest.Mock;
     incidentGroupBy?: jest.Mock;
+    txUpdateMany?: jest.Mock;
   } = {},
 ) {
   const txIncident = {
@@ -93,6 +95,12 @@ function makeService(
     update: jest
       .fn()
       .mockImplementation(({ data }) => Promise.resolve({ ...baseIncident(), ...data })),
+    updateMany: overrides.txUpdateMany ?? jest.fn().mockResolvedValue({ count: 1 }),
+    findUniqueOrThrow: jest.fn().mockResolvedValue({
+      ...baseIncident(),
+      status: IncidentStatus.ASSIGNED,
+      ownerUserId: "eng-1",
+    }),
     ...overrides.txIncident,
   };
   const tx = {
@@ -177,6 +185,8 @@ function makeService(
     enqueue: jest.fn().mockResolvedValue(undefined),
   } as unknown as NotificationsPublisher;
 
+  const events = { emit: jest.fn() } as unknown as EventEmitter2;
+
   return {
     service: new IncidentsService(
       prisma,
@@ -185,6 +195,7 @@ function makeService(
       storageService,
       slaService,
       notifications,
+      events,
     ),
     prisma,
     auditService,
@@ -192,6 +203,7 @@ function makeService(
     storageService,
     slaService,
     notifications,
+    events,
     tx,
   };
 }
@@ -1753,5 +1765,89 @@ describe("IncidentsService.notifyAlertRecovered", () => {
     expect(result).toEqual({ notified: true });
     expect(tx.incidentEvent.create).toHaveBeenCalled();
     expect(notifications.enqueue).not.toHaveBeenCalled();
+  });
+});
+
+describe("IncidentsService incident.created event", () => {
+  it("emits incident.created after the create commits", async () => {
+    const { service, events } = makeService();
+    const result = await service.create(baseCreateDto, {
+      actorId: "user-1",
+      correlationId: "corr-1",
+    });
+
+    expect(events.emit).toHaveBeenCalledWith("incident.created", {
+      incidentId: result.id,
+      siteId: result.siteId,
+      correlationId: "corr-1",
+    });
+  });
+});
+
+describe("IncidentsService.autoAssign", () => {
+  it("moves a NEW unowned incident to ASSIGNED as a system action", async () => {
+    const { service, tx, auditService, notifications } = makeService({
+      userFindUnique: jest
+        .fn()
+        .mockResolvedValue({ id: "eng-1", displayName: "Eng", email: "eng@corp.example" }),
+    });
+    const result = await service.autoAssign("incident-1", "eng-1", "corr-1");
+
+    expect(result).toMatchObject({ status: IncidentStatus.ASSIGNED, ownerUserId: "eng-1" });
+    expect(tx.incident.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "incident-1",
+        status: IncidentStatus.NEW,
+        ownerUserId: null,
+        ownerGroupId: null,
+      },
+      data: { status: IncidentStatus.ASSIGNED, ownerUserId: "eng-1" },
+    });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "STATUS_CHANGE",
+          actorId: null,
+          payload: expect.objectContaining({ source: "SKILL_ROUTING", to: "ASSIGNED" }),
+        }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "TRANSITION", actorId: null, correlationId: "corr-1" }),
+      tx,
+    );
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ kind: "INCIDENT_ASSIGNED" }),
+      }),
+      "INCIDENT_ASSIGNED:incident-1:eng-1",
+    );
+  });
+
+  it("does nothing when the incident is no longer NEW", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.ASSIGNED })),
+    });
+    await expect(service.autoAssign("incident-1", "eng-1")).resolves.toBeNull();
+    expect(tx.incident.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when someone already owns it", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerGroupId: "group-1" })),
+    });
+    await expect(service.autoAssign("incident-1", "eng-1")).resolves.toBeNull();
+    expect(tx.incident.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("backs off without side effects when the desk assigned it concurrently", async () => {
+    const { service, tx, auditService } = makeService({
+      txUpdateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    });
+    await expect(service.autoAssign("incident-1", "eng-1")).resolves.toBeNull();
+    expect(tx.incidentEvent.create).not.toHaveBeenCalled();
+    expect(auditService.record).not.toHaveBeenCalled();
   });
 });
