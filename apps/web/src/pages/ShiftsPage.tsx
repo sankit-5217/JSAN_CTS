@@ -97,6 +97,13 @@ interface SkillAssignment {
   skill: Skill;
 }
 
+interface CategoryRequirement {
+  id: string;
+  category: string;
+  skillId: string;
+  skill: Skill;
+}
+
 function daysSummary(days: number[]): string {
   return [...days]
     .sort((a, b) => a - b)
@@ -151,6 +158,9 @@ export function ShiftsPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [assignments, setAssignments] = useState<SkillAssignment[]>([]);
   const [newSkillName, setNewSkillName] = useState("");
+  const [categoryRequirements, setCategoryRequirements] = useState<CategoryRequirement[]>([]);
+  const [newReqCategory, setNewReqCategory] = useState("");
+  const [newReqSkill, setNewReqSkill] = useState<Skill | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -186,6 +196,12 @@ export function ShiftsPage() {
     apiGet<SkillAssignment[]>("/skills/assignments").then(setAssignments).catch(() => undefined);
   }, []);
 
+  const refetchCategoryRequirements = useCallback(() => {
+    apiGet<CategoryRequirement[]>("/skills/category-requirements")
+      .then(setCategoryRequirements)
+      .catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     apiGet<Paginated<SiteOption>>("/sites?limit=200")
       .then((res) => setSites(res.items))
@@ -201,7 +217,14 @@ export function ShiftsPage() {
     refetchRoster();
     refetchSkills();
     refetchAssignments();
-  }, [refetchShifts, refetchRoster, refetchSkills, refetchAssignments]);
+    refetchCategoryRequirements();
+  }, [
+    refetchShifts,
+    refetchRoster,
+    refetchSkills,
+    refetchAssignments,
+    refetchCategoryRequirements,
+  ]);
 
   useEffect(() => {
     const ROSTER_POLL_MS = 20_000;
@@ -319,6 +342,32 @@ export function ShiftsPage() {
     try {
       await apiDelete(`/skills/${skillId}/engineers/${userId}`);
       refetchAssignments();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  // --- Category → skill requirements (Phase 2 of skill-based routing;
+  // config only — nothing routes on this yet) --------------------------
+  const createCategoryRequirement = async () => {
+    const category = newReqCategory.trim();
+    if (!category || !newReqSkill) return;
+    setActionError(null);
+    try {
+      await apiPost("/skills/category-requirements", { category, skillId: newReqSkill.id });
+      setNewReqCategory("");
+      setNewReqSkill(null);
+      refetchCategoryRequirements();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const deleteCategoryRequirement = async (id: string) => {
+    setActionError(null);
+    try {
+      await apiDelete(`/skills/category-requirements/${id}`);
+      refetchCategoryRequirements();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     }
@@ -744,6 +793,92 @@ export function ShiftsPage() {
                       <TableCell colSpan={canWrite ? 3 : 2}>
                         <Typography variant="body2" color="text.secondary">
                           No staff loaded yet.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Category → skill requirements
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Which skill(s) an incident category needs — e.g. a "DATABASE" category requires the
+              Database skill. Also foundation only: nothing routes an incident automatically yet.
+            </Typography>
+
+            {canWrite && (
+              <Stack direction="row" spacing={1} sx={{ mb: 2 }} alignItems="flex-start">
+                <TextField
+                  size="small"
+                  label="Category"
+                  placeholder="DATABASE, HARDWARE_FAILURE…"
+                  value={newReqCategory}
+                  onChange={(e) => setNewReqCategory(e.target.value)}
+                />
+                <Autocomplete
+                  size="small"
+                  sx={{ minWidth: 200 }}
+                  options={skills.filter((sk) => sk.isActive)}
+                  getOptionLabel={(sk) => sk.name}
+                  isOptionEqualToValue={(o, v) => o.id === v.id}
+                  value={newReqSkill}
+                  onChange={(_, v) => setNewReqSkill(v)}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Required skill" />
+                  )}
+                />
+                <Button
+                  variant="outlined"
+                  onClick={createCategoryRequirement}
+                  disabled={!newReqCategory.trim() || !newReqSkill}
+                  sx={{ mt: 0.25 }}
+                >
+                  Add
+                </Button>
+              </Stack>
+            )}
+
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Category</TableCell>
+                    <TableCell>Required skill</TableCell>
+                    {canWrite && <TableCell />}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {categoryRequirements.map((req) => (
+                    <TableRow key={req.id}>
+                      <TableCell>{req.category}</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={req.skill.name} />
+                      </TableCell>
+                      {canWrite && (
+                        <TableCell align="right">
+                          <Button
+                            size="small"
+                            color="error"
+                            onClick={() => deleteCategoryRequirement(req.id)}
+                          >
+                            Remove
+                          </Button>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
+                  {categoryRequirements.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={canWrite ? 3 : 2}>
+                        <Typography variant="body2" color="text.secondary">
+                          No category skill requirements configured yet.
                         </Typography>
                       </TableCell>
                     </TableRow>
