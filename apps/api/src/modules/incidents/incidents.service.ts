@@ -182,6 +182,28 @@ export class IncidentsService {
     return incident;
   }
 
+  /** userId -> number of open incidents they currently own, across all
+   * sites (an engineer's workload doesn't stop at one site). Engineers with
+   * no open incidents are simply absent from the map. Used by the routing
+   * module's least-loaded tie-break. */
+  async countOpenOwnedBy(userIds: string[]): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (userIds.length === 0) {
+      return counts;
+    }
+    const rows = await this.prisma.incident.groupBy({
+      by: ["ownerUserId"],
+      where: { ownerUserId: { in: userIds }, status: { in: OPEN_STATUSES } },
+      _count: { _all: true },
+    });
+    for (const row of rows) {
+      if (row.ownerUserId) {
+        counts.set(row.ownerUserId, row._count._all);
+      }
+    }
+    return counts;
+  }
+
   private async nextIncidentNo(tx: Prisma.TransactionClient): Promise<string> {
     // A real sequence, not count()+1 — avoids a race under concurrent
     // incident creation producing a duplicate/failed-unique-constraint

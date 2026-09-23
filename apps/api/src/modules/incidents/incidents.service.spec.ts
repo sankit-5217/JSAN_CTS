@@ -8,6 +8,7 @@ import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { SlaService } from "../sla/sla.service";
 import { IncidentsService } from "./incidents.service";
+import { OPEN_STATUSES } from "./incident-transitions";
 
 const engineer: AuthenticatedUser = {
   id: "engineer-1",
@@ -82,6 +83,7 @@ function makeService(
     userFindMany?: jest.Mock;
     supportGroupFindUnique?: jest.Mock;
     alertFindMany?: jest.Mock;
+    incidentGroupBy?: jest.Mock;
   } = {},
 ) {
   const txIncident = {
@@ -123,6 +125,7 @@ function makeService(
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
+      groupBy: overrides.incidentGroupBy ?? jest.fn().mockResolvedValue([]),
     },
     incidentComment: { findMany: jest.fn().mockResolvedValue([]) },
     incidentEvent: {
@@ -684,6 +687,31 @@ describe("IncidentsService.findAll", () => {
         where: expect.objectContaining({ reportedByUserId: undefined }),
       }),
     );
+  });
+});
+
+describe("IncidentsService.countOpenOwnedBy", () => {
+  it("counts only open incidents for the given owners", async () => {
+    const incidentGroupBy = jest
+      .fn()
+      .mockResolvedValue([{ ownerUserId: "eng-1", _count: { _all: 2 } }]);
+    const { service } = makeService({ incidentGroupBy });
+    const counts = await service.countOpenOwnedBy(["eng-1", "eng-2"]);
+
+    expect(counts.get("eng-1")).toBe(2);
+    expect(counts.has("eng-2")).toBe(false);
+    expect(incidentGroupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { ownerUserId: { in: ["eng-1", "eng-2"] }, status: { in: OPEN_STATUSES } },
+      }),
+    );
+  });
+
+  it("skips the query entirely for an empty list", async () => {
+    const incidentGroupBy = jest.fn();
+    const { service } = makeService({ incidentGroupBy });
+    expect((await service.countOpenOwnedBy([])).size).toBe(0);
+    expect(incidentGroupBy).not.toHaveBeenCalled();
   });
 });
 

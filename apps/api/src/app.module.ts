@@ -14,6 +14,7 @@ import { AlertsModule } from "./modules/alerts/alerts.module";
 import { WorklogsModule } from "./modules/worklogs/worklogs.module";
 import { ShiftsModule } from "./modules/shifts/shifts.module";
 import { SkillsModule } from "./modules/skills/skills.module";
+import { RoutingModule } from "./modules/routing/routing.module";
 import { VendorsModule } from "./modules/vendors/vendors.module";
 import { KnowledgeModule } from "./modules/knowledge/knowledge.module";
 import { ChangesModule } from "./modules/changes/changes.module";
@@ -43,6 +44,7 @@ import { AuditModule } from "./modules/audit/audit.module";
     WorklogsModule,
     ShiftsModule,
     SkillsModule,
+    RoutingModule,
     SlaModule,
     AuditModule,
     ReportsModule,

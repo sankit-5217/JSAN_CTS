@@ -94,8 +94,8 @@ export class SkillsController {
     await this.skillsService.unassignSkill(id, userId, { actorId: user.id, correlationId });
   }
 
-  // Phase 2 of skill-based routing — config only, nothing routes on this
-  // yet. Same write tier as the rest of the skills domain.
+  // Phase 2 of skill-based routing — config read by the routing module's
+  // suggestions. Same write tier as the rest of the skills domain.
   @Get("category-requirements")
   findAllCategoryRequirements() {
     return this.skillsService.findAllCategoryRequirements();

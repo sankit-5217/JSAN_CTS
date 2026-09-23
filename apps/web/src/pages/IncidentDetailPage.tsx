@@ -276,6 +276,134 @@ function GroupPicker({
   );
 }
 
+interface RoutingCandidate {
+  userId: string;
+  displayName: string;
+  email: string;
+  shiftLabel: string;
+  isOnCall: boolean;
+  openIncidentCount: number;
+  isCurrentOwner: boolean;
+}
+
+interface RoutingSuggestions {
+  requiredSkills: { id: string; name: string }[];
+  candidates: RoutingCandidate[];
+  reason:
+    | "INCIDENT_NOT_OPEN"
+    | "NO_SKILL_REQUIREMENTS"
+    | "NO_ENGINEERS_ON_SHIFT"
+    | "NO_QUALIFIED_ENGINEER"
+    | null;
+  uncoveredSkills: { id: string; name: string }[];
+}
+
+function routingEmptyMessage(s: RoutingSuggestions, category: string): string {
+  switch (s.reason) {
+    case "INCIDENT_NOT_OPEN":
+      return "This incident is no longer open, so no routing suggestions are shown.";
+    case "NO_SKILL_REQUIREMENTS":
+      return `No skills are configured as required for category "${category}" — assign manually or to a group.`;
+    case "NO_ENGINEERS_ON_SHIFT":
+      return "Nobody is on shift at this site right now — assign manually or to a group queue.";
+    case "NO_QUALIFIED_ENGINEER":
+      return `Nobody on shift here has every required skill${
+        s.uncoveredSkills.length
+          ? ` (missing: ${s.uncoveredSkills.map((k) => k.name).join(", ")})`
+          : ""
+      } — assign manually or to a group queue.`;
+    default:
+      return "No suggestions.";
+  }
+}
+
+/**
+ * Skill-based routing suggestions (GET /incidents/:id/routing-suggestions).
+ * Suggest only: "Use" just fills the Owner picker — the assignment still
+ * goes through Save changes (PATCH /incidents/:id), the existing audited
+ * reassign path. Re-fetched when the category/status/owner changes, not on
+ * every live-poll tick.
+ */
+function RoutingSuggestionsPanel({
+  incident,
+  onPick,
+}: {
+  incident: Incident;
+  onPick: (engineer: EngineerOption) => void;
+}) {
+  const [suggestions, setSuggestions] = useState<RoutingSuggestions | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    apiGet<RoutingSuggestions>(`/incidents/${incident.id}/routing-suggestions`)
+      .then(setSuggestions)
+      .catch((err: Error) => setLoadError(err.message))
+      .finally(() => setLoading(false));
+  }, [incident.id]);
+
+  useEffect(load, [load, incident.category, incident.status, incident.ownerUserId]);
+
+  return (
+    <Box>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+        <Typography variant="subtitle2">Suggested engineers</Typography>
+        {suggestions && suggestions.requiredSkills.length > 0 && (
+          <Typography variant="caption" color="text.secondary">
+            needs {suggestions.requiredSkills.map((k) => k.name).join(", ")}
+          </Typography>
+        )}
+        <Button size="small" onClick={load} disabled={loading}>
+          Refresh
+        </Button>
+      </Stack>
+      {loadError ? (
+        <Alert severity="error">Could not load suggestions: {loadError}</Alert>
+      ) : !suggestions ? (
+        <Typography variant="body2" color="text.secondary">
+          Loading...
+        </Typography>
+      ) : suggestions.candidates.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          {routingEmptyMessage(suggestions, incident.category)}
+        </Typography>
+      ) : (
+        <Stack spacing={1}>
+          {suggestions.candidates.map((c) => (
+            <Stack key={c.userId} direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+              <Typography variant="body2" sx={{ minWidth: 160 }}>
+                {c.displayName}
+              </Typography>
+              <Chip
+                size="small"
+                label={c.isOnCall ? `on-call · ${c.shiftLabel}` : c.shiftLabel}
+                color={c.isOnCall ? "warning" : "default"}
+              />
+              <Typography variant="caption" color="text.secondary">
+                {c.openIncidentCount} open
+              </Typography>
+              {c.isCurrentOwner ? (
+                <Chip size="small" color="success" label="current owner" />
+              ) : (
+                <Button
+                  size="small"
+                  onClick={() =>
+                    onPick({ id: c.userId, displayName: c.displayName, email: c.email })
+                  }
+                >
+                  Use
+                </Button>
+              )}
+            </Stack>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  );
+}
+
 /**
  * Incident workspace (frontend-depth plan, Steps 3-4): header, SLA
  * countdown snapshot, status transition, comments, worklogs (add +
@@ -811,6 +939,11 @@ export function IncidentDetailPage() {
               disabled={!canRoute}
             />
           </Grid>
+          {canRoute && (
+            <Grid item xs={12}>
+              <RoutingSuggestionsPanel incident={incident} onPick={setEditOwnerUser} />
+            </Grid>
+          )}
           <Grid item xs={12}>
             <Button
               variant="contained"

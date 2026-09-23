@@ -305,3 +305,36 @@ describe("SkillsService.findAllCategoryRequirements", () => {
     );
   });
 });
+
+describe("SkillsService routing reads", () => {
+  it("matches category requirements case-insensitively and only on active skills", async () => {
+    const categoryReqFindMany = jest
+      .fn()
+      .mockResolvedValue([{ id: "requirement-1", skill: baseSkill({ name: "Storage" }) }]);
+    const { service } = makeService({ categoryReqFindMany });
+    const skills = await service.findRequiredSkillsForCategory("  storage ");
+
+    expect(skills).toEqual([baseSkill({ name: "Storage" })]);
+    expect(categoryReqFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          category: { equals: "storage", mode: "insensitive" },
+          skill: { isActive: true },
+        },
+      }),
+    );
+  });
+
+  it("groups held skill ids by engineer", async () => {
+    const userSkillFindMany = jest.fn().mockResolvedValue([
+      { userId: "eng-1", skillId: "skill-1" },
+      { userId: "eng-1", skillId: "skill-2" },
+      { userId: "eng-2", skillId: "skill-1" },
+    ]);
+    const { service } = makeService({ userSkillFindMany });
+    const byUser = await service.findSkillIdsByUser(["eng-1", "eng-2"]);
+
+    expect([...(byUser.get("eng-1") ?? [])]).toEqual(["skill-1", "skill-2"]);
+    expect([...(byUser.get("eng-2") ?? [])]).toEqual(["skill-1"]);
+  });
+});

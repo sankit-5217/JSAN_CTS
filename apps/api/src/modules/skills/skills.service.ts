@@ -20,9 +20,8 @@ export interface CategoryRequirementWithSkill extends CategorySkillRequirement {
  * Owns: the skill taxonomy, which engineers have which skills (Phase 1),
  * and which skill(s) an incident category requires (Phase 2) — all pure
  * configuration data. Must not own: incident assignment itself (incidents
- * module's job) or the actual routing/matching algorithm that will read
- * this data — that's a later routing-engine phase, a consumer of this
- * module, not part of it.
+ * module's job) or the routing/matching algorithm that reads this data —
+ * that's the routing module (Phase 3), a consumer of this module.
  */
 @Injectable()
 export class SkillsService {
@@ -187,6 +186,39 @@ export class SkillsService {
       include: { skill: true },
       orderBy: [{ category: "asc" }, { createdAt: "asc" }],
     });
+  }
+
+  /** Active skills a category requires, matched case-insensitively (the
+   * category is free text on Incident too). A requirement pointing at a
+   * retired skill is ignored — nobody can be newly given a retired skill,
+   * so honouring it would permanently block routing for that category. */
+  async findRequiredSkillsForCategory(category: string): Promise<Skill[]> {
+    const requirements = await this.prisma.categorySkillRequirement.findMany({
+      where: {
+        category: { equals: category.trim(), mode: "insensitive" },
+        skill: { isActive: true },
+      },
+      include: { skill: true },
+    });
+    return requirements.map((r) => r.skill);
+  }
+
+  /** userId -> set of skillIds held, for the given engineers only. */
+  async findSkillIdsByUser(userIds: string[]): Promise<Map<string, Set<string>>> {
+    const byUser = new Map<string, Set<string>>();
+    if (userIds.length === 0) {
+      return byUser;
+    }
+    const rows = await this.prisma.userSkill.findMany({
+      where: { userId: { in: userIds } },
+      select: { userId: true, skillId: true },
+    });
+    for (const row of rows) {
+      const held = byUser.get(row.userId) ?? new Set<string>();
+      held.add(row.skillId);
+      byUser.set(row.userId, held);
+    }
+    return byUser;
   }
 
   async createCategoryRequirement(
