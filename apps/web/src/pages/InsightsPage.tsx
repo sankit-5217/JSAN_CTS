@@ -169,7 +169,7 @@ export function InsightsPage() {
           <Card sx={{ mb: 3 }}>
             <CardContent>
               <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                Daily average response time (minutes)
+                Daily average response time
               </Typography>
               {report.daily.every((d) => d.incidentsCreated === 0) ? (
                 <Typography color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
@@ -177,28 +177,30 @@ export function InsightsPage() {
                 </Typography>
               ) : (
                 <LineChart
-                  xAxis={[
-                    {
-                      scaleType: "point",
-                      data: report.daily.map((d) => d.date.slice(5)), // MM-DD
-                    },
-                  ]}
-                  series={[
-                    {
-                      label: "Avg time to acknowledge",
-                      data: report.daily.map((d) => d.avgAckMinutes),
-                      color: "#1976d2",
-                      connectNulls: true,
-                    },
-                    {
-                      label: "Avg time to restore",
-                      data: report.daily.map((d) => d.avgRestoreMinutes),
-                      color: "#d32f2f",
-                      connectNulls: true,
-                    },
-                  ]}
-                  height={280}
-                />
+  xAxis={[
+    {
+      scaleType: "point",
+      data: report.daily.map((d) => d.date.slice(5)), // MM-DD
+    },
+  ]}
+  series={[
+    {
+      label: "Avg time to acknowledge",
+      data: report.daily.map((d) => d.avgAckMinutes),
+      color: "#1976d2",
+      connectNulls: true,
+      valueFormatter: (value) => formatMinutes(value),
+    },
+    {
+      label: "Avg time to restore",
+      data: report.daily.map((d) => d.avgRestoreMinutes),
+      color: "#d32f2f",
+      connectNulls: true,
+      valueFormatter: (value) => formatMinutes(value),
+    },
+  ]}
+  height={280}
+/>
               )}
             </CardContent>
           </Card>
