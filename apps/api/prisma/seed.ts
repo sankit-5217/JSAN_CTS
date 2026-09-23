@@ -20,7 +20,8 @@ const prisma = new PrismaClient();
  * added in Sprint 3; an incident walked through a few transitions, a
  * comment, and a worklog added in Sprint 4/5; SLA policies, a support
  * calendar per site, and the seeded incident's SLA instance added in
- * Sprint 6. No seeded attachment — that needs a live MinIO the local dev
+ * Sprint 6; skills, category requirements and engineer shifts for the
+ * skill-based routing demo. No seeded attachment — that needs a live MinIO the local dev
  * setup doesn't have running (Sprint 5 plan, Decision 7).
  * Extend per §31 "Recommended First Development Demo" as later sprints
  * land — do not seed production data here.
@@ -52,6 +53,18 @@ async function findOrCreateSupportCalendar(
   }
   return prisma.supportCalendar.create({ data });
 }
+
+/** EngineerShift has no natural unique key either — same find-or-create,
+ * guarded on engineer + site + label. */
+async function findOrCreateShift(data: Prisma.EngineerShiftUncheckedCreateInput): Promise<void> {
+  const existing = await prisma.engineerShift.findFirst({
+    where: { userId: data.userId, siteId: data.siteId, label: data.label },
+  });
+  if (!existing) {
+    await prisma.engineerShift.create({ data });
+  }
+}
+
 async function main() {
   const site1 = await prisma.site.upsert({
     where: { code: "SITE01" },
@@ -320,6 +333,102 @@ async function main() {
     await prisma.alertRule.create({ data: { name: "default" } });
   }
 
+  // Skill-based routing demo (skills Phases 1-2 + routing Phase 3). A second
+  // SITE01 engineer so GET /incidents/:id/routing-suggestions has something
+  // to rank: on INC-SEED-001 (HARDWARE_FAILURE, owned by siteEngineer1) the
+  // new engineer comes first with 0 open incidents and siteEngineer1 shows
+  // as current owner. STORAGE_FAILURE at SITE01 demos NO_QUALIFIED_ENGINEER
+  // (only the SITE02 engineer holds Storage).
+  const siteEngineer2 = await prisma.user.upsert({
+    where: { email: "engineer2@example.com" },
+    update: {},
+    create: {
+      idpSubject: "seed-site-engineer-2",
+      email: "engineer2@example.com",
+      displayName: "Seed Site Engineer 2",
+      role: UserRole.SITE_ENGINEER,
+    },
+  });
+  await prisma.userSiteAccess.upsert({
+    where: { userId_siteId: { userId: siteEngineer2.id, siteId: site1.id } },
+    update: {},
+    create: { userId: siteEngineer2.id, siteId: site1.id },
+  });
+
+  const [hardwareSkill, networkingSkill, storageSkill] = await Promise.all(
+    ["Hardware", "Networking", "Storage"].map((name) =>
+      prisma.skill.upsert({ where: { name }, update: {}, create: { name } }),
+    ),
+  );
+
+  const userSkills: [string, string][] = [
+    [siteEngineer1.id, hardwareSkill.id],
+    [siteEngineer1.id, networkingSkill.id],
+    [siteEngineer2.id, hardwareSkill.id],
+    [siteEngineer.id, storageSkill.id],
+  ];
+  for (const [userId, skillId] of userSkills) {
+    await prisma.userSkill.upsert({
+      where: { userId_skillId: { userId, skillId } },
+      update: {},
+      create: { userId, skillId },
+    });
+  }
+
+  const categoryRequirements: [string, string][] = [
+    ["HARDWARE_FAILURE", hardwareSkill.id],
+    ["NETWORK_OUTAGE", networkingSkill.id],
+    ["STORAGE_FAILURE", storageSkill.id],
+  ];
+  for (const [category, skillId] of categoryRequirements) {
+    await prisma.categorySkillRequirement.upsert({
+      where: { category_skillId: { category, skillId } },
+      update: {},
+      create: { category, skillId },
+    });
+  }
+
+  // Day + night shifts every day so the demo roster is live at whatever
+  // hour the seed is run — a single 24h shift isn't representable
+  // (startTime === endTime is rejected, see create-shift.dto.ts).
+  const everyDay = [0, 1, 2, 3, 4, 5, 6];
+  for (const engineer of [siteEngineer1, siteEngineer2]) {
+    await findOrCreateShift({
+      userId: engineer.id,
+      siteId: site1.id,
+      label: "Demo day cover",
+      daysOfWeek: everyDay,
+      startTime: "08:00",
+      endTime: "20:00",
+    });
+    await findOrCreateShift({
+      userId: engineer.id,
+      siteId: site1.id,
+      label: "Demo night cover",
+      daysOfWeek: everyDay,
+      startTime: "20:00",
+      endTime: "08:00",
+    });
+  }
+  await findOrCreateShift({
+    userId: siteEngineer.id,
+    siteId: site2.id,
+    label: "Demo on-call (day)",
+    daysOfWeek: everyDay,
+    startTime: "08:00",
+    endTime: "20:00",
+    isOnCall: true,
+  });
+  await findOrCreateShift({
+    userId: siteEngineer.id,
+    siteId: site2.id,
+    label: "Demo on-call (night)",
+    daysOfWeek: everyDay,
+    startTime: "20:00",
+    endTime: "08:00",
+    isOnCall: true,
+  });
+
   // Incident + timeline + comment — only created once (not upserted, since
   // Incident has no natural business key besides incidentNo we'd want to
   // update on reseed). Guarded by a findUnique check so re-running the seed
@@ -441,9 +550,11 @@ async function main() {
       `${serviceDesk.email} (SERVICE_DESK_NOC, ${site1.code} only), ` +
       `${siteEngineer.email} (SITE_ENGINEER, ${site2.code} only), ` +
       `${siteEngineer1.email} (SITE_ENGINEER, ${site1.code} only), ` +
+      `${siteEngineer2.email} (SITE_ENGINEER, ${site1.code} only), ` +
       `${clientViewer.email} (CLIENT_MANAGER_VIEWER, ${site1.code} only), ` +
       `1 rack and 3 CIs (1 CI-to-CI relation, 3 health snapshots), ` +
       `4 SLA policies (P1-P4) and 1 support calendar per site, ` +
+      `3 skills, 4 engineer-skill assignments, 3 category requirements, 6 demo shifts, ` +
       `1 incident (INC-SEED-001, IN_PROGRESS, 5 timeline events, 1 comment, 1 worklog, 1 SLA instance).`,
   );
 }
