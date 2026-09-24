@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { Incident } from "@prisma/client";
+import { Incident, Priority, RoutingPolicy } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
@@ -27,6 +27,9 @@ export interface RoutingCandidate {
   shiftLabel: string;
   isOnCall: boolean;
   openIncidentCount: number;
+  /** Open incidents weighted by priority with the site's workload weights;
+   *  the main ranking key. */
+  workloadScore: number;
   isCurrentOwner: boolean;
 }
 
@@ -42,15 +45,60 @@ export interface RoutingSuggestions {
   uncoveredSkills: RoutingSkillRef[];
 }
 
-/** Matches the column default on routing_policies.offer_timeout_minutes,
- *  for sites that have never saved a policy. */
-export const DEFAULT_OFFER_TIMEOUT_MINUTES = 5;
+/** Per-priority routing settings of a site. Field names match the
+ *  routing_policies columns and the PATCH body. */
+export interface RoutingSettings {
+  offerTimeoutP1Minutes: number;
+  offerTimeoutP2Minutes: number;
+  offerTimeoutP3Minutes: number;
+  offerTimeoutP4Minutes: number;
+  workloadWeightP1: number;
+  workloadWeightP2: number;
+  workloadWeightP3: number;
+  workloadWeightP4: number;
+}
+
+/** Matches the routing_policies column defaults, for sites that have never
+ *  saved a policy. */
+export const DEFAULT_ROUTING_SETTINGS: RoutingSettings = {
+  offerTimeoutP1Minutes: 2,
+  offerTimeoutP2Minutes: 5,
+  offerTimeoutP3Minutes: 10,
+  offerTimeoutP4Minutes: 15,
+  workloadWeightP1: 4,
+  workloadWeightP2: 3,
+  workloadWeightP3: 2,
+  workloadWeightP4: 1,
+};
 
 /** A site with no RoutingPolicy row reads as this (auto-routing off). */
-export interface RoutingPolicyView {
+export interface RoutingPolicyView extends RoutingSettings {
   siteId: string;
   autoAssignEnabled: boolean;
-  offerTimeoutMinutes: number;
+}
+
+export function offerTimeoutFor(settings: RoutingSettings, priority: Priority): number {
+  return settings[`offerTimeout${priority}Minutes`];
+}
+
+function weightFor(settings: RoutingSettings, priority: Priority): number {
+  return settings[`workloadWeight${priority}`];
+}
+
+function settingsOf(row: RoutingPolicy | null): RoutingSettings {
+  if (!row) {
+    return { ...DEFAULT_ROUTING_SETTINGS };
+  }
+  return {
+    offerTimeoutP1Minutes: row.offerTimeoutP1Minutes,
+    offerTimeoutP2Minutes: row.offerTimeoutP2Minutes,
+    offerTimeoutP3Minutes: row.offerTimeoutP3Minutes,
+    offerTimeoutP4Minutes: row.offerTimeoutP4Minutes,
+    workloadWeightP1: row.workloadWeightP1,
+    workloadWeightP2: row.workloadWeightP2,
+    workloadWeightP3: row.workloadWeightP3,
+    workloadWeightP4: row.workloadWeightP4,
+  };
 }
 
 /**
@@ -60,8 +108,11 @@ export interface RoutingPolicyView {
  *  2. A candidate must hold EVERY active skill the incident's category
  *     requires (skills module's category requirements).
  *  3. Working-shift engineers are preferred; on-call engineers are only
- *     suggested when no working engineer qualifies.
- *  4. Ranked by fewest open incidents currently owned, then name.
+ *     suggested when no working engineer qualifies, except for a P1, where
+ *     they're candidates from the start, ranked after working engineers.
+ *  4. Ranked by weighted workload: each open incident an engineer owns
+ *     counts by its priority (the site's workload weights, default P1=4,
+ *     P2=3, P3=2, P4=1). Ties go to fewer open incidents, then name.
  * Empty results always carry a `reason` instead of silently widening the
  * pool — the desk assigns manually or to a group queue from there.
  *
@@ -94,11 +145,12 @@ export class RoutingService {
   async getPolicy(siteId: string, user: AuthenticatedUser): Promise<RoutingPolicyView> {
     await this.assertSiteAccess(user, siteId);
     const policy = await this.prisma.routingPolicy.findUnique({ where: { siteId } });
-    return {
-      siteId,
-      autoAssignEnabled: policy?.autoAssignEnabled ?? false,
-      offerTimeoutMinutes: policy?.offerTimeoutMinutes ?? DEFAULT_OFFER_TIMEOUT_MINUTES,
-    };
+    return { siteId, autoAssignEnabled: policy?.autoAssignEnabled ?? false, ...settingsOf(policy) };
+  }
+
+  /** A site's per-priority settings, or the defaults when it has no policy. */
+  async getSettings(siteId: string): Promise<RoutingSettings> {
+    return settingsOf(await this.prisma.routingPolicy.findUnique({ where: { siteId } }));
   }
 
   async setPolicy(
@@ -117,15 +169,8 @@ export class RoutingService {
     const after = await this.prisma.$transaction(async (tx) => {
       const after = await tx.routingPolicy.upsert({
         where: { siteId },
-        update: {
-          autoAssignEnabled: dto.autoAssignEnabled,
-          offerTimeoutMinutes: dto.offerTimeoutMinutes,
-        },
-        create: {
-          siteId,
-          autoAssignEnabled: dto.autoAssignEnabled,
-          offerTimeoutMinutes: dto.offerTimeoutMinutes,
-        },
+        update: { ...dto },
+        create: { siteId, ...dto },
       });
       await this.auditService.record(
         {
@@ -141,11 +186,7 @@ export class RoutingService {
       );
       return after;
     });
-    return {
-      siteId,
-      autoAssignEnabled: after.autoAssignEnabled,
-      offerTimeoutMinutes: after.offerTimeoutMinutes,
-    };
+    return { siteId, autoAssignEnabled: after.autoAssignEnabled, ...settingsOf(after) };
   }
 
   private async assertSiteAccess(user: AuthenticatedUser, siteId: string): Promise<void> {
@@ -202,22 +243,39 @@ export class RoutingService {
     }
 
     const working = qualified.filter((e) => !e.isOnCall);
-    const pool = working.length > 0 ? working : qualified;
+    // A P1 can't wait: on-call engineers join the pool from the start.
+    const pool = incident.priority === Priority.P1 || working.length === 0 ? qualified : working;
 
-    const workload = await this.incidentsService.countOpenOwnedBy(pool.map((e) => e.userId));
+    const settings = await this.getSettings(incident.siteId);
+    const workload = await this.incidentsService.countOpenOwnedByPriority(
+      pool.map((e) => e.userId),
+    );
     result.candidates = pool
-      .map((entry) => ({
-        userId: entry.userId,
-        displayName: entry.displayName,
-        email: entry.email,
-        shiftLabel: entry.label,
-        isOnCall: entry.isOnCall,
-        openIncidentCount: workload.get(entry.userId) ?? 0,
-        isCurrentOwner: incident.ownerUserId === entry.userId,
-      }))
+      .map((entry) => {
+        const byPriority = workload.get(entry.userId) ?? {};
+        let openIncidentCount = 0;
+        let workloadScore = 0;
+        for (const [priority, count] of Object.entries(byPriority) as [Priority, number][]) {
+          openIncidentCount += count;
+          workloadScore += count * weightFor(settings, priority);
+        }
+        return {
+          userId: entry.userId,
+          displayName: entry.displayName,
+          email: entry.email,
+          shiftLabel: entry.label,
+          isOnCall: entry.isOnCall,
+          openIncidentCount,
+          workloadScore,
+          isCurrentOwner: incident.ownerUserId === entry.userId,
+        };
+      })
       .sort(
         (a, b) =>
-          a.openIncidentCount - b.openIncidentCount || a.displayName.localeCompare(b.displayName),
+          Number(a.isOnCall) - Number(b.isOnCall) ||
+          a.workloadScore - b.workloadScore ||
+          a.openIncidentCount - b.openIncidentCount ||
+          a.displayName.localeCompare(b.displayName),
       );
     return result;
   }

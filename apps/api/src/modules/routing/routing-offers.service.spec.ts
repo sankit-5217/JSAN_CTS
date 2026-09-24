@@ -7,7 +7,12 @@ import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { InboxService } from "../inbox/inbox.service";
 import { IncidentsService } from "../incidents/incidents.service";
 import { RoutingOffersService } from "./routing-offers.service";
-import { RoutingCandidate, RoutingService, RoutingSuggestions } from "./routing.service";
+import {
+  DEFAULT_ROUTING_SETTINGS,
+  RoutingCandidate,
+  RoutingService,
+  RoutingSuggestions,
+} from "./routing.service";
 
 const NOW = new Date("2026-09-24T08:00:00Z");
 
@@ -41,6 +46,7 @@ function candidate(userId: string): RoutingCandidate {
     shiftLabel: "Day",
     isOnCall: false,
     openIncidentCount: 0,
+    workloadScore: 0,
     isCurrentOwner: false,
   };
 }
@@ -74,6 +80,8 @@ function makeService(
     updateCount?: number;
     autoAssign?: jest.Mock;
     desk?: { id: string; email: string; displayName: string }[];
+    /** Engineers holding an open offer on some other ticket. */
+    busy?: string[];
   } = {},
 ) {
   const prisma = {
@@ -91,7 +99,15 @@ function makeService(
       findMany: jest
         .fn()
         .mockImplementation(({ where }) =>
-          Promise.resolve(where.expiresAt ? (opts.due ?? []) : (opts.previous ?? [])),
+          Promise.resolve(
+            where.expiresAt
+              ? (opts.due ?? [])
+              : where.userId
+                ? (opts.busy ?? [])
+                    .filter((id) => where.userId.in.includes(id))
+                    .map((userId) => ({ userId }))
+                : (opts.previous ?? []),
+          ),
         ),
       findFirst: jest.fn().mockResolvedValue(opts.pending === undefined ? offer() : opts.pending),
       create: jest
@@ -131,7 +147,14 @@ function makeService(
     reason: (opts.candidates ?? [1]).length === 0 ? "NO_QUALIFIED_ENGINEER" : null,
     uncoveredSkills: [],
   };
-  const routingService = { rank: jest.fn().mockResolvedValue(suggestions) };
+  const routingService = {
+    rank: jest.fn().mockResolvedValue(suggestions),
+    // incident() is a P2; 10 minutes keeps the expiry arithmetic readable.
+    getSettings: jest.fn().mockResolvedValue({
+      ...DEFAULT_ROUTING_SETTINGS,
+      offerTimeoutP2Minutes: 10,
+    }),
+  };
   const inbox = { notifyUsers: jest.fn().mockResolvedValue(undefined) };
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
 
@@ -237,6 +260,41 @@ describe("RoutingOffersService.offerNext", () => {
     await service.offerNext("inc-1", NOW);
     expect(prisma.routingOffer.create).not.toHaveBeenCalled();
     expect(inbox.notifyUsers).not.toHaveBeenCalled();
+  });
+
+  it("gives a P1 the site's P1 accept window", async () => {
+    const { service, prisma } = makeService({ incident: incident({ priority: "P1" }) });
+    await service.offerNext("inc-1", NOW);
+    expect(prisma.routingOffer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ expiresAt: new Date("2026-09-24T08:02:00Z") }),
+    });
+  });
+
+  it("passes over an engineer already holding another offer, below P1", async () => {
+    const { service, prisma } = makeService({ busy: ["eng-1"] });
+    await service.offerNext("inc-1", NOW);
+    expect(prisma.routingOffer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ userId: "eng-2" }),
+    });
+  });
+
+  it("still offers when every candidate is holding another offer", async () => {
+    const { service, prisma } = makeService({ busy: ["eng-1", "eng-2"] });
+    await service.offerNext("inc-1", NOW);
+    expect(prisma.routingOffer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ userId: "eng-1" }),
+    });
+  });
+
+  it("offers a P1 to the best engineer even if they hold another offer", async () => {
+    const { service, prisma } = makeService({
+      incident: incident({ priority: "P1" }),
+      busy: ["eng-1"],
+    });
+    await service.offerNext("inc-1", NOW);
+    expect(prisma.routingOffer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ userId: "eng-1" }),
+    });
   });
 
   it("never opens a second offer while one is pending", async () => {

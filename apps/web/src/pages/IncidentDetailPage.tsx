@@ -318,6 +318,8 @@ interface RoutingCandidate {
   shiftLabel: string;
   isOnCall: boolean;
   openIncidentCount: number;
+  /** Open incidents weighted by priority; what the ranking sorts on. */
+  workloadScore: number;
   isCurrentOwner: boolean;
 }
 
@@ -408,7 +410,7 @@ function RoutingSuggestionsCard({
 
   // Workload bars are relative to the busiest candidate shown, so they
   // compare engineers against each other rather than an arbitrary cap.
-  const maxOpen = Math.max(1, ...(suggestions?.candidates.map((c) => c.openIncidentCount) ?? []));
+  const maxLoad = Math.max(1, ...(suggestions?.candidates.map((c) => c.workloadScore) ?? []));
 
   return (
     <Paper sx={{ p: 2, height: "100%", display: "flex", flexDirection: "column" }}>
@@ -426,7 +428,8 @@ function RoutingSuggestionsCard({
         </Tooltip>
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
-        On shift at this site now and holding every required skill — least busy first.
+        On shift at this site now and holding every required skill, least busy first. Busy counts
+        each open ticket by its priority{incident.priority === "P1" && "; on-call included for P1"}.
       </Typography>
       {suggestions && suggestions.requiredSkills.length > 0 && (
         <Stack
@@ -513,18 +516,20 @@ function RoutingSuggestionsCard({
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.75 }}>
                   <LinearProgress
                     variant="determinate"
-                    value={(c.openIncidentCount / maxOpen) * 100}
-                    color={c.openIncidentCount === 0 ? "success" : "primary"}
+                    value={(c.workloadScore / maxLoad) * 100}
+                    color={c.workloadScore === 0 ? "success" : "primary"}
                     sx={{ flex: 1, height: 6, borderRadius: 3 }}
-                    aria-label={`${c.openIncidentCount} open incidents`}
+                    aria-label={`${c.openIncidentCount} open incidents, load ${c.workloadScore}`}
                   />
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ whiteSpace: "nowrap" }}
-                  >
-                    {c.openIncidentCount} open
-                  </Typography>
+                  <Tooltip title="Load = open tickets weighted by priority (site routing weights)">
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ whiteSpace: "nowrap" }}
+                    >
+                      {c.openIncidentCount} open · load {c.workloadScore}
+                    </Typography>
+                  </Tooltip>
                 </Stack>
               </Box>
               <Box sx={{ ml: 1, alignSelf: "center" }}>

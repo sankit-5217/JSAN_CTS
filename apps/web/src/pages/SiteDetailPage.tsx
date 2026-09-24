@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   Alert,
@@ -15,6 +15,7 @@ import {
   Stack,
   Switch,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import AltRouteOutlinedIcon from "@mui/icons-material/AltRouteOutlined";
@@ -55,20 +56,53 @@ interface SupportCalendar {
   is247: boolean;
 }
 
-interface RoutingPolicy {
+const PRIORITIES = ["P1", "P2", "P3", "P4"] as const;
+type PriorityKey = (typeof PRIORITIES)[number];
+type SettingKey = `offerTimeout${PriorityKey}Minutes` | `workloadWeight${PriorityKey}`;
+
+type RoutingPolicy = {
   siteId: string;
   autoAssignEnabled: boolean;
-  offerTimeoutMinutes: number;
+} & Record<SettingKey, number>;
+
+// Bounds mirror UpdateRoutingPolicyDto.
+const SETTING_ROWS: {
+  label: string;
+  help: string;
+  key: (p: PriorityKey) => SettingKey;
+  min: number;
+  max: number;
+}[] = [
+  {
+    label: "Time to accept (min)",
+    help: "How long each engineer has before the offer moves on",
+    key: (p) => `offerTimeout${p}Minutes`,
+    min: 1,
+    max: 120,
+  },
+  {
+    label: "Workload weight",
+    help: "How much one open ticket of this priority counts when choosing the least busy engineer",
+    key: (p) => `workloadWeight${p}`,
+    min: 0,
+    max: 20,
+  },
+];
+
+const SETTING_KEYS: SettingKey[] = SETTING_ROWS.flatMap((row) => PRIORITIES.map(row.key));
+
+function draftOf(policy: RoutingPolicy): Record<SettingKey, string> {
+  return Object.fromEntries(SETTING_KEYS.map((k) => [k, String(policy[k])])) as Record<
+    SettingKey,
+    string
+  >;
 }
 
-// Mirrors UpdateRoutingPolicyDto's bounds.
-const MIN_OFFER_MINUTES = 1;
-const MAX_OFFER_MINUTES = 120;
-
 /**
- * Per-site skill-based routing switch (GET/PATCH /routing/policies/:siteId).
- * Loaded on its own, not in the page's Promise.all, so a failure here
- * never blanks the rest of the site page. Write gate mirrors
+ * Per-site skill-based routing (GET/PATCH /routing/policies/:siteId): the
+ * auto-route switch plus the per-priority accept windows and workload
+ * weights. Loaded on its own, not in the page's Promise.all, so a failure
+ * here never blanks the rest of the site page. Write gate mirrors
  * RoutingPoliciesController's ROUTING_POLICY_WRITE_ROLES (same set as
  * SITE_MASTER_WRITE_ROLES) — UI-only; the backend re-checks.
  */
@@ -77,14 +111,14 @@ function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boo
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [minutesDraft, setMinutesDraft] = useState("");
+  const [draft, setDraft] = useState<Record<SettingKey, string> | null>(null);
 
   useEffect(() => {
     setLoadError(null);
     apiGet<RoutingPolicy>(`/routing/policies/${siteId}`)
       .then((p) => {
         setPolicy(p);
-        setMinutesDraft(String(p.offerTimeoutMinutes));
+        setDraft(draftOf(p));
       })
       .catch((err: Error) => setLoadError(err.message));
   }, [siteId]);
@@ -96,11 +130,10 @@ function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boo
     try {
       const next = await apiPatch<RoutingPolicy>(`/routing/policies/${siteId}`, {
         autoAssignEnabled: policy.autoAssignEnabled,
-        offerTimeoutMinutes: policy.offerTimeoutMinutes,
         ...changes,
       });
       setPolicy(next);
-      setMinutesDraft(String(next.offerTimeoutMinutes));
+      setDraft(draftOf(next));
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -108,10 +141,15 @@ function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boo
     }
   };
 
-  const minutes = Number(minutesDraft);
-  const minutesValid =
-    Number.isInteger(minutes) && minutes >= MIN_OFFER_MINUTES && minutes <= MAX_OFFER_MINUTES;
-  const minutesChanged = policy !== null && minutes !== policy.offerTimeoutMinutes;
+  const invalid = (key: SettingKey, min: number, max: number) => {
+    const n = Number(draft?.[key]);
+    return !Number.isInteger(n) || n < min || n > max;
+  };
+  const anyInvalid = SETTING_ROWS.some((row) =>
+    PRIORITIES.some((p) => invalid(row.key(p), row.min, row.max)),
+  );
+  const changed =
+    policy !== null && draft !== null && SETTING_KEYS.some((k) => Number(draft[k]) !== policy[k]);
 
   return (
     <Paper sx={{ p: 2, mb: 3 }}>
@@ -136,9 +174,10 @@ function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boo
             </Stack>
             <Typography variant="body2" color="text.secondary">
               Each new incident at this site is offered to the least-busy engineer who is on shift
-              here and has every skill its category requires. It's assigned to them once they
-              accept. If they decline or don't answer in time, it's offered to the next engineer. If
-              nobody accepts, it stays NEW and the service desk is told to assign it.
+              here and has every skill its category requires. It&apos;s assigned to them once they
+              accept. If they decline or don&apos;t answer in time, it&apos;s offered to the next
+              engineer. If nobody accepts, it stays NEW and the service desk is told to assign it.
+              P1s also go to on-call engineers straight away.
             </Typography>
           </Box>
         </Stack>
@@ -157,49 +196,85 @@ function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boo
           />
         )}
       </Stack>
-      {policy && (
-        <Stack
-          direction={{ xs: "column", sm: "row" }}
-          spacing={1.5}
-          alignItems={{ xs: "stretch", sm: "center" }}
-          sx={{ mt: 2, pl: { sm: 4.5 } }}
-        >
-          <TextField
-            size="small"
-            type="number"
-            label="Time to accept (minutes)"
-            value={minutesDraft}
-            onChange={(e) => setMinutesDraft(e.target.value)}
-            disabled={!canWrite || saving}
-            error={!minutesValid}
-            helperText={
-              minutesValid
-                ? "How long each engineer has before the offer moves on"
-                : `Enter a whole number from ${MIN_OFFER_MINUTES} to ${MAX_OFFER_MINUTES}`
-            }
-            inputProps={{ min: MIN_OFFER_MINUTES, max: MAX_OFFER_MINUTES, step: 1 }}
-            sx={{ width: { xs: "100%", sm: 260 } }}
-          />
-          {canWrite && minutesChanged && (
-            <Stack direction="row" spacing={1}>
+      {policy && draft && (
+        <Box sx={{ mt: 2, pl: { sm: 4.5 } }}>
+          <Box sx={{ overflowX: "auto" }}>
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: "minmax(150px, auto) repeat(4, minmax(72px, 96px))",
+                gap: 1,
+                alignItems: "center",
+                minWidth: 460,
+              }}
+            >
+              <Box />
+              {PRIORITIES.map((p) => (
+                <Typography key={p} variant="caption" fontWeight={700} textAlign="center">
+                  {p}
+                </Typography>
+              ))}
+              {SETTING_ROWS.map((row) => (
+                <Fragment key={row.label}>
+                  <Tooltip title={row.help} placement="top-start">
+                    <Typography variant="body2">{row.label}</Typography>
+                  </Tooltip>
+                  {PRIORITIES.map((p) => {
+                    const key = row.key(p);
+                    return (
+                      <TextField
+                        key={key}
+                        size="small"
+                        type="number"
+                        value={draft[key]}
+                        onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}
+                        disabled={!canWrite || saving}
+                        error={invalid(key, row.min, row.max)}
+                        inputProps={{
+                          min: row.min,
+                          max: row.max,
+                          step: 1,
+                          "aria-label": `${row.label} ${p}`,
+                          style: { textAlign: "center" },
+                        }}
+                      />
+                    );
+                  })}
+                </Fragment>
+              ))}
+            </Box>
+          </Box>
+          <Typography
+            variant="caption"
+            color={anyInvalid ? "error" : "text.secondary"}
+            sx={{ display: "block", mt: 1 }}
+          >
+            {anyInvalid
+              ? "Times must be whole minutes from 1 to 120; weights whole numbers from 0 to 20."
+              : "With the default weights (4, 3, 2, 1), one open P1 counts as much as four P4s."}
+          </Typography>
+          {canWrite && changed && (
+            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
               <Button
                 variant="contained"
                 size="small"
-                disabled={!minutesValid || saving}
-                onClick={() => save({ offerTimeoutMinutes: minutes })}
+                disabled={anyInvalid || saving}
+                onClick={() =>
+                  save(
+                    Object.fromEntries(SETTING_KEYS.map((k) => [k, Number(draft[k])])) as Partial<
+                      Omit<RoutingPolicy, "siteId">
+                    >,
+                  )
+                }
               >
                 Save
               </Button>
-              <Button
-                size="small"
-                disabled={saving}
-                onClick={() => setMinutesDraft(String(policy.offerTimeoutMinutes))}
-              >
+              <Button size="small" disabled={saving} onClick={() => setDraft(draftOf(policy))}>
                 Cancel
               </Button>
             </Stack>
           )}
-        </Stack>
+        </Box>
       )}
       {!policy && !loadError && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>

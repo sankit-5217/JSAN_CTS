@@ -11,6 +11,7 @@ import {
   InAppNotificationKind,
   Incident,
   IncidentStatus,
+  Priority,
   RoutingOffer,
   RoutingOfferStatus,
   UserRole,
@@ -28,7 +29,7 @@ import {
   IncidentUpdatedEvent,
 } from "../incidents/incident-events";
 import { IncidentsService } from "../incidents/incidents.service";
-import { RoutingService } from "./routing.service";
+import { offerTimeoutFor, RoutingCandidate, RoutingService } from "./routing.service";
 
 /** Offers the expiry sweep handles per run; the rest wait a minute. */
 const EXPIRY_BATCH_SIZE = 100;
@@ -280,7 +281,8 @@ export class RoutingOffersService {
 
     const suggestions = await this.routingService.rank(incident, now);
     const tried = new Set(previous.map((o) => o.userId));
-    const next = suggestions.candidates.find((c) => !tried.has(c.userId));
+    const untried = suggestions.candidates.filter((c) => !tried.has(c.userId));
+    const next = await this.pickCandidate(incident, untried);
     if (!next) {
       if (previous.length > 0) {
         await this.onNobodyAccepted(incident, previous);
@@ -292,7 +294,10 @@ export class RoutingOffersService {
       return;
     }
 
-    const timeoutMinutes = policy.offerTimeoutMinutes;
+    const timeoutMinutes = offerTimeoutFor(
+      await this.routingService.getSettings(incident.siteId),
+      incident.priority,
+    );
     const expiresAt = new Date(now.getTime() + timeoutMinutes * 60_000);
 
     const offer = await this.prisma.$transaction(async (tx) => {
@@ -349,6 +354,31 @@ export class RoutingOffersService {
         `INCIDENT_OFFERED:${offer.id}`,
       );
     }
+  }
+
+  /**
+   * The best-ranked candidate to offer to next. Below P1, engineers already
+   * holding an open offer on another ticket are passed over so offers spread
+   * out; if every candidate has one, the best of them still gets it, so the
+   * ticket never sits unoffered. A P1 goes to the best candidate regardless.
+   */
+  private async pickCandidate(
+    incident: Incident,
+    candidates: RoutingCandidate[],
+  ): Promise<RoutingCandidate | undefined> {
+    if (candidates.length === 0 || incident.priority === Priority.P1) {
+      return candidates[0];
+    }
+    const busy = await this.prisma.routingOffer.findMany({
+      where: {
+        status: RoutingOfferStatus.PENDING,
+        userId: { in: candidates.map((c) => c.userId) },
+        incidentId: { not: incident.id },
+      },
+      select: { userId: true },
+    });
+    const busyIds = new Set(busy.map((o) => o.userId));
+    return candidates.find((c) => !busyIds.has(c.userId)) ?? candidates[0];
   }
 
   private async onNobodyAccepted(incident: Incident, previous: OfferWithUser[]): Promise<void> {

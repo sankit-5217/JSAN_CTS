@@ -7,7 +7,7 @@ import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { IncidentsService } from "../incidents/incidents.service";
 import { RosterEntry, ShiftsService } from "../shifts/shifts.service";
 import { SkillsService } from "../skills/skills.service";
-import { RoutingService } from "./routing.service";
+import { DEFAULT_ROUTING_SETTINGS, RoutingService } from "./routing.service";
 
 const USER = { id: "desk-1", role: UserRole.SERVICE_DESK_NOC } as AuthenticatedUser;
 const NOW = new Date("2026-09-23T08:00:00Z");
@@ -47,7 +47,8 @@ function makeService(opts: {
   working?: RosterEntry[];
   onCall?: RosterEntry[];
   skills?: Record<string, string[]>;
-  workload?: Record<string, number>;
+  workload?: Record<string, Partial<Record<"P1" | "P2" | "P3" | "P4", number>>>;
+  settings?: Partial<typeof DEFAULT_ROUTING_SETTINGS>;
   policy?: { id: string; autoAssignEnabled: boolean } | null;
   canAccessSite?: boolean;
 }) {
@@ -55,12 +56,29 @@ function makeService(opts: {
     routingPolicy: {
       upsert: jest
         .fn()
-        .mockImplementation(({ create }) => Promise.resolve({ id: "policy-1", ...create })),
+        .mockImplementation(({ create }) =>
+          Promise.resolve({ id: "policy-1", ...DEFAULT_ROUTING_SETTINGS, ...create }),
+        ),
     },
   };
   const prisma = {
     $transaction: jest.fn((fn: (t: unknown) => unknown) => fn(tx)),
-    routingPolicy: { findUnique: jest.fn().mockResolvedValue(opts.policy ?? null) },
+    routingPolicy: {
+      findUnique: jest
+        .fn()
+        .mockResolvedValue(
+          opts.policy
+            ? { ...DEFAULT_ROUTING_SETTINGS, ...opts.settings, ...opts.policy }
+            : opts.settings
+              ? {
+                  id: "policy-1",
+                  autoAssignEnabled: false,
+                  ...DEFAULT_ROUTING_SETTINGS,
+                  ...opts.settings,
+                }
+              : null,
+        ),
+    },
     site: { findUnique: jest.fn().mockResolvedValue({ id: "site-1" }) },
   } as unknown as PrismaService;
   const auditService = {
@@ -72,7 +90,9 @@ function makeService(opts: {
   const incidentsService = {
     findOne: jest.fn().mockResolvedValue(opts.incident ?? incident()),
     findOneScoped: opts.findOneScoped ?? jest.fn().mockResolvedValue(opts.incident ?? incident()),
-    countOpenOwnedBy: jest.fn().mockResolvedValue(new Map(Object.entries(opts.workload ?? {}))),
+    countOpenOwnedByPriority: jest
+      .fn()
+      .mockResolvedValue(new Map(Object.entries(opts.workload ?? {}))),
   } as unknown as IncidentsService;
   const shiftsService = {
     getLiveRoster: jest.fn().mockResolvedValue({
@@ -162,15 +182,57 @@ describe("RoutingService.suggestForIncident", () => {
         rosterEntry("unskilled"),
       ],
       skills: { zed: [STORAGE.id], amy: [STORAGE.id], bob: [STORAGE.id] },
-      workload: { amy: 3 },
+      workload: { amy: { P3: 3 } },
     });
     const result = await service.suggestForIncident("inc-1", USER, NOW);
 
     expect(result.reason).toBeNull();
-    expect(result.candidates.map((c) => [c.userId, c.openIncidentCount])).toEqual([
-      ["bob", 0],
-      ["zed", 0],
-      ["amy", 3],
+    expect(result.candidates.map((c) => [c.userId, c.openIncidentCount, c.workloadScore])).toEqual([
+      ["bob", 0, 0],
+      ["zed", 0, 0],
+      ["amy", 3, 6],
+    ]);
+  });
+
+  it("weights workload by priority: one P1 outweighs two P4s", async () => {
+    const { service } = makeService({
+      working: [rosterEntry("holds-p1"), rosterEntry("holds-p4s")],
+      skills: { "holds-p1": [STORAGE.id], "holds-p4s": [STORAGE.id] },
+      workload: { "holds-p1": { P1: 1 }, "holds-p4s": { P4: 2 } },
+    });
+    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    expect(result.candidates.map((c) => [c.userId, c.workloadScore])).toEqual([
+      ["holds-p4s", 2],
+      ["holds-p1", 4],
+    ]);
+  });
+
+  it("uses the site's own workload weights", async () => {
+    const { service } = makeService({
+      settings: { workloadWeightP1: 1, workloadWeightP4: 5 },
+      working: [rosterEntry("holds-p1"), rosterEntry("holds-p4s")],
+      skills: { "holds-p1": [STORAGE.id], "holds-p4s": [STORAGE.id] },
+      workload: { "holds-p1": { P1: 1 }, "holds-p4s": { P4: 2 } },
+    });
+    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    expect(result.candidates.map((c) => [c.userId, c.workloadScore])).toEqual([
+      ["holds-p1", 1],
+      ["holds-p4s", 10],
+    ]);
+  });
+
+  it("includes on-call engineers from the start for a P1, after the working shift", async () => {
+    const { service } = makeService({
+      incident: incident({ priority: "P1" }),
+      working: [rosterEntry("worker")],
+      onCall: [rosterEntry("pager", { isOnCall: true })],
+      skills: { worker: [STORAGE.id], pager: [STORAGE.id] },
+      workload: { worker: { P2: 3 } },
+    });
+    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    expect(result.candidates.map((c) => [c.userId, c.isOnCall])).toEqual([
+      ["worker", false],
+      ["pager", true],
     ]);
   });
 
@@ -179,7 +241,7 @@ describe("RoutingService.suggestForIncident", () => {
       working: [rosterEntry("worker")],
       onCall: [rosterEntry("pager", { isOnCall: true })],
       skills: { worker: [STORAGE.id], pager: [STORAGE.id] },
-      workload: { worker: 9 },
+      workload: { worker: { P3: 9 } },
     });
     const result = await service.suggestForIncident("inc-1", USER, NOW);
     expect(result.candidates.map((c) => c.userId)).toEqual(["worker"]);
@@ -216,12 +278,19 @@ describe("RoutingService.suggestForIncident", () => {
 });
 
 describe("RoutingService policy", () => {
-  it("reads an unconfigured site as auto-routing off with a 5 minute accept window", async () => {
+  it("reads an unconfigured site as auto-routing off with the default per-priority settings", async () => {
     const { service } = makeService({ policy: null });
     await expect(service.getPolicy("site-1", USER)).resolves.toEqual({
       siteId: "site-1",
       autoAssignEnabled: false,
-      offerTimeoutMinutes: 5,
+      offerTimeoutP1Minutes: 2,
+      offerTimeoutP2Minutes: 5,
+      offerTimeoutP3Minutes: 10,
+      offerTimeoutP4Minutes: 15,
+      workloadWeightP1: 4,
+      workloadWeightP2: 3,
+      workloadWeightP3: 2,
+      workloadWeightP4: 1,
     });
   });
 
@@ -245,16 +314,22 @@ describe("RoutingService policy", () => {
     const { service, tx, auditService } = makeService({ policy: null });
     const result = await service.setPolicy(
       "site-1",
-      { autoAssignEnabled: true, offerTimeoutMinutes: 10 },
+      { autoAssignEnabled: true, offerTimeoutP1Minutes: 1, workloadWeightP1: 6 },
       USER,
       { actorId: "admin-1", correlationId: "corr-1" },
     );
 
-    expect(result).toEqual({ siteId: "site-1", autoAssignEnabled: true, offerTimeoutMinutes: 10 });
+    expect(result).toEqual({
+      siteId: "site-1",
+      autoAssignEnabled: true,
+      ...DEFAULT_ROUTING_SETTINGS,
+      offerTimeoutP1Minutes: 1,
+      workloadWeightP1: 6,
+    });
     expect(tx.routingPolicy.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { siteId: "site-1" },
-        update: { autoAssignEnabled: true, offerTimeoutMinutes: 10 },
+        update: { autoAssignEnabled: true, offerTimeoutP1Minutes: 1, workloadWeightP1: 6 },
       }),
     );
     expect(auditService.record).toHaveBeenCalledWith(

@@ -712,18 +712,20 @@ describe("IncidentsService.findAll", () => {
   });
 });
 
-describe("IncidentsService.countOpenOwnedBy", () => {
-  it("counts only open incidents for the given owners", async () => {
-    const incidentGroupBy = jest
-      .fn()
-      .mockResolvedValue([{ ownerUserId: "eng-1", _count: { _all: 2 } }]);
+describe("IncidentsService.countOpenOwnedByPriority", () => {
+  it("counts only open incidents for the given owners, split by priority", async () => {
+    const incidentGroupBy = jest.fn().mockResolvedValue([
+      { ownerUserId: "eng-1", priority: Priority.P1, _count: { _all: 1 } },
+      { ownerUserId: "eng-1", priority: Priority.P4, _count: { _all: 2 } },
+    ]);
     const { service } = makeService({ incidentGroupBy });
-    const counts = await service.countOpenOwnedBy(["eng-1", "eng-2"]);
+    const counts = await service.countOpenOwnedByPriority(["eng-1", "eng-2"]);
 
-    expect(counts.get("eng-1")).toBe(2);
+    expect(counts.get("eng-1")).toEqual({ P1: 1, P4: 2 });
     expect(counts.has("eng-2")).toBe(false);
     expect(incidentGroupBy).toHaveBeenCalledWith(
       expect.objectContaining({
+        by: ["ownerUserId", "priority"],
         where: { ownerUserId: { in: ["eng-1", "eng-2"] }, status: { in: OPEN_STATUSES } },
       }),
     );
@@ -732,7 +734,7 @@ describe("IncidentsService.countOpenOwnedBy", () => {
   it("skips the query entirely for an empty list", async () => {
     const incidentGroupBy = jest.fn();
     const { service } = makeService({ incidentGroupBy });
-    expect((await service.countOpenOwnedBy([])).size).toBe(0);
+    expect((await service.countOpenOwnedByPriority([])).size).toBe(0);
     expect(incidentGroupBy).not.toHaveBeenCalled();
   });
 });

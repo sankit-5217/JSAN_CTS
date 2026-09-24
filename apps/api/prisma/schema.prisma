@@ -364,15 +364,25 @@ model CategorySkillRequirement {
 /// row per site, created on first write. A site with no row is treated as
 /// autoAssignEnabled = false, so the feature is opt-in per site (config
 /// over hard-code, CLAUDE.md). When on, a new incident is offered to the
-/// top-ranked engineer, who has offerTimeoutMinutes to accept before it
-/// moves to the next candidate (see RoutingOffer).
+/// top-ranked engineer, who has the priority's offer timeout to accept
+/// before it moves to the next candidate (see RoutingOffer).
 model RoutingPolicy {
-  id                  String   @id @default(uuid())
-  siteId              String   @unique @map("site_id")
-  autoAssignEnabled   Boolean  @default(false) @map("auto_assign_enabled")
-  offerTimeoutMinutes Int      @default(5) @map("offer_timeout_minutes")
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  id                    String   @id @default(uuid())
+  siteId                String   @unique @map("site_id")
+  autoAssignEnabled     Boolean  @default(false) @map("auto_assign_enabled")
+  /// Minutes an engineer has to accept an offer, by incident priority.
+  offerTimeoutP1Minutes Int      @default(2) @map("offer_timeout_p1_minutes")
+  offerTimeoutP2Minutes Int      @default(5) @map("offer_timeout_p2_minutes")
+  offerTimeoutP3Minutes Int      @default(10) @map("offer_timeout_p3_minutes")
+  offerTimeoutP4Minutes Int      @default(15) @map("offer_timeout_p4_minutes")
+  /// How much one open incident of each priority counts toward an
+  /// engineer's workload when ranking candidates.
+  workloadWeightP1      Int      @default(4) @map("workload_weight_p1")
+  workloadWeightP2      Int      @default(3) @map("workload_weight_p2")
+  workloadWeightP3      Int      @default(2) @map("workload_weight_p3")
+  workloadWeightP4      Int      @default(1) @map("workload_weight_p4")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
 
   site Site @relation(fields: [siteId], references: [id])
 
