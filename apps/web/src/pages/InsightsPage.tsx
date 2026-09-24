@@ -141,14 +141,12 @@ export function InsightsPage() {
       {report && (
         <>
           <Typography variant="h6" sx={{ mb: 1 }}>
-            Incident response, {WINDOW_OPTIONS.find((o) => o.value === windowDays)?.label.toLowerCase()}
+            Incident response,{" "}
+            {WINDOW_OPTIONS.find((o) => o.value === windowDays)?.label.toLowerCase()}
           </Typography>
           <Grid container spacing={2} sx={{ mb: 3 }}>
             <Grid item xs={12} sm={4}>
-              <SummaryTile
-                label="Incidents created"
-                value={`${report.overall.incidentCount}`}
-              />
+              <SummaryTile label="Incidents created" value={`${report.overall.incidentCount}`} />
             </Grid>
             <Grid item xs={12} sm={4}>
               <SummaryTile
@@ -177,30 +175,30 @@ export function InsightsPage() {
                 </Typography>
               ) : (
                 <LineChart
-  xAxis={[
-    {
-      scaleType: "point",
-      data: report.daily.map((d) => d.date.slice(5)), // MM-DD
-    },
-  ]}
-  series={[
-    {
-      label: "Avg time to acknowledge",
-      data: report.daily.map((d) => d.avgAckMinutes),
-      color: "#1976d2",
-      connectNulls: true,
-      valueFormatter: (value) => formatMinutes(value),
-    },
-    {
-      label: "Avg time to restore",
-      data: report.daily.map((d) => d.avgRestoreMinutes),
-      color: "#d32f2f",
-      connectNulls: true,
-      valueFormatter: (value) => formatMinutes(value),
-    },
-  ]}
-  height={280}
-/>
+                  xAxis={[
+                    {
+                      scaleType: "point",
+                      data: report.daily.map((d) => d.date.slice(5)), // MM-DD
+                    },
+                  ]}
+                  series={[
+                    {
+                      label: "Avg time to acknowledge",
+                      data: report.daily.map((d) => d.avgAckMinutes),
+                      color: "#1976d2",
+                      connectNulls: true,
+                      valueFormatter: (value) => formatMinutes(value),
+                    },
+                    {
+                      label: "Avg time to restore",
+                      data: report.daily.map((d) => d.avgRestoreMinutes),
+                      color: "#d32f2f",
+                      connectNulls: true,
+                      valueFormatter: (value) => formatMinutes(value),
+                    },
+                  ]}
+                  height={280}
+                />
               )}
             </CardContent>
           </Card>
