@@ -49,7 +49,6 @@ function makeService(opts: {
   skills?: Record<string, string[]>;
   workload?: Record<string, number>;
   policy?: { id: string; autoAssignEnabled: boolean } | null;
-  autoAssign?: jest.Mock;
   canAccessSite?: boolean;
 }) {
   const tx = {
@@ -72,7 +71,6 @@ function makeService(opts: {
   } as unknown as AuthzService;
   const incidentsService = {
     findOne: jest.fn().mockResolvedValue(opts.incident ?? incident()),
-    autoAssign: opts.autoAssign ?? jest.fn().mockResolvedValue({ id: "inc-1" }),
     findOneScoped: opts.findOneScoped ?? jest.fn().mockResolvedValue(opts.incident ?? incident()),
     countOpenOwnedBy: jest.fn().mockResolvedValue(new Map(Object.entries(opts.workload ?? {}))),
   } as unknown as IncidentsService;
@@ -217,62 +215,13 @@ describe("RoutingService.suggestForIncident", () => {
   });
 });
 
-const CREATED = { incidentId: "inc-1", siteId: "site-1", correlationId: "corr-1" };
-
-describe("RoutingService.onIncidentCreated (auto-assign)", () => {
-  it("does nothing when the site has no policy (auto-assign off by default)", async () => {
-    const { service, incidentsService } = makeService({ policy: null });
-    await service.onIncidentCreated(CREATED, NOW);
-    expect(incidentsService.findOne).not.toHaveBeenCalled();
-    expect(incidentsService.autoAssign).not.toHaveBeenCalled();
-  });
-
-  it("does nothing when the site's policy is switched off", async () => {
-    const { service, incidentsService } = makeService({
-      policy: { id: "policy-1", autoAssignEnabled: false },
-    });
-    await service.onIncidentCreated(CREATED, NOW);
-    expect(incidentsService.autoAssign).not.toHaveBeenCalled();
-  });
-
-  it("assigns the top-ranked candidate when enabled", async () => {
-    const { service, incidentsService } = makeService({
-      policy: { id: "policy-1", autoAssignEnabled: true },
-      working: [rosterEntry("busy"), rosterEntry("free")],
-      skills: { busy: [STORAGE.id], free: [STORAGE.id] },
-      workload: { busy: 2 },
-    });
-    await service.onIncidentCreated(CREATED, NOW);
-    expect(incidentsService.autoAssign).toHaveBeenCalledWith("inc-1", "free", "corr-1");
-  });
-
-  it("leaves the incident alone when nobody qualifies", async () => {
-    const { service, incidentsService } = makeService({
-      policy: { id: "policy-1", autoAssignEnabled: true },
-      working: [rosterEntry("eng-a")],
-      skills: {},
-    });
-    await service.onIncidentCreated(CREATED, NOW);
-    expect(incidentsService.autoAssign).not.toHaveBeenCalled();
-  });
-
-  it("swallows failures so incident creation is never affected", async () => {
-    const { service } = makeService({
-      policy: { id: "policy-1", autoAssignEnabled: true },
-      working: [rosterEntry("eng-a")],
-      skills: { "eng-a": [STORAGE.id] },
-      autoAssign: jest.fn().mockRejectedValue(new Error("db down")),
-    });
-    await expect(service.onIncidentCreated(CREATED, NOW)).resolves.toBeUndefined();
-  });
-});
-
 describe("RoutingService policy", () => {
-  it("reads an unconfigured site as auto-assign off", async () => {
+  it("reads an unconfigured site as auto-routing off with a 5 minute accept window", async () => {
     const { service } = makeService({ policy: null });
     await expect(service.getPolicy("site-1", USER)).resolves.toEqual({
       siteId: "site-1",
       autoAssignEnabled: false,
+      offerTimeoutMinutes: 5,
     });
   });
 
@@ -294,14 +243,19 @@ describe("RoutingService policy", () => {
 
   it("upserts and audits a first-time enable as CREATE", async () => {
     const { service, tx, auditService } = makeService({ policy: null });
-    const result = await service.setPolicy("site-1", { autoAssignEnabled: true }, USER, {
-      actorId: "admin-1",
-      correlationId: "corr-1",
-    });
+    const result = await service.setPolicy(
+      "site-1",
+      { autoAssignEnabled: true, offerTimeoutMinutes: 10 },
+      USER,
+      { actorId: "admin-1", correlationId: "corr-1" },
+    );
 
-    expect(result).toEqual({ siteId: "site-1", autoAssignEnabled: true });
+    expect(result).toEqual({ siteId: "site-1", autoAssignEnabled: true, offerTimeoutMinutes: 10 });
     expect(tx.routingPolicy.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { siteId: "site-1" } }),
+      expect.objectContaining({
+        where: { siteId: "site-1" },
+        update: { autoAssignEnabled: true, offerTimeoutMinutes: 10 },
+      }),
     );
     expect(auditService.record).toHaveBeenCalledWith(
       expect.objectContaining({

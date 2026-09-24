@@ -58,7 +58,12 @@ interface SupportCalendar {
 interface RoutingPolicy {
   siteId: string;
   autoAssignEnabled: boolean;
+  offerTimeoutMinutes: number;
 }
+
+// Mirrors UpdateRoutingPolicyDto's bounds.
+const MIN_OFFER_MINUTES = 1;
+const MAX_OFFER_MINUTES = 120;
 
 /**
  * Per-site skill-based routing switch (GET/PATCH /routing/policies/:siteId).
@@ -72,27 +77,41 @@ function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boo
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [minutesDraft, setMinutesDraft] = useState("");
 
   useEffect(() => {
     setLoadError(null);
     apiGet<RoutingPolicy>(`/routing/policies/${siteId}`)
-      .then(setPolicy)
+      .then((p) => {
+        setPolicy(p);
+        setMinutesDraft(String(p.offerTimeoutMinutes));
+      })
       .catch((err: Error) => setLoadError(err.message));
   }, [siteId]);
 
-  const toggle = async (autoAssignEnabled: boolean) => {
+  const save = async (changes: Partial<Omit<RoutingPolicy, "siteId">>) => {
+    if (!policy) return;
     setSaving(true);
     setSaveError(null);
     try {
-      setPolicy(
-        await apiPatch<RoutingPolicy>(`/routing/policies/${siteId}`, { autoAssignEnabled }),
-      );
+      const next = await apiPatch<RoutingPolicy>(`/routing/policies/${siteId}`, {
+        autoAssignEnabled: policy.autoAssignEnabled,
+        offerTimeoutMinutes: policy.offerTimeoutMinutes,
+        ...changes,
+      });
+      setPolicy(next);
+      setMinutesDraft(String(next.offerTimeoutMinutes));
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
   };
+
+  const minutes = Number(minutesDraft);
+  const minutesValid =
+    Number.isInteger(minutes) && minutes >= MIN_OFFER_MINUTES && minutes <= MAX_OFFER_MINUTES;
+  const minutesChanged = policy !== null && minutes !== policy.offerTimeoutMinutes;
 
   return (
     <Paper sx={{ p: 2, mb: 3 }}>
@@ -106,7 +125,7 @@ function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boo
           <AltRouteOutlinedIcon color="primary" sx={{ mt: 0.5 }} />
           <Box>
             <Stack direction="row" spacing={1} alignItems="center">
-              <Typography variant="h6">Auto-assign new incidents</Typography>
+              <Typography variant="h6">Auto-route new incidents</Typography>
               {policy && (
                 <Chip
                   size="small"
@@ -116,9 +135,10 @@ function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boo
               )}
             </Stack>
             <Typography variant="body2" color="text.secondary">
-              New incidents at this site go straight to ASSIGNED, owned by the least-busy engineer
-              who is on shift here and has every skill the incident's category requires. If nobody
-              qualifies, the incident stays NEW for the service desk.
+              Each new incident at this site is offered to the least-busy engineer who is on shift
+              here and has every skill its category requires. It's assigned to them once they
+              accept. If they decline or don't answer in time, it's offered to the next engineer. If
+              nobody accepts, it stays NEW and the service desk is told to assign it.
             </Typography>
           </Box>
         </Stack>
@@ -128,8 +148,8 @@ function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boo
               <Switch
                 checked={policy.autoAssignEnabled}
                 disabled={!canWrite || saving}
-                onChange={(e) => toggle(e.target.checked)}
-                inputProps={{ "aria-label": "Auto-assign new incidents" }}
+                onChange={(e) => save({ autoAssignEnabled: e.target.checked })}
+                inputProps={{ "aria-label": "Auto-route new incidents" }}
               />
             }
             label={saving ? "Saving…" : ""}
@@ -137,6 +157,50 @@ function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boo
           />
         )}
       </Stack>
+      {policy && (
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={1.5}
+          alignItems={{ xs: "stretch", sm: "center" }}
+          sx={{ mt: 2, pl: { sm: 4.5 } }}
+        >
+          <TextField
+            size="small"
+            type="number"
+            label="Time to accept (minutes)"
+            value={minutesDraft}
+            onChange={(e) => setMinutesDraft(e.target.value)}
+            disabled={!canWrite || saving}
+            error={!minutesValid}
+            helperText={
+              minutesValid
+                ? "How long each engineer has before the offer moves on"
+                : `Enter a whole number from ${MIN_OFFER_MINUTES} to ${MAX_OFFER_MINUTES}`
+            }
+            inputProps={{ min: MIN_OFFER_MINUTES, max: MAX_OFFER_MINUTES, step: 1 }}
+            sx={{ width: { xs: "100%", sm: 260 } }}
+          />
+          {canWrite && minutesChanged && (
+            <Stack direction="row" spacing={1}>
+              <Button
+                variant="contained"
+                size="small"
+                disabled={!minutesValid || saving}
+                onClick={() => save({ offerTimeoutMinutes: minutes })}
+              >
+                Save
+              </Button>
+              <Button
+                size="small"
+                disabled={saving}
+                onClick={() => setMinutesDraft(String(policy.offerTimeoutMinutes))}
+              >
+                Cancel
+              </Button>
+            </Stack>
+          )}
+        </Stack>
+      )}
       {!policy && !loadError && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
           Loading...

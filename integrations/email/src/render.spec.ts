@@ -71,6 +71,30 @@ describe("renderNotification", () => {
     expect(mail.headers["X-Priority"]).toBe("1");
   });
 
+  it("renders a routing offer with its accept window", () => {
+    const mail = renderNotification(
+      {
+        kind: "INCIDENT_OFFERED",
+        entity: incident(),
+        offeredTo: LEAD,
+        expiresAt: "2026-09-03T12:05:00.000Z",
+        timeoutMinutes: 5,
+      },
+      { to: [LEAD] },
+    );
+    expect(mail.subject).toBe("‼ [SITE01] INC-1042 — offered to you (accept within 5 min)");
+    expect(mail.text).toContain("before 2026-09-03T12:05:00.000Z");
+  });
+
+  it("tells the desk when nobody accepted a routing offer", () => {
+    const mail = renderNotification(
+      { kind: "INCIDENT_OFFER_UNACCEPTED", entity: incident(), offeredTo: ["Ana", "Ben"] },
+      { to: [LEAD] },
+    );
+    expect(mail.subject).toContain("no engineer accepted");
+    expect(mail.text).toContain("It was offered to: Ana, Ben.");
+  });
+
   it("phrases the SLA warning window and flags urgency under 15 min", () => {
     const near = renderNotification(
       {

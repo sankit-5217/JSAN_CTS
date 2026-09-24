@@ -1,12 +1,10 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { OnEvent } from "@nestjs/event-emitter";
 import { Incident } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
-import { INCIDENT_CREATED_EVENT, IncidentCreatedEvent } from "../incidents/incident-events";
 import { OPEN_STATUSES } from "../incidents/incident-transitions";
 import { IncidentsService } from "../incidents/incidents.service";
 import { RosterEntry, ShiftsService } from "../shifts/shifts.service";
@@ -44,10 +42,15 @@ export interface RoutingSuggestions {
   uncoveredSkills: RoutingSkillRef[];
 }
 
-/** A site with no RoutingPolicy row reads as this (auto-assign off). */
+/** Matches the column default on routing_policies.offer_timeout_minutes,
+ *  for sites that have never saved a policy. */
+export const DEFAULT_OFFER_TIMEOUT_MINUTES = 5;
+
+/** A site with no RoutingPolicy row reads as this (auto-routing off). */
 export interface RoutingPolicyView {
   siteId: string;
   autoAssignEnabled: boolean;
+  offerTimeoutMinutes: number;
 }
 
 /**
@@ -62,10 +65,8 @@ export interface RoutingPolicyView {
  * Empty results always carry a `reason` instead of silently widening the
  * pool — the desk assigns manually or to a group queue from there.
  *
- * Phase 4: when a site's RoutingPolicy.autoAssignEnabled is on, a newly
- * created incident there is moved NEW -> ASSIGNED to the top candidate
- * (via IncidentsService.autoAssign, which audits it). No candidate means
- * no change — the ticket stays NEW for the desk, same as with it off.
+ * When a site's RoutingPolicy.autoAssignEnabled is on, RoutingOffersService
+ * offers each new incident there to these candidates one at a time.
  */
 @Injectable()
 export class RoutingService {
@@ -90,53 +91,14 @@ export class RoutingService {
     return this.rank(incident, now);
   }
 
-  /**
-   * Listener for INCIDENT_CREATED_EVENT. Runs after the create has
-   * committed and returned; any failure here is logged and swallowed — a
-   * routing problem must never surface as a failed incident creation, and
-   * the ticket simply stays NEW for the desk.
-   */
-  @OnEvent(INCIDENT_CREATED_EVENT, { async: true })
-  async onIncidentCreated(event: IncidentCreatedEvent, now: Date = new Date()): Promise<void> {
-    try {
-      const policy = await this.prisma.routingPolicy.findUnique({
-        where: { siteId: event.siteId },
-      });
-      if (!policy?.autoAssignEnabled) {
-        return;
-      }
-
-      const incident = await this.incidentsService.findOne(event.incidentId);
-      const suggestions = await this.rank(incident, now);
-      const top = suggestions.candidates[0];
-      if (!top) {
-        this.logger.log(
-          `auto-assign skipped for incident ${incident.id}: ${suggestions.reason ?? "no candidates"}`,
-        );
-        return;
-      }
-
-      const assigned = await this.incidentsService.autoAssign(
-        incident.id,
-        top.userId,
-        event.correlationId,
-      );
-      this.logger.log(
-        assigned
-          ? `auto-assigned incident ${incident.id} to ${top.userId}`
-          : `auto-assign skipped for incident ${incident.id}: no longer NEW and unowned`,
-      );
-    } catch (err) {
-      this.logger.error(
-        `auto-assign failed for incident ${event.incidentId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-
   async getPolicy(siteId: string, user: AuthenticatedUser): Promise<RoutingPolicyView> {
     await this.assertSiteAccess(user, siteId);
     const policy = await this.prisma.routingPolicy.findUnique({ where: { siteId } });
-    return { siteId, autoAssignEnabled: policy?.autoAssignEnabled ?? false };
+    return {
+      siteId,
+      autoAssignEnabled: policy?.autoAssignEnabled ?? false,
+      offerTimeoutMinutes: policy?.offerTimeoutMinutes ?? DEFAULT_OFFER_TIMEOUT_MINUTES,
+    };
   }
 
   async setPolicy(
@@ -155,8 +117,15 @@ export class RoutingService {
     const after = await this.prisma.$transaction(async (tx) => {
       const after = await tx.routingPolicy.upsert({
         where: { siteId },
-        update: { autoAssignEnabled: dto.autoAssignEnabled },
-        create: { siteId, autoAssignEnabled: dto.autoAssignEnabled },
+        update: {
+          autoAssignEnabled: dto.autoAssignEnabled,
+          offerTimeoutMinutes: dto.offerTimeoutMinutes,
+        },
+        create: {
+          siteId,
+          autoAssignEnabled: dto.autoAssignEnabled,
+          offerTimeoutMinutes: dto.offerTimeoutMinutes,
+        },
       });
       await this.auditService.record(
         {
@@ -172,7 +141,11 @@ export class RoutingService {
       );
       return after;
     });
-    return { siteId, autoAssignEnabled: after.autoAssignEnabled };
+    return {
+      siteId,
+      autoAssignEnabled: after.autoAssignEnabled,
+      offerTimeoutMinutes: after.offerTimeoutMinutes,
+    };
   }
 
   private async assertSiteAccess(user: AuthenticatedUser, siteId: string): Promise<void> {
@@ -181,7 +154,9 @@ export class RoutingService {
     }
   }
 
-  private async rank(incident: Incident, now: Date): Promise<RoutingSuggestions> {
+  /** The ranked candidates for an incident the caller is already allowed
+   *  to act on. Also used by RoutingOffersService to pick who to offer to. */
+  async rank(incident: Incident, now: Date): Promise<RoutingSuggestions> {
     const result: RoutingSuggestions = {
       incidentId: incident.id,
       category: incident.category,

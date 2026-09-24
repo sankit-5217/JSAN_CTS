@@ -22,6 +22,8 @@ import FiberNewOutlinedIcon from "@mui/icons-material/FiberNewOutlined";
 import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
 import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import NotificationsOutlinedIcon from "@mui/icons-material/NotificationsOutlined";
+import PanToolOutlinedIcon from "@mui/icons-material/PanToolOutlined";
+import PersonOffOutlinedIcon from "@mui/icons-material/PersonOffOutlined";
 import SyncAltOutlinedIcon from "@mui/icons-material/SyncAltOutlined";
 import TimerOffOutlinedIcon from "@mui/icons-material/TimerOffOutlined";
 import TimerOutlinedIcon from "@mui/icons-material/TimerOutlined";
@@ -34,7 +36,9 @@ type NotificationKind =
   | "INCIDENT_STATUS_CHANGED"
   | "INCIDENT_COMMENT_ADDED"
   | "SLA_WARNING"
-  | "SLA_BREACHED";
+  | "SLA_BREACHED"
+  | "INCIDENT_OFFERED"
+  | "INCIDENT_OFFER_UNACCEPTED";
 
 interface InAppNotification {
   id: string;
@@ -67,6 +71,11 @@ const KIND_STYLE: Record<NotificationKind, { icon: ReactNode; color: string }> =
   },
   SLA_WARNING: { icon: <TimerOutlinedIcon fontSize="small" />, color: "#ed6c02" },
   SLA_BREACHED: { icon: <TimerOffOutlinedIcon fontSize="small" />, color: "#d32f2f" },
+  INCIDENT_OFFERED: { icon: <PanToolOutlinedIcon fontSize="small" />, color: "#ed6c02" },
+  INCIDENT_OFFER_UNACCEPTED: {
+    icon: <PersonOffOutlinedIcon fontSize="small" />,
+    color: "#d32f2f",
+  },
 };
 
 function timeAgo(iso: string, now: number): string {
@@ -231,7 +240,8 @@ export function NotificationBell({ linkFor }: NotificationBellProps) {
               <NotificationsNoneOutlinedIcon sx={{ fontSize: 36, opacity: 0.6 }} />
               <Typography sx={{ fontSize: 13.5 }}>You're all caught up.</Typography>
               <Typography sx={{ fontSize: 12, textAlign: "center" }}>
-                Ticket assignments, status changes, comments and SLA alerts will show up here.
+                Ticket offers, assignments, status changes, comments and SLA alerts will show up
+                here.
               </Typography>
             </Stack>
           )}

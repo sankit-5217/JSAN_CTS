@@ -15,3 +15,19 @@ export interface IncidentCreatedEvent {
   siteId: string;
   correlationId?: string;
 }
+
+/**
+ * Emitted after a PATCH or a status transition commits, with the incident's
+ * new status and ownership. The routing module uses it to cancel an open
+ * offer once the ticket has been assigned or moved on some other way.
+ */
+export const INCIDENT_UPDATED_EVENT = "incident.updated";
+
+export interface IncidentUpdatedEvent {
+  incidentId: string;
+  status: string;
+  ownerUserId: string | null;
+  ownerGroupId: string | null;
+  actorId: string | null;
+  correlationId?: string;
+}

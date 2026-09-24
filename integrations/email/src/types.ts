@@ -60,6 +60,22 @@ export type NotificationEvent =
     }
   | { kind: "SLA_BREACHED"; entity: EntityRef; slaKind: SlaKind; breachedAt: string }
   | {
+      /** A new ticket is offered to one engineer, who has until expiresAt
+       *  to accept it in the portal before it moves to the next candidate. */
+      kind: "INCIDENT_OFFERED";
+      entity: EntityRef;
+      offeredTo: Party;
+      expiresAt: string;
+      timeoutMinutes: number;
+    }
+  | {
+      /** Every qualified engineer declined or let the offer expire, so the
+       *  ticket is back with the service desk. */
+      kind: "INCIDENT_OFFER_UNACCEPTED";
+      entity: EntityRef;
+      offeredTo: string[];
+    }
+  | {
       kind: "CHANGE_APPROVED";
       entity: EntityRef;
       approver: Party;

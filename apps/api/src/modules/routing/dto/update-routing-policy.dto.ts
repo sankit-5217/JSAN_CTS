@@ -1,11 +1,23 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { IsBoolean } from "class-validator";
+import { IsBoolean, IsInt, IsOptional, Max, Min } from "class-validator";
 
 export class UpdateRoutingPolicyDto {
   @ApiProperty({
     description:
-      "Auto-assign newly created incidents at this site to the top skill-routing suggestion (NEW -> ASSIGNED)",
+      "Auto-route newly created incidents at this site: offer each one to the best-matched engineer on shift, then the next if they decline or don't answer",
   })
   @IsBoolean()
   autoAssignEnabled!: boolean;
+
+  @ApiProperty({
+    required: false,
+    minimum: 1,
+    maximum: 120,
+    description: "Minutes an engineer has to accept an offer before it moves on (default 5)",
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(120)
+  offerTimeoutMinutes?: number;
 }

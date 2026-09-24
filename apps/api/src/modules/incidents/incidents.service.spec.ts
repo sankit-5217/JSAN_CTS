@@ -140,6 +140,7 @@ function makeService(
     incidentEvent: {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn().mockResolvedValue({ id: "event-1" }),
     },
     attachment: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -899,16 +900,14 @@ describe("IncidentsService.createTransition", () => {
         .mockResolvedValue(
           baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
         ),
-      alertFindMany: jest
-        .fn()
-        .mockResolvedValue([
-          {
-            id: "alert-1",
-            alertType: "hardware.health_degraded",
-            severity: "CRITICAL",
-            state: "OPEN",
-          },
-        ]),
+      alertFindMany: jest.fn().mockResolvedValue([
+        {
+          id: "alert-1",
+          alertType: "hardware.health_degraded",
+          severity: "CRITICAL",
+          state: "OPEN",
+        },
+      ]),
     });
     await expect(
       service.createTransition(
@@ -931,16 +930,14 @@ describe("IncidentsService.createTransition", () => {
         .mockResolvedValue(
           baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
         ),
-      alertFindMany: jest
-        .fn()
-        .mockResolvedValue([
-          {
-            id: "alert-1",
-            alertType: "hardware.health_degraded",
-            severity: "CRITICAL",
-            state: "OPEN",
-          },
-        ]),
+      alertFindMany: jest.fn().mockResolvedValue([
+        {
+          id: "alert-1",
+          alertType: "hardware.health_degraded",
+          severity: "CRITICAL",
+          state: "OPEN",
+        },
+      ]),
     });
     const result = await service.createTransition(
       "incident-1",
@@ -1281,16 +1278,14 @@ describe("IncidentsService.getAvailableTransitions", () => {
         .mockResolvedValue(
           baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
         ),
-      alertFindMany: jest
-        .fn()
-        .mockResolvedValue([
-          {
-            id: "alert-1",
-            alertType: "hardware.health_degraded",
-            severity: "CRITICAL",
-            state: "OPEN",
-          },
-        ]),
+      alertFindMany: jest.fn().mockResolvedValue([
+        {
+          id: "alert-1",
+          alertType: "hardware.health_degraded",
+          severity: "CRITICAL",
+          state: "OPEN",
+        },
+      ]),
     });
     const result = await service.getAvailableTransitions("incident-1", engineer);
     const resolved = result.find((r) => r.toStatus === IncidentStatus.RESOLVED);
@@ -1995,5 +1990,77 @@ describe("IncidentsService in-app notifications", () => {
         }),
       ]),
     );
+  });
+});
+
+describe("IncidentsService routing-offer hooks", () => {
+  it("publishes incident.updated after a transition assigns the ticket", async () => {
+    const { service, events } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+    });
+    await service.createTransition(
+      "incident-1",
+      { toStatus: IncidentStatus.ASSIGNED, ownerUserId: "engineer-1" },
+      { actorId: serviceDesk.id, correlationId: "corr-1" },
+      serviceDesk,
+    );
+    expect(events.emit).toHaveBeenCalledWith(
+      "incident.updated",
+      expect.objectContaining({
+        incidentId: "incident-1",
+        actorId: serviceDesk.id,
+        correlationId: "corr-1",
+      }),
+    );
+  });
+
+  it("publishes incident.updated after a PATCH", async () => {
+    const { service, events } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerUserId: null })),
+    });
+    await service.update("incident-1", { ownerUserId: "engineer-2" }, serviceDesk, {
+      actorId: serviceDesk.id,
+    });
+    expect(events.emit).toHaveBeenCalledWith(
+      "incident.updated",
+      expect.objectContaining({ incidentId: "incident-1", actorId: serviceDesk.id }),
+    );
+  });
+
+  it("records the accepting engineer as the actor when an offer is accepted", async () => {
+    const { service, tx, auditService, inbox } = makeService();
+
+    await service.autoAssign("incident-1", "eng-1", "corr-1", "eng-1");
+
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "STATUS_CHANGE",
+          actorId: "eng-1",
+          payload: expect.objectContaining({ source: "ROUTING_OFFER" }),
+        }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "TRANSITION", actorId: "eng-1" }),
+      tx,
+    );
+    // They accepted it themselves, so no "assigned to you" in their own bell.
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "INCIDENT_ASSIGNED", actorUserId: "eng-1" }),
+    );
+  });
+
+  it("writes routing timeline entries as ROUTING events", async () => {
+    const { service, prisma } = makeService();
+    await service.recordRoutingEvent("incident-1", null, { action: "OFFERED", userId: "eng-1" });
+    expect(prisma.incidentEvent.create).toHaveBeenCalledWith({
+      data: {
+        incidentId: "incident-1",
+        eventType: "ROUTING",
+        actorId: null,
+        payload: { action: "OFFERED", userId: "eng-1" },
+      },
+    });
   });
 });

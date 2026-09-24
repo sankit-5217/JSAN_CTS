@@ -26,13 +26,16 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { keyframes } from "@mui/material/styles";
+import { alpha, keyframes } from "@mui/material/styles";
+import AssignmentIndOutlinedIcon from "@mui/icons-material/AssignmentIndOutlined";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import HourglassTopOutlinedIcon from "@mui/icons-material/HourglassTopOutlined";
 import PersonOffOutlinedIcon from "@mui/icons-material/PersonOffOutlined";
 import PersonSearchOutlinedIcon from "@mui/icons-material/PersonSearchOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
-import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "../api/client";
-import { getCurrentUserRole } from "../api/jwt";
+import TimerOutlinedIcon from "@mui/icons-material/TimerOutlined";
+import { apiDelete, apiGet, apiPatch, apiPost, apiUpload, getStoredToken } from "../api/client";
+import { decodeJwtPayload, getCurrentUserRole } from "../api/jwt";
 import { severityColors } from "../theme/theme";
 
 const pulse = keyframes`
@@ -106,6 +109,28 @@ interface IncidentEvent {
   actorId: string | null;
   payload: Record<string, unknown>;
   createdAt: string;
+}
+
+/** Plain-language line for a ROUTING timeline entry; null for other types
+ *  (they keep the raw payload view). */
+function describeRoutingEvent(e: IncidentEvent): string | null {
+  if (e.eventType !== "ROUTING") return null;
+  const p = e.payload;
+  const name = typeof p.displayName === "string" ? p.displayName : "an engineer";
+  switch (p.action) {
+    case "OFFERED":
+      return `Offered to ${name}, who has until ${new Date(String(p.expiresAt)).toLocaleTimeString()} to accept`;
+    case "DECLINED":
+      return p.reason ? `${name} declined: "${String(p.reason)}"` : `${name} declined`;
+    case "EXPIRED":
+      return `${name} didn't answer in time`;
+    case "UNACCEPTED":
+      return `No engineer accepted. Offered to ${
+        Array.isArray(p.offeredTo) ? p.offeredTo.join(", ") : "everyone qualified"
+      }. Back to the service desk`;
+    default:
+      return null;
+  }
 }
 
 interface Comment {
@@ -529,6 +554,246 @@ function RoutingSuggestionsCard({
   );
 }
 
+interface RoutingOffer {
+  id: string;
+  userId: string;
+  displayName: string;
+  status: "PENDING" | "ACCEPTED" | "DECLINED" | "EXPIRED" | "CANCELLED";
+  expiresAt: string;
+  respondedAt: string | null;
+  declineReason: string | null;
+  createdAt: string;
+}
+
+interface IncidentRoutingOffers {
+  incidentId: string;
+  pending: RoutingOffer | null;
+  history: RoutingOffer[];
+}
+
+const OFFER_POLL_MS = 4000;
+
+function countdown(msLeft: number): string {
+  const total = Math.max(0, Math.ceil(msLeft / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function offerOutcome(o: RoutingOffer): string {
+  switch (o.status) {
+    case "DECLINED":
+      return o.declineReason ? `declined: "${o.declineReason}"` : "declined";
+    case "EXPIRED":
+      return "didn't answer in time";
+    case "CANCELLED":
+      return "offer withdrawn";
+    case "ACCEPTED":
+      return "accepted";
+    default:
+      return "waiting";
+  }
+}
+
+/**
+ * Offer/accept routing (GET /incidents/:id/routing-offers). Three views:
+ * the engineer the ticket is offered to gets Accept / Decline with a
+ * countdown; everyone else sees who it's waiting on; and once nobody has
+ * accepted, the desk sees who declined so it can assign by hand. Hidden
+ * when the ticket has no offers. Polls while the ticket is still NEW so an
+ * offer moving on shows up without a reload. Accept and decline are
+ * re-checked by the backend (only the offered engineer can answer).
+ */
+function RoutingOfferBanner({
+  incident,
+  currentUserId,
+  onChanged,
+}: {
+  incident: Incident;
+  currentUserId: string | null;
+  onChanged: () => void;
+}) {
+  const [offers, setOffers] = useState<IncidentRoutingOffers | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"accept" | "decline" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [declining, setDeclining] = useState(false);
+  const [reason, setReason] = useState("");
+  const [now, setNow] = useState(() => Date.now());
+
+  const isOpenNew = incident.status === "NEW" && !incident.ownerUserId && !incident.ownerGroupId;
+
+  const load = useCallback(() => {
+    apiGet<IncidentRoutingOffers>(`/incidents/${incident.id}/routing-offers`)
+      .then((result) => {
+        setOffers(result);
+        setLoadError(null);
+      })
+      .catch((err: Error) => setLoadError(err.message));
+  }, [incident.id]);
+
+  useEffect(load, [load, incident.status, incident.ownerUserId, incident.ownerGroupId]);
+
+  useEffect(() => {
+    if (!isOpenNew) return undefined;
+    const tick = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    const intervalId = window.setInterval(tick, OFFER_POLL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [isOpenNew, load]);
+
+  const pending = offers?.pending ?? null;
+  useEffect(() => {
+    if (!pending) return undefined;
+    const intervalId = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, [pending]);
+
+  const respond = async (kind: "accept" | "decline") => {
+    setBusy(kind);
+    setActionError(null);
+    try {
+      await apiPost(
+        `/incidents/${incident.id}/routing-offers/${kind}`,
+        kind === "decline" && reason.trim() ? { reason: reason.trim() } : undefined,
+      );
+      setDeclining(false);
+      setReason("");
+      load();
+      onChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+      load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (loadError) {
+    return (
+      <Alert severity="error" sx={{ mb: 2 }}>
+        Could not load routing offers: {loadError}
+      </Alert>
+    );
+  }
+  if (!offers || offers.history.length === 0) {
+    return null;
+  }
+
+  const past = offers.history.filter((o) => o.status !== "PENDING" && o.status !== "ACCEPTED");
+  const pastSummary = past.map((o) => `${o.displayName} (${offerOutcome(o)})`).join(", ");
+  const msLeft = pending ? new Date(pending.expiresAt).getTime() - now : 0;
+
+  if (pending && pending.userId === currentUserId) {
+    return (
+      <Paper
+        sx={{
+          p: 2,
+          mb: 2,
+          border: 2,
+          borderColor: "warning.main",
+          bgcolor: (theme) => alpha(theme.palette.warning.main, 0.06),
+        }}
+      >
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={2}
+          alignItems={{ xs: "stretch", sm: "center" }}
+          justifyContent="space-between"
+        >
+          <Stack direction="row" spacing={1.5} alignItems="flex-start">
+            <AssignmentIndOutlinedIcon color="warning" sx={{ mt: 0.25 }} />
+            <Box>
+              <Typography variant="h6">This ticket is offered to you</Typography>
+              <Typography variant="body2" color="text.secondary">
+                It matches your skills and your shift. Accept to take ownership, or decline so it
+                goes to the next engineer.
+              </Typography>
+            </Box>
+          </Stack>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
+            <Chip
+              icon={<TimerOutlinedIcon />}
+              color={msLeft < 60_000 ? "error" : "warning"}
+              label={msLeft > 0 ? `${countdown(msLeft)} left` : "Expiring…"}
+              sx={{ fontVariantNumeric: "tabular-nums" }}
+            />
+            <Button
+              variant="contained"
+              color="success"
+              disabled={busy !== null || msLeft <= 0}
+              onClick={() => respond("accept")}
+            >
+              {busy === "accept" ? "Accepting…" : "Accept"}
+            </Button>
+            <Button
+              variant="outlined"
+              color="inherit"
+              disabled={busy !== null || msLeft <= 0}
+              onClick={() => setDeclining((d) => !d)}
+            >
+              Decline
+            </Button>
+          </Stack>
+        </Stack>
+        {declining && (
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1}
+            alignItems={{ xs: "stretch", sm: "flex-start" }}
+            sx={{ mt: 2 }}
+          >
+            <TextField
+              size="small"
+              label="Reason (optional)"
+              placeholder="e.g. On site at another data center"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              inputProps={{ maxLength: 500 }}
+              sx={{ flex: 1 }}
+            />
+            <Button
+              variant="contained"
+              color="error"
+              disabled={busy !== null}
+              onClick={() => respond("decline")}
+            >
+              {busy === "decline" ? "Declining…" : "Confirm decline"}
+            </Button>
+          </Stack>
+        )}
+        {actionError && (
+          <Alert severity="error" sx={{ mt: 2 }} onClose={() => setActionError(null)}>
+            {actionError}
+          </Alert>
+        )}
+      </Paper>
+    );
+  }
+
+  if (pending) {
+    return (
+      <Alert severity="info" icon={<HourglassTopOutlinedIcon />} sx={{ mb: 2 }}>
+        Offered to <strong>{pending.displayName}</strong>, waiting for them to accept (
+        <Box component="span" sx={{ fontVariantNumeric: "tabular-nums" }}>
+          {msLeft > 0 ? `${countdown(msLeft)} left` : "expiring"}
+        </Box>
+        ).{pastSummary && ` Earlier: ${pastSummary}.`}
+      </Alert>
+    );
+  }
+
+  if (isOpenNew && past.length > 0) {
+    return (
+      <Alert severity="warning" sx={{ mb: 2 }}>
+        No engineer accepted this ticket. Offered to {pastSummary}. Assign it manually below.
+      </Alert>
+    );
+  }
+  return null;
+}
+
 /**
  * Incident workspace (frontend-depth plan, Steps 3-4): header, SLA
  * countdown snapshot, status transition, comments, worklogs (add +
@@ -543,6 +808,8 @@ function RoutingSuggestionsCard({
 export function IncidentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const canRoute = INCIDENT_ROUTING_ROLES.includes(getCurrentUserRole() ?? "");
+  const storedToken = getStoredToken();
+  const currentUserId = storedToken ? (decodeJwtPayload(storedToken)?.sub ?? null) : null;
   const [incident, setIncident] = useState<Incident | null>(null);
   const [sla, setSla] = useState<SlaState | null>(null);
   const [events, setEvents] = useState<IncidentEvent[]>([]);
@@ -932,6 +1199,12 @@ export function IncidentDetailPage() {
           {actionError}
         </Alert>
       )}
+
+      <RoutingOfferBanner
+        incident={incident}
+        currentUserId={currentUserId}
+        onChanged={() => refetch()}
+      />
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} md={canRoute ? 8 : 12}>
@@ -1471,7 +1744,7 @@ export function IncidentDetailPage() {
                     <strong>{e.eventType}</strong> — {new Date(e.createdAt).toLocaleString()}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {JSON.stringify(e.payload)}
+                    {describeRoutingEvent(e) ?? JSON.stringify(e.payload)}
                   </Typography>
                   <Divider sx={{ mt: 1 }} />
                 </Box>

@@ -114,6 +114,24 @@ function renderBody(event: NotificationEvent): Rendered {
           `The ${event.slaKind.toLowerCase()} SLA for ${event.entity.key} breached at ${event.breachedAt}.`,
         ],
       };
+    case "INCIDENT_OFFERED":
+      return {
+        phrase: `offered to you (accept within ${minutesPhrase(event.timeoutMinutes)})`,
+        urgent: true,
+        lines: [
+          `${event.entity.key} matches your skills and shift, so it has been offered to ${addr(event.offeredTo)}.`,
+          `Accept or decline it in the portal before ${event.expiresAt}. If you don't respond, it goes to the next engineer.`,
+        ],
+      };
+    case "INCIDENT_OFFER_UNACCEPTED":
+      return {
+        phrase: "no engineer accepted, needs manual assignment",
+        urgent: true,
+        lines: [
+          `No engineer accepted ${event.entity.key}. It was offered to: ${event.offeredTo.join(", ")}.`,
+          "It is still NEW and unowned. Please assign it manually.",
+        ],
+      };
     case "CHANGE_APPROVED":
       return {
         phrase: `approved by ${event.approver.name ?? event.approver.email}`,

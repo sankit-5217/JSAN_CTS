@@ -167,6 +167,7 @@ model User {
   engineerShifts      EngineerShift[]
   userSkills          UserSkill[]
   inAppNotifications  InAppNotification[]
+  routingOffers       RoutingOffer[]
 
   @@map("users")
 }
@@ -359,21 +360,58 @@ model CategorySkillRequirement {
   @@map("category_skill_requirements")
 }
 
-/// Phase 4 of skill-based routing: per-site switch for auto-assigning a
-/// newly created incident to the top routing suggestion (NEW -> ASSIGNED).
-/// Owned by the routing module; one row per site, created on first write —
-/// a site with no row is treated as autoAssignEnabled = false, so the
-/// feature is opt-in per site (config over hard-code, CLAUDE.md).
+/// Per-site skill-based routing settings. Owned by the routing module; one
+/// row per site, created on first write. A site with no row is treated as
+/// autoAssignEnabled = false, so the feature is opt-in per site (config
+/// over hard-code, CLAUDE.md). When on, a new incident is offered to the
+/// top-ranked engineer, who has offerTimeoutMinutes to accept before it
+/// moves to the next candidate (see RoutingOffer).
 model RoutingPolicy {
-  id                String   @id @default(uuid())
-  siteId            String   @unique @map("site_id")
-  autoAssignEnabled Boolean  @default(false) @map("auto_assign_enabled")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id                  String   @id @default(uuid())
+  siteId              String   @unique @map("site_id")
+  autoAssignEnabled   Boolean  @default(false) @map("auto_assign_enabled")
+  offerTimeoutMinutes Int      @default(5) @map("offer_timeout_minutes")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
   site Site @relation(fields: [siteId], references: [id])
 
   @@map("routing_policies")
+}
+
+enum RoutingOfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  /// The ticket was assigned or moved on some other way while the offer
+  /// was open.
+  CANCELLED
+}
+
+/// One offer of a NEW incident to one engineer. Owned by the routing
+/// module. The incident itself stays NEW and unowned until an offer is
+/// accepted; at most one offer per incident is PENDING at a time (enforced
+/// by the routing service's conditional writes). Declined and expired
+/// offers stay as history so the next round skips those engineers.
+model RoutingOffer {
+  id            String             @id @default(uuid())
+  incidentId    String             @map("incident_id")
+  userId        String             @map("user_id")
+  status        RoutingOfferStatus @default(PENDING)
+  expiresAt     DateTime           @map("expires_at")
+  respondedAt   DateTime?          @map("responded_at")
+  declineReason String?            @map("decline_reason")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  incident Incident @relation(fields: [incidentId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([incidentId, status])
+  @@index([status, expiresAt])
+  @@index([userId, status])
+  @@map("routing_offers")
 }
 
 /// What an in-app notification is about: the subset of the email
@@ -386,6 +424,8 @@ enum InAppNotificationKind {
   INCIDENT_COMMENT_ADDED
   SLA_WARNING
   SLA_BREACHED
+  INCIDENT_OFFERED
+  INCIDENT_OFFER_UNACCEPTED
 }
 
 /// One entry in a user's notification bell. Owned by the inbox module;
@@ -485,18 +525,18 @@ model CiRelation {
 }
 
 model HealthSnapshot {
-  id              String    @id @default(uuid())
-  ciId            String    @unique @map("ci_id")
-  overallHealth   String    @map("overall_health") // HEALTHY / WARNING / CRITICAL / UNKNOWN / MAINTENANCE
-  details         Json?
-  lastHeartbeatAt DateTime? @map("last_heartbeat_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  id               String    @id @default(uuid())
+  ciId             String    @unique @map("ci_id")
+  overallHealth    String    @map("overall_health") // HEALTHY / WARNING / CRITICAL / UNKNOWN / MAINTENANCE
+  details          Json?
+  lastHeartbeatAt  DateTime? @map("last_heartbeat_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
   // Alert.externalEventId of the currently-open hardware-health alert this CI's
   // WARNING/CRITICAL streak opened (see MonitoringService.syncHealthAlert) — null
   // when the CI is HEALTHY/UNKNOWN/MAINTENANCE with no open episode. Lets repeated
   // bad polls update the same alert row and the eventual HEALTHY poll close it,
   // instead of a fresh alert per poll.
-  openAlertEventId String? @map("open_alert_event_id")
+  openAlertEventId String?   @map("open_alert_event_id")
 
   ci ConfigurationItem @relation(fields: [ciId], references: [id])
 
@@ -553,11 +593,12 @@ model Incident {
   ownerGroup SupportGroup?      @relation(fields: [ownerGroupId], references: [id])
   reportedBy User?              @relation("IncidentReportedBy", fields: [reportedByUserId], references: [id])
 
-  events       IncidentEvent[]
-  comments     IncidentComment[]
-  worklogs     Worklog[]
-  slaInstances SlaInstance[]
-  vendorCases  VendorCase[]
+  events        IncidentEvent[]
+  comments      IncidentComment[]
+  worklogs      Worklog[]
+  slaInstances  SlaInstance[]
+  vendorCases   VendorCase[]
+  routingOffers RoutingOffer[]
 
   @@index([siteId])
   @@index([status])

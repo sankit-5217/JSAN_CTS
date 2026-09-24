@@ -33,7 +33,12 @@ import {
   ALLOWED_ATTACHMENT_CONTENT_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
 } from "./attachment.constants";
-import { INCIDENT_CREATED_EVENT, IncidentCreatedEvent } from "./incident-events";
+import {
+  INCIDENT_CREATED_EVENT,
+  INCIDENT_UPDATED_EVENT,
+  IncidentCreatedEvent,
+  IncidentUpdatedEvent,
+} from "./incident-events";
 import { CreateIncidentAsCustomerDto } from "./dto/create-incident-as-customer.dto";
 import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
@@ -394,6 +399,7 @@ export class IncidentsService {
     } else if (ownerChanged && after.ownerGroupId && !after.ownerUserId) {
       await this.notifyGroupAssignment(after, after.ownerGroupId, actor.actorId);
     }
+    this.emitUpdated(after, actor);
 
     return after;
   }
@@ -548,21 +554,55 @@ export class IncidentsService {
     ) {
       await this.notifyGroupAssignment(after, after.ownerGroupId, actor.actorId);
     }
+    this.emitUpdated(after, actor);
 
     return after;
   }
 
+  private emitUpdated(after: Incident, actor: ActorContext): void {
+    const event: IncidentUpdatedEvent = {
+      incidentId: after.id,
+      status: after.status,
+      ownerUserId: after.ownerUserId,
+      ownerGroupId: after.ownerGroupId,
+      actorId: actor.actorId,
+      correlationId: actor.correlationId,
+    };
+    this.events.emit(INCIDENT_UPDATED_EVENT, event);
+  }
+
   /**
-   * System-initiated NEW -> ASSIGNED for skill-based auto-routing (routing
-   * module, Phase 4). Not createTransition(): there's no authenticated
-   * caller whose role could be checked (a customer-portal ticket's creator
-   * can't assign at all) — the authorization here is the admin-enabled
-   * per-site RoutingPolicy, checked by the routing module before calling.
+   * Adds a ROUTING entry to the incident's timeline (offered, declined,
+   * expired, nobody accepted). The routing module owns the offers but not
+   * incident_events, so it records timeline entries through here.
+   */
+  async recordRoutingEvent(
+    incidentId: string,
+    actorId: string | null,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    await this.prisma.incidentEvent.create({
+      data: {
+        incidentId,
+        eventType: "ROUTING",
+        actorId,
+        payload: payload as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  /**
+   * NEW -> ASSIGNED on behalf of skill-based routing. The routing module
+   * calls it when an engineer accepts a routing offer, passing that
+   * engineer as `acceptedBy`. Not createTransition(): an engineer can't
+   * normally assign a NEW ticket to themselves. The authorization here is
+   * the admin-enabled per-site RoutingPolicy plus the routing module's
+   * check that the caller holds the open offer.
    * Everything else matches a human assign: the same rule table's
-   * validate(), a STATUS_CHANGE timeline event, an audit record (actorId
-   * null — no human actor — with `source: SKILL_ROUTING` on the event), and
-   * the usual status/assignment notifications. NEW -> ASSIGNED has no SLA
-   * hook, same as the human path.
+   * validate(), a STATUS_CHANGE timeline event, an audit record (actor is
+   * the accepting engineer, or null for a system assign, with `source` on
+   * the event), and the usual status/assignment notifications.
+   * NEW -> ASSIGNED has no SLA hook, same as the human path.
    *
    * Returns null (and changes nothing) when the incident is no longer NEW
    * and unowned — e.g. the desk assigned it first. The conditional
@@ -572,7 +612,10 @@ export class IncidentsService {
     id: string,
     ownerUserId: string,
     correlationId?: string,
+    acceptedBy?: string,
   ): Promise<Incident | null> {
+    const actorId = acceptedBy ?? null;
+    const source = acceptedBy ? "ROUTING_OFFER" : "SKILL_ROUTING";
     const incident = await this.findOne(id);
     if (incident.status !== IncidentStatus.NEW || incident.ownerUserId || incident.ownerGroupId) {
       return null;
@@ -601,18 +644,18 @@ export class IncidentsService {
         data: {
           incidentId: id,
           eventType: "STATUS_CHANGE",
-          actorId: null,
+          actorId,
           payload: {
             from: incident.status,
             to: after.status,
             ownerUserId,
-            source: "SKILL_ROUTING",
+            source,
           } as Prisma.InputJsonValue,
         },
       });
       await this.auditService.record(
         {
-          actorId: null,
+          actorId,
           entityType: "Incident",
           entityId: id,
           action: "TRANSITION",
@@ -628,8 +671,13 @@ export class IncidentsService {
     if (!after) {
       return null;
     }
-    await this.notifyStatusChange(incident, after, "Auto-assigned by skill-based routing");
-    await this.notifyAssignment(after, ownerUserId);
+    await this.notifyStatusChange(
+      incident,
+      after,
+      acceptedBy ? "Accepted a routing offer" : "Auto-assigned by skill-based routing",
+      acceptedBy,
+    );
+    await this.notifyAssignment(after, ownerUserId, acceptedBy);
     return after;
   }
 
