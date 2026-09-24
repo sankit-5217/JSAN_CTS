@@ -31,7 +31,27 @@ export interface EffectiveAlertRule {
   autoCorrelateIncidents: boolean;
   /** §10.10 rule 5: maintenance window suppresses auto-ticketing vs only labels. */
   suppressAutoTicketDuringMaintenance: boolean;
+  /** Severities that open an incident when the CI has none open. Empty = off. */
+  autoCreateSeverities: AlertSeverity[];
+  /** Category for an auto-created incident; null means OTHER. */
+  incidentCategory: string | null;
+  /** Priority for an auto-created incident; null means derived from severity. */
+  incidentPriority: IncidentPriority | null;
 }
+
+export type IncidentPriority = "P1" | "P2" | "P3" | "P4";
+
+/** Category an auto-created incident gets when its rule names none. */
+export const DEFAULT_AUTO_INCIDENT_CATEGORY = "OTHER";
+
+/** Priority an auto-created incident gets from its alert's severity when the
+ *  rule doesn't set one. */
+export const SEVERITY_TO_INCIDENT_PRIORITY: Record<AlertSeverity, IncidentPriority> = {
+  CRITICAL: "P1",
+  HIGH: "P2",
+  WARNING: "P3",
+  INFO: "P4",
+};
 
 /**
  * Code fallback used only until the `alert_rules` table is seeded (or if every
@@ -44,4 +64,7 @@ export const DEFAULT_ALERT_RULE: EffectiveAlertRule = {
   pagingSeverities: ["CRITICAL"],
   autoCorrelateIncidents: true,
   suppressAutoTicketDuringMaintenance: true,
+  autoCreateSeverities: ["CRITICAL"],
+  incidentCategory: null,
+  incidentPriority: null,
 };

@@ -24,6 +24,9 @@ import {
 import { apiGet, apiPatch, apiPost } from "../api/client";
 
 const ALERT_SEVERITIES = ["CRITICAL", "HIGH", "WARNING", "INFO"];
+const PRIORITIES = ["P1", "P2", "P3", "P4"];
+// Mirrors SEVERITY_TO_INCIDENT_PRIORITY in the API's alerts.constants.ts.
+const SEVERITY_PRIORITY_HINT = "CRITICAL→P1, HIGH→P2, WARNING→P3, INFO→P4";
 
 interface AlertRule {
   id: string;
@@ -35,6 +38,9 @@ interface AlertRule {
   pagingSeverities: string[];
   autoCorrelateIncidents: boolean;
   suppressAutoTicketDuringMaintenance: boolean;
+  autoCreateSeverities: string[] | null;
+  incidentCategory: string | null;
+  incidentPriority: string | null;
   isActive: boolean;
   updatedAt: string;
 }
@@ -48,6 +54,9 @@ const BLANK = {
   pagingSeverities: ["CRITICAL"] as string[],
   autoCorrelateIncidents: true,
   suppressAutoTicketDuringMaintenance: true,
+  autoCreateSeverities: ["CRITICAL"] as string[],
+  incidentCategory: "",
+  incidentPriority: "",
 };
 
 function scopeLabel(r: AlertRule): string {
@@ -95,6 +104,9 @@ export function AlertRulesPage() {
       pagingSeverities: r.pagingSeverities,
       autoCorrelateIncidents: r.autoCorrelateIncidents,
       suppressAutoTicketDuringMaintenance: r.suppressAutoTicketDuringMaintenance,
+      autoCreateSeverities: r.autoCreateSeverities ?? [],
+      incidentCategory: r.incidentCategory ?? "",
+      incidentPriority: r.incidentPriority ?? "",
     });
   };
 
@@ -114,6 +126,9 @@ export function AlertRulesPage() {
       pagingSeverities: form.pagingSeverities,
       autoCorrelateIncidents: form.autoCorrelateIncidents,
       suppressAutoTicketDuringMaintenance: form.suppressAutoTicketDuringMaintenance,
+      autoCreateSeverities: form.autoCreateSeverities,
+      incidentCategory: form.incidentCategory.trim() || (editingId ? null : undefined),
+      incidentPriority: form.incidentPriority || (editingId ? null : undefined),
     };
     try {
       if (editingId) await apiPatch(`/alert-rules/${editingId}`, body);
@@ -226,6 +241,71 @@ export function AlertRulesPage() {
                 }
                 label="Auto-correlate to open incidents"
               />
+              <Typography variant="subtitle2" sx={{ pt: 1 }}>
+                Auto-create incidents
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: "0 !important" }}>
+                A new alert at one of these severities opens an incident when its device has none
+                open, and routing offers it to an engineer. Needs auto-correlate on.
+              </Typography>
+              <TextField
+                select
+                size="small"
+                label="Create incidents for severities"
+                value={form.autoCreateSeverities}
+                onChange={(e) =>
+                  set(
+                    "autoCreateSeverities",
+                    typeof e.target.value === "string"
+                      ? e.target.value.split(",").filter(Boolean)
+                      : (e.target.value as string[]),
+                  )
+                }
+                SelectProps={{
+                  multiple: true,
+                  displayEmpty: true,
+                  renderValue: (v) =>
+                    (v as string[]).length ? (v as string[]).join(", ") : "Off (never create)",
+                }}
+                InputLabelProps={{ shrink: true }}
+                helperText="Leave empty to turn auto-creation off for this rule"
+              >
+                {ALERT_SEVERITIES.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {s}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  size="small"
+                  label="Incident category"
+                  placeholder="OTHER"
+                  value={form.incidentCategory}
+                  onChange={(e) => set("incidentCategory", e.target.value)}
+                  helperText="e.g. STORAGE_FAILURE; picks the skills routing needs"
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ flex: 1 }}
+                />
+                <TextField
+                  select
+                  size="small"
+                  label="Incident priority"
+                  value={form.incidentPriority}
+                  onChange={(e) => set("incidentPriority", e.target.value)}
+                  helperText={`Blank: from severity (${SEVERITY_PRIORITY_HINT})`}
+                  SelectProps={{ displayEmpty: true }}
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ flex: 1 }}
+                >
+                  <MenuItem value="">From severity</MenuItem>
+                  {PRIORITIES.map((p) => (
+                    <MenuItem key={p} value={p}>
+                      {p}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Stack>
               <FormControlLabel
                 control={
                   <Checkbox
@@ -255,6 +335,7 @@ export function AlertRulesPage() {
                   <TableCell>Flapping</TableCell>
                   <TableCell>Paging</TableCell>
                   <TableCell>Correlate</TableCell>
+                  <TableCell>Auto-create</TableCell>
                   <TableCell>Maint.</TableCell>
                   <TableCell>Active</TableCell>
                   <TableCell />
@@ -270,6 +351,18 @@ export function AlertRulesPage() {
                     </TableCell>
                     <TableCell>{r.pagingSeverities.join(", ") || "—"}</TableCell>
                     <TableCell>{r.autoCorrelateIncidents ? "yes" : "no"}</TableCell>
+                    <TableCell>
+                      {r.autoCreateSeverities && r.autoCreateSeverities.length > 0 ? (
+                        <>
+                          {r.autoCreateSeverities.join(", ")}
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {r.incidentCategory ?? "OTHER"} · {r.incidentPriority ?? "by severity"}
+                          </Typography>
+                        </>
+                      ) : (
+                        "off"
+                      )}
+                    </TableCell>
                     <TableCell>
                       {r.suppressAutoTicketDuringMaintenance ? "suppress" : "label"}
                     </TableCell>
@@ -290,9 +383,10 @@ export function AlertRulesPage() {
                 ))}
                 {rules.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8}>
+                    <TableCell colSpan={9}>
                       <Typography variant="body2" color="text.secondary">
-                        No rules yet — ingestion uses the built-in defaults.
+                        No rules yet. Ingestion uses the built-in defaults: CRITICAL alerts page the
+                        NOC and open an incident (category OTHER, P1).
                       </Typography>
                     </TableCell>
                   </TableRow>

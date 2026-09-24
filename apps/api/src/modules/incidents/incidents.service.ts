@@ -54,6 +54,15 @@ import {
 } from "./incident-transitions";
 import type { TransitionDto } from "./incident-transitions";
 
+/** Impact and urgency recorded on an incident opened from an alert, where no
+ *  person assessed them; they mirror the priority the alert rule gave it. */
+const PRIORITY_IMPACT_URGENCY: Record<Priority, [string, string]> = {
+  P1: ["HIGH", "HIGH"],
+  P2: ["HIGH", "MEDIUM"],
+  P3: ["MEDIUM", "MEDIUM"],
+  P4: ["LOW", "LOW"],
+};
+
 export interface AvailableTransition {
   toStatus: IncidentStatus;
   /** Fields the transition endpoint will require in the request body. */
@@ -229,51 +238,74 @@ export class IncidentsService {
   // passes it, straight from the authenticated caller's own id, never from
   // request body input.
   async create(dto: CreateIncidentDto, actor: ActorContext, reportedByUserId?: string) {
-    const incident = await this.prisma.$transaction(async (tx) => {
-      const incidentNo = await this.nextIncidentNo(tx);
-      const incident = await tx.incident.create({
-        data: {
-          incidentNo,
-          siteId: dto.siteId,
-          ciId: dto.ciId,
-          category: dto.category,
-          impact: dto.impact,
-          urgency: dto.urgency,
-          priority: dto.priority,
-          shortDescription: dto.shortDescription,
-          reportedByUserId,
-        },
-      });
-      await tx.incidentEvent.create({
-        data: {
-          incidentId: incident.id,
-          eventType: "CREATED",
-          actorId: actor.actorId,
-          payload: { status: incident.status } as Prisma.InputJsonValue,
-        },
-      });
-      await this.auditService.record(
-        {
-          actorId: actor.actorId,
-          entityType: "Incident",
-          entityId: incident.id,
-          action: "CREATE",
-          after: incident,
-          correlationId: actor.correlationId,
-        },
-        tx,
-      );
-      // SLA clock starts the moment a qualifying incident is created (spec
-      // §10.8) — same transaction as the incident row, never a follow-up call.
-      await this.slaService.startForIncident(
-        tx,
-        { id: incident.id, siteId: incident.siteId },
-        incident.priority,
-        actor,
-      );
-      return incident;
-    });
+    const incident = await this.prisma.$transaction((tx) =>
+      this.createInTx(tx, dto, actor, reportedByUserId),
+    );
+    await this.afterCreate(incident, actor);
+    return incident;
+  }
 
+  /**
+   * Opens an incident for a monitoring alert on a CI that has no open
+   * incident yet, and links the alert to it. Called by the alerts module
+   * when an alert rule's auto-create severities match. A per-CI advisory
+   * lock serializes the "any open incident?" check with the insert, so two
+   * alerts arriving together for the same device can't open two tickets.
+   * If one is already open, the alert is linked to it instead.
+   */
+  async createFromAlert(
+    input: {
+      siteId: string;
+      ciId: string;
+      category: string;
+      priority: Priority;
+      shortDescription: string;
+      alert: {
+        id: string;
+        alertType: string;
+        severity: string;
+        source: string;
+        fingerprint: string;
+      };
+    },
+    actor: ActorContext,
+  ): Promise<{ incident: Incident; created: boolean }> {
+    const [impact, urgency] = PRIORITY_IMPACT_URGENCY[input.priority];
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${input.ciId}))::text`;
+      const open = await tx.incident.findFirst({
+        where: { ciId: input.ciId, status: { in: IncidentsService.OPEN_INCIDENT_STATUSES } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (open) {
+        await this.writeAlertLink(tx, open.id, input.alert, actor);
+        return { incident: open, created: false };
+      }
+      const incident = await this.createInTx(
+        tx,
+        {
+          siteId: input.siteId,
+          ciId: input.ciId,
+          category: input.category,
+          impact,
+          urgency,
+          priority: input.priority,
+          shortDescription: input.shortDescription.slice(0, 256),
+        },
+        actor,
+        undefined,
+        { source: "ALERT", alertId: input.alert.id },
+      );
+      await this.writeAlertLink(tx, incident.id, input.alert, actor);
+      return { incident, created: true };
+    });
+    if (result.created) {
+      await this.afterCreate(result.incident, actor);
+    }
+    return result;
+  }
+
+  private async afterCreate(incident: Incident, actor: ActorContext): Promise<void> {
     await this.notifyServiceDeskOfNewIncident(incident, actor.actorId);
     const createdEvent: IncidentCreatedEvent = {
       incidentId: incident.id,
@@ -281,6 +313,56 @@ export class IncidentsService {
       correlationId: actor.correlationId,
     };
     this.events.emit(INCIDENT_CREATED_EVENT, createdEvent);
+  }
+
+  private async createInTx(
+    tx: Prisma.TransactionClient,
+    dto: CreateIncidentDto,
+    actor: ActorContext,
+    reportedByUserId?: string,
+    origin?: Record<string, unknown>,
+  ): Promise<Incident> {
+    const incidentNo = await this.nextIncidentNo(tx);
+    const incident = await tx.incident.create({
+      data: {
+        incidentNo,
+        siteId: dto.siteId,
+        ciId: dto.ciId,
+        category: dto.category,
+        impact: dto.impact,
+        urgency: dto.urgency,
+        priority: dto.priority,
+        shortDescription: dto.shortDescription,
+        reportedByUserId,
+      },
+    });
+    await tx.incidentEvent.create({
+      data: {
+        incidentId: incident.id,
+        eventType: "CREATED",
+        actorId: actor.actorId,
+        payload: { status: incident.status, ...origin } as Prisma.InputJsonValue,
+      },
+    });
+    await this.auditService.record(
+      {
+        actorId: actor.actorId,
+        entityType: "Incident",
+        entityId: incident.id,
+        action: "CREATE",
+        after: incident,
+        correlationId: actor.correlationId,
+      },
+      tx,
+    );
+    // SLA clock starts the moment a qualifying incident is created (spec
+    // §10.8) — same transaction as the incident row, never a follow-up call.
+    await this.slaService.startForIncident(
+      tx,
+      { id: incident.id, siteId: incident.siteId },
+      incident.priority,
+      actor,
+    );
     return incident;
   }
 
@@ -807,53 +889,61 @@ export class IncidentsService {
       return { linked: false };
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.incidentEvent.create({
-        data: {
-          incidentId,
-          eventType: "ALERT_LINKED",
-          actorId: actor.actorId,
-          payload: {
-            alertId: alert.id,
-            alertType: alert.alertType,
-            severity: alert.severity,
-            source: alert.source,
-            fingerprint: alert.fingerprint,
-          } as Prisma.InputJsonValue,
-        },
-      });
-      await this.auditService.record(
-        {
-          actorId: actor.actorId,
-          entityType: "Incident",
-          entityId: incidentId,
-          action: "ALERT_LINKED",
-          after: {
-            alertId: alert.id,
-            alertType: alert.alertType,
-            severity: alert.severity,
-            source: alert.source,
-          },
-          correlationId: actor.correlationId,
-        },
-        tx,
-      );
-    });
+    await this.prisma.$transaction((tx) => this.writeAlertLink(tx, incidentId, alert, actor));
 
     return { linked: true };
+  }
+
+  private async writeAlertLink(
+    tx: Prisma.TransactionClient,
+    incidentId: string,
+    alert: { id: string; alertType: string; severity: string; source: string; fingerprint: string },
+    actor: ActorContext,
+  ): Promise<void> {
+    await tx.incidentEvent.create({
+      data: {
+        incidentId,
+        eventType: "ALERT_LINKED",
+        actorId: actor.actorId,
+        payload: {
+          alertId: alert.id,
+          alertType: alert.alertType,
+          severity: alert.severity,
+          source: alert.source,
+          fingerprint: alert.fingerprint,
+        } as Prisma.InputJsonValue,
+      },
+    });
+    await this.auditService.record(
+      {
+        actorId: actor.actorId,
+        entityType: "Incident",
+        entityId: incidentId,
+        action: "ALERT_LINKED",
+        after: {
+          alertId: alert.id,
+          alertType: alert.alertType,
+          severity: alert.severity,
+          source: alert.source,
+        },
+        correlationId: actor.correlationId,
+      },
+      tx,
+    );
   }
 
   /**
    * Recovery counterpart to `linkAlert` — called when an already-linked alert
    * genuinely clears (monitoring reports RECOVERED). If the ticket is still
-   * open this is just the expected order (condition cleared, engineer
-   * resolves next) and needs no extra signal. If the ticket was already
+   * open, the timeline gets an ALERT_RECOVERED entry and the owner (or team,
+   * or service desk) a bell notification; nothing closes automatically. If
+   * the ticket was already
    * RESOLVED/CLOSED — most notably via the open-alert override in
    * `createTransition()` — this closes the loop: writes an
    * `ALERT_RECOVERED_AFTER_RESOLVE` timeline event + audit record, and
    * best-effort emails the owner that the real problem is now actually fixed.
-   * No-ops (returns `{ notified: false }`) when the incident is still open,
-   * unknown, or has no owner to tell.
+   * No-ops (returns `{ notified: false }`) when the incident is unknown or
+   * cancelled.
    */
   async notifyAlertRecovered(
     incidentId: string,
@@ -865,7 +955,11 @@ export class IncidentsService {
       return { notified: false };
     }
     if (incident.status !== IncidentStatus.RESOLVED && incident.status !== IncidentStatus.CLOSED) {
-      return { notified: false };
+      if (incident.status === IncidentStatus.CANCELLED) {
+        return { notified: false };
+      }
+      await this.noteAlertRecoveredOnOpenIncident(incident, alert, actor);
+      return { notified: true };
     }
 
     const recoveredAt = new Date();
@@ -913,6 +1007,80 @@ export class IncidentsService {
   /** Best-effort — same posture as notifyAssignment/notifyStatusChange: a
    *  failed email must never undo the timeline/audit write that already
    *  landed. No-ops silently if the ticket has no owner on file. */
+  /**
+   * Monitoring reports the alert cleared while the ticket is still being
+   * worked. Nothing closes automatically: the timeline records it and the
+   * owner (or, with no owner, the assigned team or else the service desk)
+   * gets a bell notification, so a person can confirm and close it.
+   */
+  private async noteAlertRecoveredOnOpenIncident(
+    incident: Incident,
+    alert: { id: string; alertType: string; severity: string; source: string },
+    actor: ActorContext,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.incidentEvent.create({
+        data: {
+          incidentId: incident.id,
+          eventType: "ALERT_RECOVERED",
+          actorId: actor.actorId,
+          payload: {
+            alertId: alert.id,
+            alertType: alert.alertType,
+            severity: alert.severity,
+            source: alert.source,
+            incidentStatusAtRecovery: incident.status,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Incident",
+          entityId: incident.id,
+          action: "ALERT_RECOVERED",
+          after: { alertId: alert.id, alertType: alert.alertType, severity: alert.severity },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+    });
+
+    try {
+      let userIds: string[] = [];
+      if (incident.ownerUserId) {
+        userIds = [incident.ownerUserId];
+      } else if (incident.ownerGroupId) {
+        const members = await this.prisma.supportGroupMember.findMany({
+          where: { groupId: incident.ownerGroupId },
+          select: { userId: true },
+        });
+        userIds = members.map((m) => m.userId);
+      } else {
+        const desk = await this.prisma.user.findMany({
+          where: { isActive: true, role: UserRole.SERVICE_DESK_NOC },
+          select: { id: true },
+        });
+        userIds = desk.map((u) => u.id);
+      }
+      await this.inbox.notifyUsers({
+        userIds,
+        kind: InAppNotificationKind.ALERT_RECOVERED,
+        title: `Monitoring reports ${alert.alertType} cleared on ${incident.incidentNo}`,
+        body: "Confirm the fix and resolve the ticket if nothing else is wrong.",
+        entityType: "INCIDENT",
+        entityId: incident.id,
+        dedupeKey: `alert-recovered:${alert.id}`,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `alert-recovered notification skipped for incident ${incident.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   private async notifyAlertRecoveredEmail(
     incident: Incident,
     alert: { id: string; alertType: string; severity: string },

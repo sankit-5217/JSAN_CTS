@@ -43,6 +43,9 @@ function dbRow(overrides: Record<string, unknown> = {}) {
     pagingSeverities: ["CRITICAL", "HIGH"],
     autoCorrelateIncidents: false,
     suppressAutoTicketDuringMaintenance: true,
+    autoCreateSeverities: ["CRITICAL", "HIGH"],
+    incidentCategory: "STORAGE_FAILURE",
+    incidentPriority: null,
     isActive: true,
     createdAt: new Date("2026-09-04T00:00:00.000Z"),
     updatedAt: new Date("2026-09-04T00:00:00.000Z"),
@@ -56,6 +59,9 @@ const EFFECTIVE_FROM_DBROW = {
   pagingSeverities: ["CRITICAL", "HIGH"],
   autoCorrelateIncidents: false,
   suppressAutoTicketDuringMaintenance: true,
+  autoCreateSeverities: ["CRITICAL", "HIGH"],
+  incidentCategory: "STORAGE_FAILURE",
+  incidentPriority: null,
 };
 
 describe("AlertRulesService", () => {
@@ -161,6 +167,9 @@ describe("AlertRulesService", () => {
           autoCorrelateIncidents: DEFAULT_ALERT_RULE.autoCorrelateIncidents,
           suppressAutoTicketDuringMaintenance:
             DEFAULT_ALERT_RULE.suppressAutoTicketDuringMaintenance,
+          autoCreateSeverities: ["CRITICAL"],
+          incidentCategory: null,
+          incidentPriority: null,
           isActive: true,
         },
       });

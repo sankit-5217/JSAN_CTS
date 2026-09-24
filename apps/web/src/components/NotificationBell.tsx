@@ -17,6 +17,7 @@ import {
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import AssignmentIndOutlinedIcon from "@mui/icons-material/AssignmentIndOutlined";
+import CheckCircleOutlineOutlinedIcon from "@mui/icons-material/CheckCircleOutlineOutlined";
 import ChatBubbleOutlineOutlinedIcon from "@mui/icons-material/ChatBubbleOutlineOutlined";
 import FiberNewOutlinedIcon from "@mui/icons-material/FiberNewOutlined";
 import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
@@ -38,7 +39,8 @@ type NotificationKind =
   | "SLA_WARNING"
   | "SLA_BREACHED"
   | "INCIDENT_OFFERED"
-  | "INCIDENT_OFFER_UNACCEPTED";
+  | "INCIDENT_OFFER_UNACCEPTED"
+  | "ALERT_RECOVERED";
 
 interface InAppNotification {
   id: string;
@@ -72,6 +74,10 @@ const KIND_STYLE: Record<NotificationKind, { icon: ReactNode; color: string }> =
   SLA_WARNING: { icon: <TimerOutlinedIcon fontSize="small" />, color: "#ed6c02" },
   SLA_BREACHED: { icon: <TimerOffOutlinedIcon fontSize="small" />, color: "#d32f2f" },
   INCIDENT_OFFERED: { icon: <PanToolOutlinedIcon fontSize="small" />, color: "#ed6c02" },
+  ALERT_RECOVERED: {
+    icon: <CheckCircleOutlineOutlinedIcon fontSize="small" />,
+    color: "#2e7d32",
+  },
   INCIDENT_OFFER_UNACCEPTED: {
     icon: <PersonOffOutlinedIcon fontSize="small" />,
     color: "#d32f2f",

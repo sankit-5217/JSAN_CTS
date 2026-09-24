@@ -115,6 +115,11 @@ export class AlertRulesService {
           suppressAutoTicketDuringMaintenance:
             dto.suppressAutoTicketDuringMaintenance ??
             DEFAULT_ALERT_RULE.suppressAutoTicketDuringMaintenance,
+          autoCreateSeverities: dto.autoCreateSeverities ?? [
+            ...DEFAULT_ALERT_RULE.autoCreateSeverities,
+          ],
+          incidentCategory: dto.incidentCategory?.trim() || null,
+          incidentPriority: dto.incidentPriority ?? null,
           isActive: dto.isActive ?? true,
         },
       });
@@ -150,6 +155,10 @@ export class AlertRulesService {
           pagingSeverities: dto.pagingSeverities,
           autoCorrelateIncidents: dto.autoCorrelateIncidents,
           suppressAutoTicketDuringMaintenance: dto.suppressAutoTicketDuringMaintenance,
+          autoCreateSeverities: dto.autoCreateSeverities,
+          incidentCategory:
+            dto.incidentCategory === undefined ? undefined : dto.incidentCategory?.trim() || null,
+          incidentPriority: dto.incidentPriority,
           isActive: dto.isActive,
         },
       });
@@ -179,5 +188,8 @@ function toEffectiveRule(row: AlertRule): EffectiveAlertRule {
     suppressAutoTicketDuringMaintenance: row.suppressAutoTicketDuringMaintenance,
     pagingSeverities: row.pagingSeverities as AlertSeverity[],
     autoCorrelateIncidents: row.autoCorrelateIncidents,
+    autoCreateSeverities: (row.autoCreateSeverities ?? []) as AlertSeverity[],
+    incidentCategory: row.incidentCategory,
+    incidentPriority: row.incidentPriority,
   };
 }

@@ -1,7 +1,9 @@
+import { Priority } from "@prisma/client";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
   ArrayUnique,
   IsBoolean,
+  IsEnum,
   IsIn,
   IsInt,
   IsOptional,
@@ -84,6 +86,37 @@ export class CreateAlertRuleDto {
   @IsOptional()
   @IsBoolean()
   suppressAutoTicketDuringMaintenance?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      "Severities that open a new incident when the CI has no open one (routing then offers it). " +
+      "Send [] to turn auto-creation off.",
+    enum: [...ALERT_SEVERITIES],
+    isArray: true,
+    default: ["CRITICAL"],
+  })
+  @IsOptional()
+  @IsIn(ALERT_SEVERITIES, { each: true })
+  @ArrayUnique()
+  autoCreateSeverities?: AlertSeverity[];
+
+  @ApiPropertyOptional({
+    description:
+      'Category for auto-created incidents, e.g. "STORAGE_FAILURE" (drives skill-based routing). ' +
+      "Omit or empty for OTHER.",
+  })
+  @IsOptional()
+  @IsString()
+  @Length(0, 100)
+  incidentCategory?: string;
+
+  @ApiPropertyOptional({
+    description: "Priority for auto-created incidents. Omit or null to derive it from severity.",
+    enum: Priority,
+  })
+  @IsOptional()
+  @IsEnum(Priority)
+  incidentPriority?: Priority;
 
   @ApiPropertyOptional({
     description: "Only the newest active row is applied; set false to retire one.",

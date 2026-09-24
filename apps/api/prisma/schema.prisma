@@ -426,6 +426,7 @@ enum InAppNotificationKind {
   SLA_BREACHED
   INCIDENT_OFFERED
   INCIDENT_OFFER_UNACCEPTED
+  ALERT_RECOVERED
 }
 
 /// One entry in a user's notification bell. Owned by the inbox module;
@@ -756,6 +757,15 @@ model AlertRule {
   pagingSeverities                    AlertSeverity[] @default([CRITICAL]) @map("paging_severities")
   autoCorrelateIncidents              Boolean         @default(true) @map("auto_correlate_incidents")
   suppressAutoTicketDuringMaintenance Boolean         @default(true) @map("suppress_auto_ticket_during_maintenance")
+  /// Severities that open a new incident when the CI has no open one.
+  /// Empty turns auto-creation off for this rule's scope.
+  autoCreateSeverities                AlertSeverity[] @default([CRITICAL]) @map("auto_create_severities")
+  /// Category for auto-created incidents (drives skill-based routing).
+  /// Null means OTHER.
+  incidentCategory                    String?         @map("incident_category")
+  /// Priority for auto-created incidents. Null means derived from the alert
+  /// severity (CRITICAL P1, HIGH P2, WARNING P3, INFO P4).
+  incidentPriority                    Priority?       @map("incident_priority")
   isActive                            Boolean         @default(true) @map("is_active")
   createdAt                           DateTime        @default(now()) @map("created_at")
   updatedAt                           DateTime        @updatedAt @map("updated_at")

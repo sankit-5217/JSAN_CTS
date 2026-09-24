@@ -1685,21 +1685,60 @@ describe("IncidentsService.notifyAlertRecovered", () => {
     source: "REDFISH",
   };
 
-  it("no-ops when the incident is still open — the expected order needs no extra signal", async () => {
-    const { service, tx, auditService, notifications } = makeService({
+  it("notes a recovery on a still-open ticket and tells its owner in-app, without closing it", async () => {
+    const { service, tx, auditService, notifications, inbox } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ status: IncidentStatus.IN_PROGRESS })),
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: "engineer-1" }),
+        ),
     });
 
     const result = await service.notifyAlertRecovered("incident-1", recoveredAlert, {
       actorId: "collector-svc",
     });
 
-    expect(result).toEqual({ notified: false });
-    expect(tx.incidentEvent.create).not.toHaveBeenCalled();
-    expect(auditService.record).not.toHaveBeenCalled();
+    expect(result).toEqual({ notified: true });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ eventType: "ALERT_RECOVERED" }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ALERT_RECOVERED" }),
+      tx,
+    );
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "ALERT_RECOVERED", userIds: ["engineer-1"] }),
+    );
+    // The closed-ticket email is only for tickets already resolved or closed.
     expect(notifications.enqueue).not.toHaveBeenCalled();
+    expect(tx.incident.update).not.toHaveBeenCalled();
+  });
+
+  it("tells the service desk about a recovery on an open ticket nobody owns", async () => {
+    const { service, inbox } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+      userFindMany: jest.fn().mockResolvedValue([{ id: "desk-1" }]),
+    });
+
+    await service.notifyAlertRecovered("incident-1", recoveredAlert, { actorId: "collector-svc" });
+
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "ALERT_RECOVERED", userIds: ["desk-1"] }),
+    );
+  });
+
+  it("ignores a recovery on a cancelled ticket", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.CANCELLED })),
+    });
+    await expect(
+      service.notifyAlertRecovered("incident-1", recoveredAlert, { actorId: "collector-svc" }),
+    ).resolves.toEqual({ notified: false });
+    expect(tx.incidentEvent.create).not.toHaveBeenCalled();
   });
 
   it("no-ops when the incident is unknown", async () => {
@@ -2061,6 +2100,95 @@ describe("IncidentsService routing-offer hooks", () => {
         actorId: null,
         payload: { action: "OFFERED", userId: "eng-1" },
       },
+    });
+  });
+});
+
+describe("IncidentsService.createFromAlert", () => {
+  const alert = {
+    id: "alert-1",
+    alertType: "hardware.health_degraded",
+    severity: "CRITICAL",
+    source: "REDFISH",
+    fingerprint: "f".repeat(64),
+  };
+  const input = {
+    siteId: "site-a",
+    ciId: "ci-1",
+    category: "HARDWARE_FAILURE",
+    priority: Priority.P1,
+    shortDescription: "[SITE01-SRV-001] PSU 2 failed (hardware.health_degraded)",
+    alert,
+  };
+
+  it("locks the CI, opens a P1 incident from the alert, links it, and hands it to routing", async () => {
+    const { service, tx, events, inbox } = makeService({
+      txIncident: { findFirst: jest.fn().mockResolvedValue(null) },
+      userFindMany: jest
+        .fn()
+        .mockResolvedValue([{ id: "desk-1", email: "desk@example.com", displayName: "Desk" }]),
+    });
+
+    const result = await service.createFromAlert(input, { actorId: "collector-svc" });
+
+    expect(result.created).toBe(true);
+    const [lockSql] = (tx.$queryRaw as jest.Mock).mock.calls[0];
+    expect((lockSql as string[]).join("?")).toContain("pg_advisory_xact_lock");
+    expect(tx.incident.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        siteId: "site-a",
+        ciId: "ci-1",
+        category: "HARDWARE_FAILURE",
+        priority: Priority.P1,
+        impact: "HIGH",
+        urgency: "HIGH",
+      }),
+    });
+    const eventTypes = (tx.incidentEvent.create as jest.Mock).mock.calls.map(
+      ([arg]) => arg.data.eventType,
+    );
+    expect(eventTypes).toEqual(["CREATED", "ALERT_LINKED"]);
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventType: "CREATED",
+        payload: expect.objectContaining({ source: "ALERT", alertId: "alert-1" }),
+      }),
+    });
+    expect(events.emit).toHaveBeenCalledWith(
+      "incident.created",
+      expect.objectContaining({ incidentId: result.incident.id }),
+    );
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "INCIDENT_CREATED", userIds: ["desk-1"] }),
+    );
+  });
+
+  it("links to the incident another alert just opened instead of creating a second", async () => {
+    const open = baseIncident({ id: "incident-open", status: IncidentStatus.NEW, ciId: "ci-1" });
+    const { service, tx, events } = makeService({
+      txIncident: { findFirst: jest.fn().mockResolvedValue(open) },
+    });
+
+    const result = await service.createFromAlert(input, { actorId: "collector-svc" });
+
+    expect(result).toEqual({ incident: open, created: false });
+    expect(tx.incident.create).not.toHaveBeenCalled();
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ incidentId: "incident-open", eventType: "ALERT_LINKED" }),
+    });
+    expect(events.emit).not.toHaveBeenCalled();
+  });
+
+  it("maps a P3 to medium impact and urgency", async () => {
+    const { service, tx } = makeService({
+      txIncident: { findFirst: jest.fn().mockResolvedValue(null) },
+    });
+    await service.createFromAlert(
+      { ...input, priority: Priority.P3 },
+      { actorId: "collector-svc" },
+    );
+    expect(tx.incident.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ impact: "MEDIUM", urgency: "MEDIUM" }),
     });
   });
 });
