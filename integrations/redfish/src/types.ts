@@ -33,6 +33,8 @@ export interface RedfishComputerSystem {
   Status?: RedfishStatus;
   ProcessorSummary?: RedfishResourceSummary;
   MemorySummary?: RedfishResourceSummary;
+  /** Link to the system's storage controllers collection. */
+  Storage?: { "@odata.id"?: string };
 }
 
 export interface RedfishTemperature {
