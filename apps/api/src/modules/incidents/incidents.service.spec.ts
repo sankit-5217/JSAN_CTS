@@ -2068,6 +2068,22 @@ describe("IncidentsService routing-offer hooks", () => {
     );
   });
 
+  it("records the owning team alongside the engineer when one is given", async () => {
+    const { service, tx } = makeService();
+
+    await service.autoAssign("incident-1", "eng-1", "corr-1", "eng-1", "grp-storage");
+
+    expect(tx.incident.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          status: IncidentStatus.ASSIGNED,
+          ownerUserId: "eng-1",
+          ownerGroupId: "grp-storage",
+        },
+      }),
+    );
+  });
+
   it("records the accepting engineer as the actor when an offer is accepted", async () => {
     const { service, tx, auditService, inbox } = makeService();
 

@@ -699,6 +699,7 @@ export class IncidentsService {
     ownerUserId: string,
     correlationId?: string,
     acceptedBy?: string,
+    ownerGroupId?: string,
   ): Promise<Incident | null> {
     const actorId = acceptedBy ?? null;
     const source = acceptedBy ? "ROUTING_OFFER" : "SKILL_ROUTING";
@@ -719,7 +720,11 @@ export class IncidentsService {
     const after = await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.incident.updateMany({
         where: { id, status: IncidentStatus.NEW, ownerUserId: null, ownerGroupId: null },
-        data: { status: IncidentStatus.ASSIGNED, ownerUserId },
+        data: {
+          status: IncidentStatus.ASSIGNED,
+          ownerUserId,
+          ...(ownerGroupId ? { ownerGroupId } : {}),
+        },
       });
       if (count === 0) {
         return null;
@@ -735,6 +740,7 @@ export class IncidentsService {
             from: incident.status,
             to: after.status,
             ownerUserId,
+            ...(ownerGroupId ? { ownerGroupId } : {}),
             source,
           } as Prisma.InputJsonValue,
         },

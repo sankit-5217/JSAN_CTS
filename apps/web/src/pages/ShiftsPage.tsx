@@ -25,6 +25,7 @@ import {
 import { keyframes } from "@mui/material/styles";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
+import { CategoryTeamsCard } from "../components/CategoryTeamsCard";
 import { severityColors } from "../theme/theme";
 
 // Mirrors ShiftsController's SHIFT_WRITE_ROLES — UI-only gate (same pattern
@@ -189,11 +190,15 @@ export function ShiftsPage() {
   }, []);
 
   const refetchSkills = useCallback(() => {
-    apiGet<Skill[]>("/skills").then(setSkills).catch(() => undefined);
+    apiGet<Skill[]>("/skills")
+      .then(setSkills)
+      .catch(() => undefined);
   }, []);
 
   const refetchAssignments = useCallback(() => {
-    apiGet<SkillAssignment[]>("/skills/assignments").then(setAssignments).catch(() => undefined);
+    apiGet<SkillAssignment[]>("/skills/assignments")
+      .then(setAssignments)
+      .catch(() => undefined);
   }, []);
 
   const refetchCategoryRequirements = useCallback(() => {
@@ -398,8 +403,8 @@ export function ShiftsPage() {
         )}
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Who's actually on duty right now, computed from the recurring weekly shift schedule below
-        — not a manual status anyone has to set.
+        Who's actually on duty right now, computed from the recurring weekly shift schedule below —
+        not a manual status anyone has to set.
       </Typography>
 
       {error && (
@@ -588,7 +593,12 @@ export function ShiftsPage() {
                   onChange={(e) => setFormLabel(e.target.value)}
                 />
                 <Box>
-                  <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    display="block"
+                    sx={{ mb: 0.5 }}
+                  >
                     Days (the day the shift starts on)
                   </Typography>
                   <FormGroup row>
@@ -664,8 +674,8 @@ export function ShiftsPage() {
               Skills
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              The skill tags engineers can be assigned. Foundation for skill-based incident
-              routing — nothing routes automatically yet.
+              The skill tags engineers can be assigned. Foundation for skill-based incident routing
+              — nothing routes automatically yet.
             </Typography>
 
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
@@ -687,7 +697,14 @@ export function ShiftsPage() {
               )}
             </Stack>
             {skills.some((sk) => !sk.isActive) && (
-              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+              <Stack
+                direction="row"
+                spacing={1}
+                alignItems="center"
+                flexWrap="wrap"
+                useFlexGap
+                sx={{ mb: 1.5 }}
+              >
                 <Typography variant="caption" color="text.secondary">
                   Retired:
                 </Typography>
@@ -718,11 +735,7 @@ export function ShiftsPage() {
                     if (e.key === "Enter") createSkillTag();
                   }}
                 />
-                <Button
-                  variant="outlined"
-                  onClick={createSkillTag}
-                  disabled={!newSkillName.trim()}
-                >
+                <Button variant="outlined" onClick={createSkillTag} disabled={!newSkillName.trim()}>
                   Add tag
                 </Button>
               </Stack>
@@ -810,7 +823,8 @@ export function ShiftsPage() {
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               Which skill(s) an incident category needs — e.g. a "DATABASE" category requires the
-              Database skill. Also foundation only: nothing routes an incident automatically yet.
+              Database skill. Routing only offers a ticket to engineers who hold every required
+              skill.
             </Typography>
 
             {canWrite && (
@@ -830,9 +844,7 @@ export function ShiftsPage() {
                   isOptionEqualToValue={(o, v) => o.id === v.id}
                   value={newReqSkill}
                   onChange={(_, v) => setNewReqSkill(v)}
-                  renderInput={(params) => (
-                    <TextField {...params} label="Required skill" />
-                  )}
+                  renderInput={(params) => <TextField {...params} label="Required skill" />}
                 />
                 <Button
                   variant="outlined"
@@ -887,6 +899,10 @@ export function ShiftsPage() {
               </Table>
             </TableContainer>
           </Paper>
+        </Grid>
+
+        <Grid item xs={12}>
+          <CategoryTeamsCard canWrite={canWrite} />
         </Grid>
       </Grid>
     </Box>

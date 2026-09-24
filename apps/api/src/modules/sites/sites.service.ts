@@ -214,6 +214,20 @@ export class SitesService {
     });
   }
 
+  /** A group's name and the ids of its active members, or null when the
+   *  group doesn't exist. For the routing module's team filter. */
+  async findGroupRoster(
+    groupId: string,
+  ): Promise<{ id: string; name: string; memberIds: string[] } | null> {
+    const group = await this.prisma.supportGroup.findUnique({
+      where: { id: groupId },
+      include: { members: { where: { user: { isActive: true } }, select: { userId: true } } },
+    });
+    return group
+      ? { id: group.id, name: group.name, memberIds: group.members.map((m) => m.userId) }
+      : null;
+  }
+
   /** Who's actually on a group's roster — this is what
    * IncidentsService.notifyGroupAssignment reads to know who to tell when a
    * ticket lands in this group unassigned. */

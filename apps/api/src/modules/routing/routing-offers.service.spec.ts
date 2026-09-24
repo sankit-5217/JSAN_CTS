@@ -6,6 +6,7 @@ import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { InboxService } from "../inbox/inbox.service";
 import { IncidentsService } from "../incidents/incidents.service";
+import { CategoryTeamsService } from "./category-teams.service";
 import { RoutingOffersService } from "./routing-offers.service";
 import {
   DEFAULT_ROUTING_SETTINGS,
@@ -48,6 +49,7 @@ function candidate(userId: string): RoutingCandidate {
     openIncidentCount: 0,
     workloadScore: 0,
     isCurrentOwner: false,
+    inTeam: false,
   };
 }
 
@@ -146,6 +148,8 @@ function makeService(
     candidates: opts.candidates ?? [candidate("eng-1"), candidate("eng-2")],
     reason: (opts.candidates ?? [1]).length === 0 ? "NO_QUALIFIED_ENGINEER" : null,
     uncoveredSkills: [],
+    team: null,
+    teamFallback: false,
   };
   const routingService = {
     rank: jest.fn().mockResolvedValue(suggestions),
@@ -156,6 +160,7 @@ function makeService(
     }),
   };
   const inbox = { notifyUsers: jest.fn().mockResolvedValue(undefined) };
+  const categoryTeams = { teamForCategory: jest.fn().mockResolvedValue(null) };
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
 
   const service = new RoutingOffersService(
@@ -165,8 +170,18 @@ function makeService(
     routingService as unknown as RoutingService,
     inbox as unknown as InboxService,
     notifications as unknown as NotificationsPublisher,
+    categoryTeams as unknown as CategoryTeamsService,
   );
-  return { service, prisma, auditService, incidentsService, routingService, inbox, notifications };
+  return {
+    service,
+    prisma,
+    auditService,
+    incidentsService,
+    routingService,
+    inbox,
+    notifications,
+    categoryTeams,
+  };
 }
 
 const CREATED = { incidentId: "inc-1", siteId: "site-1", correlationId: "corr-1" };
@@ -372,8 +387,32 @@ describe("RoutingOffersService.accept", () => {
       expect.objectContaining({ entityType: "RoutingOffer", action: "ACCEPTED", actorId: "eng-1" }),
       prisma,
     );
-    expect(incidentsService.autoAssign).toHaveBeenCalledWith("inc-1", "eng-1", "c", "eng-1");
+    expect(incidentsService.autoAssign).toHaveBeenCalledWith(
+      "inc-1",
+      "eng-1",
+      "c",
+      "eng-1",
+      undefined,
+    );
     expect(result).toMatchObject({ id: "offer-1", displayName: "Name eng-1" });
+  });
+
+  it("records the category's team on the ticket when accepted", async () => {
+    const { service, incidentsService, categoryTeams } = makeService();
+    categoryTeams.teamForCategory.mockResolvedValue({
+      id: "grp-storage",
+      name: "Storage team",
+      memberIds: ["eng-1"],
+    });
+    await service.accept("inc-1", ENGINEER, { actorId: "eng-1", correlationId: "c" }, NOW);
+    expect(categoryTeams.teamForCategory).toHaveBeenCalledWith("STORAGE_FAILURE");
+    expect(incidentsService.autoAssign).toHaveBeenCalledWith(
+      "inc-1",
+      "eng-1",
+      "c",
+      "eng-1",
+      "grp-storage",
+    );
   });
 
   it("checks the caller can see the incident first", async () => {

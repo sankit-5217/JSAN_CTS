@@ -29,6 +29,7 @@ import {
 import { alpha, keyframes } from "@mui/material/styles";
 import AssignmentIndOutlinedIcon from "@mui/icons-material/AssignmentIndOutlined";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
 import HourglassTopOutlinedIcon from "@mui/icons-material/HourglassTopOutlined";
 import PersonOffOutlinedIcon from "@mui/icons-material/PersonOffOutlined";
 import PersonSearchOutlinedIcon from "@mui/icons-material/PersonSearchOutlined";
@@ -321,6 +322,7 @@ interface RoutingCandidate {
   /** Open incidents weighted by priority; what the ranking sorts on. */
   workloadScore: number;
   isCurrentOwner: boolean;
+  inTeam: boolean;
 }
 
 interface RoutingSuggestions {
@@ -333,6 +335,8 @@ interface RoutingSuggestions {
     | "NO_QUALIFIED_ENGINEER"
     | null;
   uncoveredSkills: { id: string; name: string }[];
+  team: { id: string; name: string } | null;
+  teamFallback: boolean;
 }
 
 function routingEmptyMessage(s: RoutingSuggestions, category: string): string {
@@ -448,6 +452,20 @@ function RoutingSuggestionsCard({
           ))}
         </Stack>
       )}
+      {suggestions?.team && (
+        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mb: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            Team
+          </Typography>
+          <Chip size="small" icon={<GroupsOutlinedIcon />} label={suggestions.team.name} />
+        </Stack>
+      )}
+      {suggestions?.teamFallback && suggestions.team && (
+        <Alert severity="info" sx={{ mb: 1, py: 0 }}>
+          Nobody from {suggestions.team.name} is on shift with the right skills, so these are
+          qualified engineers from other teams.
+        </Alert>
+      )}
       <Divider sx={{ mb: 1 }} />
       {loading && <LinearProgress sx={{ mb: 1 }} />}
       {assignError && (
@@ -503,6 +521,9 @@ function RoutingSuggestionsCard({
                   </Typography>
                   {index === 0 && !c.isCurrentOwner && (
                     <Chip size="small" color="success" variant="outlined" label="Best match" />
+                  )}
+                  {suggestions.team && !c.inTeam && (
+                    <Chip size="small" variant="outlined" label="Outside team" />
                   )}
                 </Stack>
                 <Box sx={{ mt: 0.5 }}>

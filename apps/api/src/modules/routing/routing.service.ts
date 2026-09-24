@@ -9,6 +9,7 @@ import { OPEN_STATUSES } from "../incidents/incident-transitions";
 import { IncidentsService } from "../incidents/incidents.service";
 import { RosterEntry, ShiftsService } from "../shifts/shifts.service";
 import { SkillsService } from "../skills/skills.service";
+import { CategoryTeamsService } from "./category-teams.service";
 import { UpdateRoutingPolicyDto } from "./dto/update-routing-policy.dto";
 
 /** Why `candidates` is empty — null whenever there is at least one. */
@@ -31,6 +32,8 @@ export interface RoutingCandidate {
    *  the main ranking key. */
   workloadScore: number;
   isCurrentOwner: boolean;
+  /** Member of the ticket's team (see RoutingSuggestions.team). */
+  inTeam: boolean;
 }
 
 export interface RoutingSuggestions {
@@ -43,6 +46,12 @@ export interface RoutingSuggestions {
   /** Required skills nobody currently on shift at the site holds — only
    * populated for NO_QUALIFIED_ENGINEER, so the desk can see the gap. */
   uncoveredSkills: RoutingSkillRef[];
+  /** The team this ticket belongs to: its assigned group, else the team
+   *  mapped to its category. null when neither is set. */
+  team: { id: string; name: string } | null;
+  /** true when the team has nobody on shift who qualifies, so the
+   *  candidates are qualified engineers from outside it. */
+  teamFallback: boolean;
 }
 
 /** Per-priority routing settings of a site. Field names match the
@@ -110,7 +119,11 @@ function settingsOf(row: RoutingPolicy | null): RoutingSettings {
  *  3. Working-shift engineers are preferred; on-call engineers are only
  *     suggested when no working engineer qualifies, except for a P1, where
  *     they're candidates from the start, ranked after working engineers.
- *  4. Ranked by weighted workload: each open incident an engineer owns
+ *  4. Team: when the ticket has a team (its assigned group, else the team
+ *     mapped to its category), only that team's qualified members are
+ *     candidates; if none is on shift, every qualified engineer is, and
+ *     `teamFallback` says so.
+ *  5. Ranked by weighted workload: each open incident an engineer owns
  *     counts by its priority (the site's workload weights, default P1=4,
  *     P2=3, P3=2, P4=1). Ties go to fewer open incidents, then name.
  * Empty results always carry a `reason` instead of silently widening the
@@ -130,6 +143,7 @@ export class RoutingService {
     private readonly incidentsService: IncidentsService,
     private readonly shiftsService: ShiftsService,
     private readonly skillsService: SkillsService,
+    private readonly categoryTeams: CategoryTeamsService,
   ) {}
 
   async suggestForIncident(
@@ -206,6 +220,8 @@ export class RoutingService {
       candidates: [],
       reason: null,
       uncoveredSkills: [],
+      team: null,
+      teamFallback: false,
     };
 
     if (!OPEN_STATUSES.includes(incident.status)) {
@@ -242,9 +258,27 @@ export class RoutingService {
       return this.empty(result, "NO_QUALIFIED_ENGINEER");
     }
 
-    const working = qualified.filter((e) => !e.isOnCall);
+    // Team first: the ticket's assigned group, else its category's team.
+    // With nobody from that team qualified and on shift, fall back to every
+    // qualified engineer rather than leaving the ticket with no one.
+    const team = incident.ownerGroupId
+      ? await this.categoryTeams.rosterFor(incident.ownerGroupId)
+      : await this.categoryTeams.teamForCategory(incident.category);
+    const teamIds = new Set(team?.memberIds ?? []);
+    let base = qualified;
+    if (team) {
+      result.team = { id: team.id, name: team.name };
+      const inTeam = qualified.filter((e) => teamIds.has(e.userId));
+      if (inTeam.length > 0) {
+        base = inTeam;
+      } else {
+        result.teamFallback = true;
+      }
+    }
+
+    const working = base.filter((e) => !e.isOnCall);
     // A P1 can't wait: on-call engineers join the pool from the start.
-    const pool = incident.priority === Priority.P1 || working.length === 0 ? qualified : working;
+    const pool = incident.priority === Priority.P1 || working.length === 0 ? base : working;
 
     const settings = await this.getSettings(incident.siteId);
     const workload = await this.incidentsService.countOpenOwnedByPriority(
@@ -268,6 +302,7 @@ export class RoutingService {
           openIncidentCount,
           workloadScore,
           isCurrentOwner: incident.ownerUserId === entry.userId,
+          inTeam: teamIds.has(entry.userId),
         };
       })
       .sort(

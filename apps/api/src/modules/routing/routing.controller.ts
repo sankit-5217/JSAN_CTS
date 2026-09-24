@@ -1,4 +1,16 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  UseGuards,
+} from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
@@ -8,6 +20,8 @@ import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { INCIDENT_ROUTING_ROLES } from "../incidents/incident-transitions";
+import { CategoryTeamsService } from "./category-teams.service";
+import { CreateCategoryTeamDto } from "./dto/create-category-team.dto";
 import { DeclineRoutingOfferDto } from "./dto/decline-routing-offer.dto";
 import { UpdateRoutingPolicyDto } from "./dto/update-routing-policy.dto";
 import { RoutingOffersService } from "./routing-offers.service";
@@ -130,5 +144,45 @@ export class RoutingPoliciesController {
     @CorrelationId() correlationId?: string,
   ) {
     return this.routingService.setPolicy(siteId, dto, user, { actorId: user.id, correlationId });
+  }
+}
+
+@ApiTags("routing")
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller("routing/category-teams")
+export class CategoryTeamsController {
+  constructor(private readonly categoryTeams: CategoryTeamsService) {}
+
+  @Get()
+  @Roles(...ROUTING_POLICY_READ_ROLES)
+  @ApiOperation({ summary: "Which team owns each incident category" })
+  list() {
+    return this.categoryTeams.list();
+  }
+
+  @Post()
+  @Roles(...ROUTING_POLICY_WRITE_ROLES)
+  @ApiOperation({
+    summary: "Map a category to its owning team; routing then prefers that team's engineers",
+  })
+  create(
+    @Body() dto: CreateCategoryTeamDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.categoryTeams.create(dto, { actorId: user.id, correlationId });
+  }
+
+  @Delete(":id")
+  @Roles(...ROUTING_POLICY_WRITE_ROLES)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: "Remove a category's team mapping" })
+  async remove(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    await this.categoryTeams.remove(id, { actorId: user.id, correlationId });
   }
 }

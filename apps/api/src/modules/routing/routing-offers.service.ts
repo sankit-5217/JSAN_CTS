@@ -29,6 +29,7 @@ import {
   IncidentUpdatedEvent,
 } from "../incidents/incident-events";
 import { IncidentsService } from "../incidents/incidents.service";
+import { CategoryTeamsService } from "./category-teams.service";
 import { offerTimeoutFor, RoutingCandidate, RoutingService } from "./routing.service";
 
 /** Offers the expiry sweep handles per run; the rest wait a minute. */
@@ -78,6 +79,7 @@ export class RoutingOffersService {
     private readonly routingService: RoutingService,
     private readonly inbox: InboxService,
     private readonly notifications: NotificationsPublisher,
+    private readonly categoryTeams: CategoryTeamsService,
   ) {}
 
   // --- Triggers ---------------------------------------------------------
@@ -179,11 +181,16 @@ export class RoutingOffersService {
 
     let assigned: Incident | null;
     try {
+      // Record the category's owning team on the ticket too, even when the
+      // engineer came from outside it (the team fallback).
+      const incident = await this.incidentsService.findOne(incidentId);
+      const team = await this.categoryTeams.teamForCategory(incident.category);
       assigned = await this.incidentsService.autoAssign(
         incidentId,
         user.id,
         actor.correlationId,
         user.id,
+        team?.id,
       );
     } catch (err) {
       // Never leave an ACCEPTED offer on a ticket nobody owns.

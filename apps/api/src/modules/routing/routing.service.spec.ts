@@ -7,6 +7,7 @@ import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { IncidentsService } from "../incidents/incidents.service";
 import { RosterEntry, ShiftsService } from "../shifts/shifts.service";
 import { SkillsService } from "../skills/skills.service";
+import { CategoryTeamsService } from "./category-teams.service";
 import { DEFAULT_ROUTING_SETTINGS, RoutingService } from "./routing.service";
 
 const USER = { id: "desk-1", role: UserRole.SERVICE_DESK_NOC } as AuthenticatedUser;
@@ -49,6 +50,9 @@ function makeService(opts: {
   skills?: Record<string, string[]>;
   workload?: Record<string, Partial<Record<"P1" | "P2" | "P3" | "P4", number>>>;
   settings?: Partial<typeof DEFAULT_ROUTING_SETTINGS>;
+  /** The category's team, and a group already on the incident, by id. */
+  categoryTeam?: { id: string; name: string; memberIds: string[] } | null;
+  groups?: Record<string, { id: string; name: string; memberIds: string[] }>;
   policy?: { id: string; autoAssignEnabled: boolean } | null;
   canAccessSite?: boolean;
 }) {
@@ -64,20 +68,18 @@ function makeService(opts: {
   const prisma = {
     $transaction: jest.fn((fn: (t: unknown) => unknown) => fn(tx)),
     routingPolicy: {
-      findUnique: jest
-        .fn()
-        .mockResolvedValue(
-          opts.policy
-            ? { ...DEFAULT_ROUTING_SETTINGS, ...opts.settings, ...opts.policy }
-            : opts.settings
-              ? {
-                  id: "policy-1",
-                  autoAssignEnabled: false,
-                  ...DEFAULT_ROUTING_SETTINGS,
-                  ...opts.settings,
-                }
-              : null,
-        ),
+      findUnique: jest.fn().mockResolvedValue(
+        opts.policy
+          ? { ...DEFAULT_ROUTING_SETTINGS, ...opts.settings, ...opts.policy }
+          : opts.settings
+            ? {
+                id: "policy-1",
+                autoAssignEnabled: false,
+                ...DEFAULT_ROUTING_SETTINGS,
+                ...opts.settings,
+              }
+            : null,
+      ),
     },
     site: { findUnique: jest.fn().mockResolvedValue({ id: "site-1" }) },
   } as unknown as PrismaService;
@@ -110,6 +112,13 @@ function makeService(opts: {
       ),
   } as unknown as SkillsService;
 
+  const categoryTeams = {
+    teamForCategory: jest.fn().mockResolvedValue(opts.categoryTeam ?? null),
+    rosterFor: jest
+      .fn()
+      .mockImplementation((id: string) => Promise.resolve(opts.groups?.[id] ?? null)),
+  } as unknown as CategoryTeamsService;
+
   return {
     service: new RoutingService(
       prisma,
@@ -118,7 +127,9 @@ function makeService(opts: {
       incidentsService,
       shiftsService,
       skillsService,
+      categoryTeams,
     ),
+    categoryTeams,
     prisma,
     auditService,
     incidentsService,
@@ -257,6 +268,58 @@ describe("RoutingService.suggestForIncident", () => {
 
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]).toMatchObject({ userId: "pager", isOnCall: true });
+  });
+
+  describe("team filter", () => {
+    const STORAGE_TEAM = { id: "grp-storage", name: "Storage team", memberIds: ["member"] };
+
+    it("only offers the category's team members when one is on shift and qualified", async () => {
+      const { service } = makeService({
+        categoryTeam: STORAGE_TEAM,
+        working: [rosterEntry("member"), rosterEntry("outsider")],
+        skills: { member: [STORAGE.id], outsider: [STORAGE.id] },
+        workload: { member: { P1: 3 } },
+      });
+      const result = await service.suggestForIncident("inc-1", USER, NOW);
+      expect(result.team).toEqual({ id: "grp-storage", name: "Storage team" });
+      expect(result.teamFallback).toBe(false);
+      expect(result.candidates.map((c) => [c.userId, c.inTeam])).toEqual([["member", true]]);
+    });
+
+    it("falls back to every qualified engineer, and says so, when the team has nobody", async () => {
+      const { service } = makeService({
+        categoryTeam: STORAGE_TEAM,
+        working: [rosterEntry("outsider"), rosterEntry("member")],
+        skills: { outsider: [STORAGE.id] }, // the member lacks the skill
+      });
+      const result = await service.suggestForIncident("inc-1", USER, NOW);
+      expect(result.teamFallback).toBe(true);
+      expect(result.candidates.map((c) => [c.userId, c.inTeam])).toEqual([["outsider", false]]);
+    });
+
+    it("uses the group already on the incident before the category's team", async () => {
+      const { service, categoryTeams } = makeService({
+        incident: incident({ ownerGroupId: "grp-net" }),
+        groups: { "grp-net": { id: "grp-net", name: "Network team", memberIds: ["netop"] } },
+        categoryTeam: STORAGE_TEAM,
+        working: [rosterEntry("netop"), rosterEntry("member")],
+        skills: { netop: [STORAGE.id], member: [STORAGE.id] },
+      });
+      const result = await service.suggestForIncident("inc-1", USER, NOW);
+      expect(result.team).toEqual({ id: "grp-net", name: "Network team" });
+      expect(result.candidates.map((c) => c.userId)).toEqual(["netop"]);
+      expect(categoryTeams.teamForCategory).not.toHaveBeenCalled();
+    });
+
+    it("doesn't filter a category with no team", async () => {
+      const { service } = makeService({
+        working: [rosterEntry("a"), rosterEntry("b")],
+        skills: { a: [STORAGE.id], b: [STORAGE.id] },
+      });
+      const result = await service.suggestForIncident("inc-1", USER, NOW);
+      expect(result.team).toBeNull();
+      expect(result.candidates).toHaveLength(2);
+    });
   });
 
   it("dedupes an engineer with overlapping shifts and flags the current owner", async () => {

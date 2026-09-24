@@ -252,10 +252,28 @@ model SupportGroup {
   name      String   @unique
   createdAt DateTime @default(now()) @map("created_at")
 
-  incidents Incident[]
-  members   SupportGroupMember[]
+  incidents     Incident[]
+  members       SupportGroupMember[]
+  categoryTeams CategoryTeam[]
 
   @@map("support_groups")
+}
+
+/// Which support group (team) owns an incident category, e.g.
+/// STORAGE_FAILURE -> Storage team. Owned by the routing module: offers and
+/// suggestions prefer that team's members, and an accepted offer records the
+/// team on the incident. One team per category (case-insensitive, enforced
+/// by the routing service). Deleting the group removes its mappings.
+model CategoryTeam {
+  id        String   @id @default(uuid())
+  category  String   @unique
+  groupId   String   @map("group_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  group SupportGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@map("category_teams")
 }
 
 /// Who's actually on a support group's roster — SupportGroup itself has no
