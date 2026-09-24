@@ -337,8 +337,8 @@ async function main() {
   // SITE01 engineer so GET /incidents/:id/routing-suggestions has something
   // to rank: on INC-SEED-001 (HARDWARE_FAILURE, owned by siteEngineer1) the
   // new engineer comes first with 0 open incidents and siteEngineer1 shows
-  // as current owner. STORAGE_FAILURE at SITE01 demos NO_QUALIFIED_ENGINEER
-  // (only the SITE02 engineer holds Storage).
+  // as current owner. Rahul and Vikas (below) cover the rest of the
+  // omnichannel demo.
   const siteEngineer2 = await prisma.user.upsert({
     where: { email: "engineer2@example.com" },
     update: {},
@@ -428,6 +428,158 @@ async function main() {
     endTime: "08:00",
     isOnCall: true,
   });
+
+  // Omnichannel routing demo: two named SITE01 engineers with distinct
+  // skills, each owning a team, so an alert or ticket routes to the right
+  // person end to end:
+  //   Rahul: Windows + Servers    -> Windows & Servers team
+  //   Vikas: Storage + Backup     -> Storage & Backup team
+  // A "database.down" alert on the demo database server opens a DATABASE
+  // incident (the database.down alert rule below), which needs Storage +
+  // Backup, so it's offered to Vikas once SITE01's auto-routing is
+  // switched on (left off here, like every site's routing by default).
+  const rahul = await prisma.user.upsert({
+    where: { email: "rahul@example.com" },
+    update: {},
+    create: {
+      idpSubject: "seed-rahul",
+      email: "rahul@example.com",
+      displayName: "Rahul",
+      role: UserRole.SITE_ENGINEER,
+    },
+  });
+  const vikas = await prisma.user.upsert({
+    where: { email: "vikas@example.com" },
+    update: {},
+    create: {
+      idpSubject: "seed-vikas",
+      email: "vikas@example.com",
+      displayName: "Vikas",
+      role: UserRole.SITE_ENGINEER,
+    },
+  });
+  for (const engineer of [rahul, vikas]) {
+    await prisma.userSiteAccess.upsert({
+      where: { userId_siteId: { userId: engineer.id, siteId: site1.id } },
+      update: {},
+      create: { userId: engineer.id, siteId: site1.id },
+    });
+  }
+
+  const [windowsSkill, serversSkill, backupSkill] = await Promise.all(
+    ["Windows", "Servers", "Backup"].map((name) =>
+      prisma.skill.upsert({ where: { name }, update: {}, create: { name } }),
+    ),
+  );
+  const demoUserSkills: [string, string][] = [
+    [rahul.id, windowsSkill.id],
+    [rahul.id, serversSkill.id],
+    [vikas.id, storageSkill.id],
+    [vikas.id, backupSkill.id],
+  ];
+  for (const [userId, skillId] of demoUserSkills) {
+    await prisma.userSkill.upsert({
+      where: { userId_skillId: { userId, skillId } },
+      update: {},
+      create: { userId, skillId },
+    });
+  }
+
+  const demoCategoryRequirements: [string, string][] = [
+    ["SERVER_FAILURE", serversSkill.id],
+    ["WINDOWS_OS", windowsSkill.id],
+    ["WINDOWS_OS", serversSkill.id],
+    ["DATABASE", storageSkill.id],
+    ["DATABASE", backupSkill.id],
+    ["BACKUP_FAILURE", backupSkill.id],
+  ];
+  for (const [category, skillId] of demoCategoryRequirements) {
+    await prisma.categorySkillRequirement.upsert({
+      where: { category_skillId: { category, skillId } },
+      update: {},
+      create: { category, skillId },
+    });
+  }
+
+  const [serversTeam, storageTeam] = await Promise.all(
+    ["Windows & Servers team", "Storage & Backup team"].map((name) =>
+      prisma.supportGroup.upsert({ where: { name }, update: {}, create: { name } }),
+    ),
+  );
+  const teamMembers: [string, string][] = [
+    [serversTeam.id, rahul.id],
+    [storageTeam.id, vikas.id],
+  ];
+  for (const [groupId, userId] of teamMembers) {
+    await prisma.supportGroupMember.upsert({
+      where: { groupId_userId: { groupId, userId } },
+      update: {},
+      create: { groupId, userId },
+    });
+  }
+  const categoryTeams: [string, string][] = [
+    ["SERVER_FAILURE", serversTeam.id],
+    ["WINDOWS_OS", serversTeam.id],
+    ["DATABASE", storageTeam.id],
+    ["BACKUP_FAILURE", storageTeam.id],
+    ["STORAGE_FAILURE", storageTeam.id],
+  ];
+  for (const [category, groupId] of categoryTeams) {
+    await prisma.categoryTeam.upsert({
+      where: { category },
+      update: {},
+      create: { category, groupId },
+    });
+  }
+
+  for (const engineer of [rahul, vikas]) {
+    await findOrCreateShift({
+      userId: engineer.id,
+      siteId: site1.id,
+      label: "Demo day cover",
+      daysOfWeek: everyDay,
+      startTime: "08:00",
+      endTime: "20:00",
+    });
+    await findOrCreateShift({
+      userId: engineer.id,
+      siteId: site1.id,
+      label: "Demo night cover",
+      daysOfWeek: everyDay,
+      startTime: "20:00",
+      endTime: "08:00",
+    });
+  }
+
+  await prisma.configurationItem.upsert({
+    where: { ciCode: "SITE01-R01-DB-001" },
+    update: {},
+    create: {
+      ciCode: "SITE01-R01-DB-001",
+      siteId: site1.id,
+      rackId: rack1.id,
+      ciType: CiType.SERVER,
+      name: "SITE01 Rack01 Database server",
+      manufacturer: "Dell",
+      model: "PowerEdge R760",
+      managedBy: ManagedBy.JSAN,
+      criticality: Criticality.CRITICAL,
+      lifecycleStatus: LifecycleStatus.ACTIVE,
+    },
+  });
+  const dbAlertRule = await prisma.alertRule.findFirst({
+    where: { name: "demo: database.down" },
+  });
+  if (!dbAlertRule) {
+    await prisma.alertRule.create({
+      data: {
+        name: "demo: database.down",
+        alertType: "database.down",
+        autoCreateSeverities: ["CRITICAL"],
+        incidentCategory: "DATABASE",
+      },
+    });
+  }
 
   // Incident + timeline + comment — only created once (not upserted, since
   // Incident has no natural business key besides incidentNo we'd want to
@@ -551,10 +703,13 @@ async function main() {
       `${siteEngineer.email} (SITE_ENGINEER, ${site2.code} only), ` +
       `${siteEngineer1.email} (SITE_ENGINEER, ${site1.code} only), ` +
       `${siteEngineer2.email} (SITE_ENGINEER, ${site1.code} only), ` +
+      `${rahul.email} (Windows + Servers) and ${vikas.email} (Storage + Backup) ` +
+      `(SITE_ENGINEER, ${site1.code}, each owning a team), ` +
       `${clientViewer.email} (CLIENT_MANAGER_VIEWER, ${site1.code} only), ` +
-      `1 rack and 3 CIs (1 CI-to-CI relation, 3 health snapshots), ` +
+      `1 rack and 4 CIs (1 CI-to-CI relation, 3 health snapshots), ` +
       `4 SLA policies (P1-P4) and 1 support calendar per site, ` +
-      `3 skills, 4 engineer-skill assignments, 3 category requirements, 6 demo shifts, ` +
+      `6 skills, 8 engineer-skill assignments, 9 category requirements, 10 demo shifts, ` +
+      `2 demo teams with 5 category -> team mappings, a database.down alert rule, ` +
       `1 incident (INC-SEED-001, IN_PROGRESS, 5 timeline events, 1 comment, 1 worklog, 1 SLA instance).`,
   );
 }
