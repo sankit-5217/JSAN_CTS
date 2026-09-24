@@ -1,6 +1,7 @@
 import { Priority } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { InboxService } from "../inbox/inbox.service";
 import { SlaEscalationScanner } from "./sla-escalation.scanner";
 import { SlaTimersPublisher } from "./sla-timers.publisher";
 
@@ -52,6 +53,8 @@ function baseInstance(overrides: Partial<Record<string, unknown>> = {}) {
 function makeScanner(
   overrides: {
     findMany?: jest.Mock;
+    userFindMany?: jest.Mock;
+    notifyUsers?: jest.Mock;
     txSlaInstance?: Partial<Record<string, jest.Mock>>;
   } = {},
 ) {
@@ -69,6 +72,9 @@ function makeScanner(
     slaInstance: {
       findMany: overrides.findMany ?? jest.fn().mockResolvedValue([baseInstance()]),
     },
+    user: {
+      findMany: overrides.userFindMany ?? jest.fn().mockResolvedValue([]),
+    },
   } as unknown as PrismaService;
 
   const auditService = {
@@ -78,11 +84,16 @@ function makeScanner(
     enqueue: jest.fn().mockResolvedValue(undefined),
   } as unknown as SlaTimersPublisher;
 
+  const inbox = {
+    notifyUsers: overrides.notifyUsers ?? jest.fn().mockResolvedValue(undefined),
+  } as unknown as InboxService;
+
   return {
-    scanner: new SlaEscalationScanner(prisma, auditService, publisher),
+    scanner: new SlaEscalationScanner(prisma, auditService, publisher, inbox),
     prisma,
     auditService,
     publisher,
+    inbox,
     tx,
   };
 }
@@ -337,5 +348,79 @@ describe("SlaEscalationScanner.scan", () => {
     expect(tx.slaInstance.update).toHaveBeenCalled();
 
     jest.useRealTimers();
+  });
+});
+
+describe("SlaEscalationScanner in-app notifications", () => {
+  afterEach(() => jest.useRealTimers());
+
+  it("puts a breach in the bell of the owner, the team and any on-call contact who is a user", async () => {
+    jest.useFakeTimers().setSystemTime(NOW);
+    const userFindMany = jest.fn().mockResolvedValue([{ id: "oncall-user" }]);
+    const { scanner, inbox } = makeScanner({
+      userFindMany,
+      findMany: jest.fn().mockResolvedValue([
+        baseInstance({
+          incident: {
+            ...baseInstance().incident,
+            owner: { id: "owner-1", displayName: "Sam Engineer", email: "sam@corp.example" },
+            ownerGroup: {
+              members: [
+                {
+                  user: {
+                    id: "member-1",
+                    displayName: "Team A",
+                    email: "a@corp.example",
+                    isActive: true,
+                  },
+                },
+              ],
+            },
+          },
+        }),
+      ]),
+    });
+
+    await scanner.scan();
+
+    expect(userFindMany).toHaveBeenCalledWith({
+      where: { email: { in: ["oncall@corp.example"] } },
+      select: { id: true },
+    });
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "SLA_BREACHED",
+        userIds: ["owner-1", "member-1", "oncall-user"],
+        title: "Resolution SLA breached on INC-000042",
+        entityType: "INCIDENT",
+        entityId: "incident-1",
+        dedupeKey: "sla:instance-1:RESOLVE_BREACH",
+      }),
+    );
+  });
+
+  it("uses the warning kind for a milestone short of 100%", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-09-03T12:00:00Z")); // 50% of 4h
+    const { scanner, inbox } = makeScanner();
+
+    await scanner.scan();
+
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "SLA_WARNING", title: expect.stringContaining("50% used") }),
+    );
+  });
+
+  it("still sends the email when the in-app write fails", async () => {
+    jest.useFakeTimers().setSystemTime(NOW);
+    const { scanner, publisher } = makeScanner({
+      userFindMany: jest.fn().mockRejectedValue(new Error("db down")),
+    });
+
+    await scanner.scan();
+
+    expect(publisher.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ event: expect.objectContaining({ kind: "SLA_BREACHED" }) }),
+      "sla:instance-1:RESOLVE_BREACH",
+    );
   });
 });

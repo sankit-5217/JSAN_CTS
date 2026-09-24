@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ScheduleModule } from "@nestjs/schedule";
 import { AuthModule } from "../auth/auth.module";
+import { InboxModule } from "../inbox/inbox.module";
 import { SitesModule } from "../sites/sites.module";
 import { SlaController } from "./sla.controller";
 import { SlaEscalationScanner } from "./sla-escalation.scanner";
@@ -24,7 +25,7 @@ import { SlaTimersPublisher } from "./sla-timers.publisher";
  * `.forRoot()` import anywhere else in the tree would double-register it.
  */
 @Module({
-  imports: [AuthModule, SitesModule, ScheduleModule.forRoot()],
+  imports: [AuthModule, SitesModule, InboxModule, ScheduleModule.forRoot()],
   controllers: [SlaController],
   providers: [SlaService, SlaTimersPublisher, SlaEscalationScanner],
   exports: [SlaService],

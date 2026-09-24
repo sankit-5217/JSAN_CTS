@@ -34,6 +34,7 @@ import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
 import { AccountMenu, roleMeta } from "./components/AccountMenu";
+import { NotificationBell } from "./components/NotificationBell";
 import { clearStoredToken, getStoredToken } from "./api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "./api/jwt";
 import { theme } from "./theme/theme";
@@ -327,6 +328,11 @@ function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
           <MenuOutlinedIcon />
         </IconButton>
         <Box sx={{ flex: 1 }} />
+        {user && (
+          <NotificationBell
+            linkFor={(n) => (n.entityType === "INCIDENT" ? `/incidents/${n.entityId}` : null)}
+          />
+        )}
         {user && meta && (
           <AccountMenu
             email={user.email}

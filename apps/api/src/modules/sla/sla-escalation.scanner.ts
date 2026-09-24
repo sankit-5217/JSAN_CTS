@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import {
+  InAppNotificationKind,
   Prisma,
   SlaInstance,
   SlaPolicy,
@@ -14,6 +15,7 @@ import {
 import type { EntityRef, NotificationEvent, Party } from "@cts-dc-opsdesk/email-adapter";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { InboxService } from "../inbox/inbox.service";
 import { SlaTimersPublisher } from "./sla-timers.publisher";
 
 type SlaKindInternal = "ACK" | "RESOLVE";
@@ -56,6 +58,7 @@ export class SlaEscalationScanner {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly publisher: SlaTimersPublisher,
+    private readonly inbox: InboxService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -225,7 +228,62 @@ export class SlaEscalationScanner {
     return parties.filter((p) => (seen.has(p.email) ? false : (seen.add(p.email), true)));
   }
 
+  /**
+   * The same audience as recipients(), but as user ids for the in-app bell.
+   * Owner and group members are users already. An on-call site contact is
+   * only a name and email, so they're included only if that email belongs
+   * to an active user; otherwise they get the email alone.
+   */
+  private async recipientUserIds(instance: InstanceWithContext): Promise<string[]> {
+    const ids: string[] = [];
+    if (instance.incident.owner) {
+      ids.push(instance.incident.owner.id);
+    }
+    for (const member of instance.incident.ownerGroup?.members ?? []) {
+      ids.push(member.user.id);
+    }
+    const contactEmails = instance.incident.site.contacts
+      .filter((c) => c.isOnCall && c.email)
+      .map((c) => c.email as string);
+    if (contactEmails.length > 0) {
+      const contactUsers = await this.prisma.user.findMany({
+        where: { email: { in: contactEmails } },
+        select: { id: true },
+      });
+      ids.push(...contactUsers.map((u) => u.id));
+    }
+    return ids;
+  }
+
+  private async notifyInApp(
+    instance: InstanceWithContext,
+    crossed: CrossedMilestone,
+  ): Promise<void> {
+    try {
+      const breached = crossed.percent === 100;
+      const kindLabel = crossed.slaKind === "ACK" ? "Response" : "Resolution";
+      await this.inbox.notifyUsers({
+        userIds: await this.recipientUserIds(instance),
+        kind: breached ? InAppNotificationKind.SLA_BREACHED : InAppNotificationKind.SLA_WARNING,
+        title: breached
+          ? `${kindLabel} SLA breached on ${instance.incident.incidentNo}`
+          : `${kindLabel} SLA ${crossed.percent}% used on ${instance.incident.incidentNo}`,
+        body: instance.incident.shortDescription,
+        entityType: "INCIDENT",
+        entityId: instance.incident.id,
+        dedupeKey: `sla:${instance.id}:${crossed.milestone}`,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `in-app SLA ${crossed.milestone} notification skipped for incident ${instance.incident.incidentNo}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   private async notify(instance: InstanceWithContext, crossed: CrossedMilestone): Promise<void> {
+    await this.notifyInApp(instance, crossed);
     const to = this.recipients(instance);
     if (to.length === 0) {
       this.logger.warn(

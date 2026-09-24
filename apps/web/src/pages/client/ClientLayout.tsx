@@ -2,6 +2,7 @@ import { Navigate, Outlet, Link, useLocation } from "react-router-dom";
 import { AppBar, Box, Button, Stack, Toolbar, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import { AccountMenu, roleMeta } from "../../components/AccountMenu";
+import { NotificationBell } from "../../components/NotificationBell";
 import { clearStoredToken, getStoredToken } from "../../api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "../../api/jwt";
 import { theme } from "../../theme/theme";
@@ -92,6 +93,13 @@ export function ClientLayout() {
 
           <Box sx={{ flex: 1 }} />
 
+          {user && (
+            <NotificationBell
+              linkFor={(n) =>
+                n.entityType === "INCIDENT" ? `/client/tickets/${n.entityId}` : null
+              }
+            />
+          )}
           {user && (
             <AccountMenu
               email={user.email}

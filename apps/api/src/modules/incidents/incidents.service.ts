@@ -9,6 +9,7 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 import { createHash, randomUUID } from "crypto";
 import {
   Attachment,
+  InAppNotificationKind,
   Incident,
   IncidentComment,
   IncidentEvent,
@@ -26,6 +27,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { InboxService } from "../inbox/inbox.service";
 import { SlaService } from "../sla/sla.service";
 import {
   ALLOWED_ATTACHMENT_CONTENT_TYPES,
@@ -96,6 +98,7 @@ export class IncidentsService {
     private readonly slaService: SlaService,
     private readonly notifications: NotificationsPublisher,
     private readonly events: EventEmitter2,
+    private readonly inbox: InboxService,
   ) {}
 
   async assertSiteAccess(user: AuthenticatedUser, siteId: string): Promise<void> {
@@ -266,7 +269,7 @@ export class IncidentsService {
       return incident;
     });
 
-    await this.notifyServiceDeskOfNewIncident(incident);
+    await this.notifyServiceDeskOfNewIncident(incident, actor.actorId);
     const createdEvent: IncidentCreatedEvent = {
       incidentId: incident.id,
       siteId: incident.siteId,
@@ -387,9 +390,9 @@ export class IncidentsService {
     });
 
     if (ownerChanged && after.ownerUserId) {
-      await this.notifyAssignment(after, after.ownerUserId);
+      await this.notifyAssignment(after, after.ownerUserId, actor.actorId);
     } else if (ownerChanged && after.ownerGroupId && !after.ownerUserId) {
-      await this.notifyGroupAssignment(after, after.ownerGroupId);
+      await this.notifyGroupAssignment(after, after.ownerGroupId, actor.actorId);
     }
 
     return after;
@@ -534,16 +537,16 @@ export class IncidentsService {
       return after;
     });
 
-    await this.notifyStatusChange(incident, after, dto.reason);
+    await this.notifyStatusChange(incident, after, dto.reason, actor.actorId);
     if (dto.ownerUserId !== undefined && dto.ownerUserId !== incident.ownerUserId) {
-      await this.notifyAssignment(after, dto.ownerUserId);
+      await this.notifyAssignment(after, dto.ownerUserId, actor.actorId);
     } else if (
       dto.ownerGroupId !== undefined &&
       dto.ownerGroupId !== incident.ownerGroupId &&
       after.ownerGroupId &&
       !after.ownerUserId
     ) {
-      await this.notifyGroupAssignment(after, after.ownerGroupId);
+      await this.notifyGroupAssignment(after, after.ownerGroupId, actor.actorId);
     }
 
     return after;
@@ -571,11 +574,7 @@ export class IncidentsService {
     correlationId?: string,
   ): Promise<Incident | null> {
     const incident = await this.findOne(id);
-    if (
-      incident.status !== IncidentStatus.NEW ||
-      incident.ownerUserId ||
-      incident.ownerGroupId
-    ) {
+    if (incident.status !== IncidentStatus.NEW || incident.ownerUserId || incident.ownerGroupId) {
       return null;
     }
 
@@ -1186,11 +1185,24 @@ export class IncidentsService {
    * AlertsService.notifyNocOfCriticalAlert's role-roster pattern; there was
    * no equivalent "page the desk" helper in this module yet.
    */
-  private async notifyServiceDeskOfNewIncident(incident: Incident): Promise<void> {
+  private async notifyServiceDeskOfNewIncident(
+    incident: Incident,
+    actorUserId: string,
+  ): Promise<void> {
     try {
       const roster = await this.prisma.user.findMany({
         where: { isActive: true, role: UserRole.SERVICE_DESK_NOC },
-        select: { email: true, displayName: true },
+        select: { id: true, email: true, displayName: true },
+      });
+      await this.inbox.notifyUsers({
+        userIds: roster.map((u) => u.id),
+        actorUserId,
+        kind: InAppNotificationKind.INCIDENT_CREATED,
+        title: `New ticket ${incident.incidentNo} (${incident.priority})`,
+        body: incident.shortDescription,
+        entityType: "INCIDENT",
+        entityId: incident.id,
+        dedupeKey: `created:${incident.id}`,
       });
       const to = roster
         .filter((u) => u.email)
@@ -1225,8 +1237,25 @@ export class IncidentsService {
 
   /** Tell the (re)assigned owner. Called from createTransition (assigning as
    *  part of a status move) and update() (a plain reassignment via PATCH). */
-  private async notifyAssignment(incident: Incident, ownerUserId: string): Promise<void> {
+  private async notifyAssignment(
+    incident: Incident,
+    ownerUserId: string,
+    actorUserId?: string,
+  ): Promise<void> {
     try {
+      // The in-app key includes updatedAt so that a later re-assignment back
+      // to the same engineer shows up again. The email's jobId intentionally
+      // doesn't include it.
+      await this.inbox.notifyUsers({
+        userIds: [ownerUserId],
+        actorUserId,
+        kind: InAppNotificationKind.INCIDENT_ASSIGNED,
+        title: `${incident.incidentNo} assigned to you`,
+        body: incident.shortDescription,
+        entityType: "INCIDENT",
+        entityId: incident.id,
+        dedupeKey: `assigned:${incident.id}:${ownerUserId}:${incident.updatedAt.getTime()}`,
+      });
       const assignee = await this.prisma.user.findUnique({ where: { id: ownerUserId } });
       if (!assignee?.email) {
         return;
@@ -1251,7 +1280,11 @@ export class IncidentsService {
    *  satisfies the NEW -> ASSIGNED gate but pages nobody. Only called when
    *  ownerUserId is unset; once someone claims it, notifyAssignment takes
    *  over. */
-  private async notifyGroupAssignment(incident: Incident, ownerGroupId: string): Promise<void> {
+  private async notifyGroupAssignment(
+    incident: Incident,
+    ownerGroupId: string,
+    actorUserId?: string,
+  ): Promise<void> {
     try {
       const group = await this.prisma.supportGroup.findUnique({
         where: { id: ownerGroupId },
@@ -1260,6 +1293,16 @@ export class IncidentsService {
       if (!group) {
         return;
       }
+      await this.inbox.notifyUsers({
+        userIds: group.members.map((m) => m.user.id),
+        actorUserId,
+        kind: InAppNotificationKind.INCIDENT_GROUP_ASSIGNED,
+        title: `${incident.incidentNo} assigned to ${group.name}`,
+        body: incident.shortDescription,
+        entityType: "INCIDENT",
+        entityId: incident.id,
+        dedupeKey: `group:${incident.id}:${ownerGroupId}:${incident.updatedAt.getTime()}`,
+      });
       const to: Party[] = group.members
         .filter((m) => m.user.isActive && m.user.email)
         .map((m) => ({ name: m.user.displayName, email: m.user.email }));
@@ -1294,6 +1337,7 @@ export class IncidentsService {
     before: Incident,
     after: Incident,
     reason?: string,
+    actorUserId?: string,
   ): Promise<void> {
     try {
       const ids = [after.ownerUserId, after.reportedByUserId].filter((v): v is string =>
@@ -1302,6 +1346,16 @@ export class IncidentsService {
       if (ids.length === 0) {
         return;
       }
+      await this.inbox.notifyUsers({
+        userIds: ids,
+        actorUserId,
+        kind: InAppNotificationKind.INCIDENT_STATUS_CHANGED,
+        title: `${after.incidentNo}: ${before.status} → ${after.status}`,
+        body: reason ?? after.shortDescription,
+        entityType: "INCIDENT",
+        entityId: after.id,
+        dedupeKey: `status:${after.id}:${after.status}:${after.updatedAt.getTime()}`,
+      });
       const users = await this.prisma.user.findMany({ where: { id: { in: ids } } });
       const owner = this.partyFor(users, after.ownerUserId);
       const customer = this.partyFor(users, after.reportedByUserId);
@@ -1348,6 +1402,16 @@ export class IncidentsService {
       if (!recipientId) {
         return;
       }
+      await this.inbox.notifyUsers({
+        userIds: [recipientId],
+        actorUserId: author.id,
+        kind: InAppNotificationKind.INCIDENT_COMMENT_ADDED,
+        title: `New comment on ${incident.incidentNo}`,
+        body: comment.body.length > 200 ? `${comment.body.slice(0, 199)}…` : comment.body,
+        entityType: "INCIDENT",
+        entityId: incident.id,
+        dedupeKey: `comment:${comment.id}`,
+      });
       const recipient = await this.prisma.user.findUnique({ where: { id: recipientId } });
       if (!recipient?.email) {
         return;

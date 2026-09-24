@@ -166,6 +166,7 @@ model User {
   supportGroupMembers SupportGroupMember[]
   engineerShifts      EngineerShift[]
   userSkills          UserSkill[]
+  inAppNotifications  InAppNotification[]
 
   @@map("users")
 }
@@ -373,6 +374,43 @@ model RoutingPolicy {
   site Site @relation(fields: [siteId], references: [id])
 
   @@map("routing_policies")
+}
+
+/// What an in-app notification is about: the subset of the email
+/// notification kinds that also land in the web app's bell.
+enum InAppNotificationKind {
+  INCIDENT_CREATED
+  INCIDENT_ASSIGNED
+  INCIDENT_GROUP_ASSIGNED
+  INCIDENT_STATUS_CHANGED
+  INCIDENT_COMMENT_ADDED
+  SLA_WARNING
+  SLA_BREACHED
+}
+
+/// One entry in a user's notification bell. Owned by the inbox module;
+/// written best-effort next to the matching email, after the triggering
+/// mutation has committed. `dedupeKey` makes a repeated write of the same
+/// event for the same user a no-op. Rows older than
+/// NOTIFICATION_RETENTION_DAYS (default 90) are purged daily.
+model InAppNotification {
+  id         String                @id @default(uuid())
+  userId     String                @map("user_id")
+  kind       InAppNotificationKind
+  title      String
+  body       String?
+  entityType String                @map("entity_type")
+  entityId   String                @map("entity_id")
+  dedupeKey  String                @map("dedupe_key")
+  readAt     DateTime?             @map("read_at")
+  createdAt  DateTime              @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("in_app_notifications")
 }
 
 // ---------------------------------------------------------------------------

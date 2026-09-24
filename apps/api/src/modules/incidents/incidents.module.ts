@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { StorageModule } from "../../common/storage/storage.module";
 import { AuthModule } from "../auth/auth.module";
+import { InboxModule } from "../inbox/inbox.module";
 import { SlaModule } from "../sla/sla.module";
 import { IncidentsController } from "./incidents.controller";
 import { IncidentsService } from "./incidents.service";
@@ -22,7 +23,7 @@ import { IncidentsService } from "./incidents.service";
  * this one) to avoid a circular dependency.
  */
 @Module({
-  imports: [AuthModule, StorageModule, SlaModule],
+  imports: [AuthModule, StorageModule, SlaModule, InboxModule],
   controllers: [IncidentsController],
   providers: [IncidentsService],
   exports: [IncidentsService],
