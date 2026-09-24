@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Card,
@@ -10,7 +11,7 @@ import {
   CircularProgress,
   Divider,
   Grid,
-  MenuItem,
+  InputAdornment,
   Snackbar,
   Stack,
   TextField,
@@ -27,6 +28,7 @@ import MailOutlineIcon from "@mui/icons-material/MailOutline";
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
+import SearchIcon from "@mui/icons-material/Search";
 import SecurityOutlinedIcon from "@mui/icons-material/SecurityOutlined";
 import VerifiedUserOutlinedIcon from "@mui/icons-material/VerifiedUserOutlined";
 import { apiPost, storeToken } from "../api/client";
@@ -90,8 +92,10 @@ const SOCIAL_PROVIDERS = [
 const PANEL_BG = darken(theme.palette.primary.main, 0.45);
 const ACCENT = theme.palette.secondary.light;
 
-// Matches apps/api/prisma/seed.ts's seeded users — a convenience dropdown,
-// not a hard-coded allowlist (any active user's email works via dev-login).
+// Matches apps/api/prisma/seed.ts's seeded users — search suggestions for the
+// email box, not a hard-coded allowlist (any active user's email works via
+// dev-login, typed in full). There's deliberately no API call here: a
+// signed-out page must not be able to list the organization's users.
 const SEEDED_USERS = [
   {
     email: "admin@example.com",
@@ -110,6 +114,24 @@ const SEEDED_USERS = [
     role: "SITE_ENGINEER",
     scope: "SITE01",
     note: "Hands-on floor engineering and hardware actions.",
+  },
+  {
+    email: "engineer2@example.com",
+    role: "SITE_ENGINEER",
+    scope: "SITE01",
+    note: "Hands-on floor engineering and hardware actions.",
+  },
+  {
+    email: "rahul@example.com",
+    role: "SITE_ENGINEER",
+    scope: "SITE01",
+    note: "Routing demo: Windows + Servers skills, Windows & Servers team.",
+  },
+  {
+    email: "vikas@example.com",
+    role: "SITE_ENGINEER",
+    scope: "SITE01",
+    note: "Routing demo: Storage + Backup skills, Storage & Backup team.",
   },
   {
     email: "engineer@example.com",
@@ -265,10 +287,11 @@ function BrandMark({ height = 24, on = "dark" }: { height?: number; on?: "dark" 
  */
 export function LoginPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState(SEEDED_USERS[0].email);
+  const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const selectedUser = SEEDED_USERS.find((u) => u.email === email);
+  const typedEmail = email.trim().toLowerCase();
+  const selectedUser = SEEDED_USERS.find((u) => u.email === typedEmail);
 
   // Contact form is decorative — same honesty rule as the social buttons:
   // nothing on a real page should look functional and silently do nothing.
@@ -289,11 +312,15 @@ export function LoginPage() {
     document.getElementById("hero")?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const handleLogin = async () => {
+  const handleLogin = async (e?: FormEvent) => {
+    e?.preventDefault();
+    if (!typedEmail || loading) return;
     setError(null);
     setLoading(true);
     try {
-      const { accessToken } = await apiPost<DevLoginResponse>("/auth/dev-login", { email });
+      const { accessToken } = await apiPost<DevLoginResponse>("/auth/dev-login", {
+        email: typedEmail,
+      });
       storeToken(accessToken);
       const role = decodeJwtPayload(accessToken)?.role;
       navigate(role === "CLIENT_MANAGER_VIEWER" ? "/client/report" : "/");
@@ -595,8 +622,8 @@ export function LoginPage() {
                 </Divider>
 
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Dev-mode sign-in — pick a seeded user, no password. Disabled server-side outside
-                  local/dev.
+                  Dev-mode sign-in — type or search your work email, no password. Disabled
+                  server-side outside local/dev.
                 </Typography>
 
                 {error && (
@@ -605,78 +632,120 @@ export function LoginPage() {
                   </Alert>
                 )}
 
-                <TextField
-                  id="dev-login-user"
-                  select
-                  fullWidth
-                  label="User"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  sx={{ mb: 2, "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
-                >
-                  {SEEDED_USERS.map((user) => (
-                    <MenuItem key={user.email} value={user.email}>
-                      {user.email} ({user.role}, {user.scope})
-                    </MenuItem>
-                  ))}
-                </TextField>
-
-                {selectedUser && (
-                  <Box
-                    sx={{
-                      mb: 3,
-                      p: 1.5,
-                      borderRadius: 2,
-                      bgcolor: alpha(theme.palette.primary.main, 0.05),
-                      border: "1px solid",
-                      borderColor: alpha(theme.palette.primary.main, 0.12),
+                <Box component="form" onSubmit={handleLogin} noValidate>
+                  <Autocomplete
+                    id="dev-login-user"
+                    freeSolo
+                    openOnFocus
+                    options={SEEDED_USERS}
+                    inputValue={email}
+                    onInputChange={(_, value) => setEmail(value)}
+                    onChange={(_, value) =>
+                      setEmail(typeof value === "string" ? value : (value?.email ?? ""))
+                    }
+                    getOptionLabel={(user) => (typeof user === "string" ? user : user.email)}
+                    filterOptions={(users, { inputValue }) => {
+                      const q = inputValue.trim().toLowerCase();
+                      return q
+                        ? users.filter((u) =>
+                            [u.email, u.role, u.scope, u.note].some((field) =>
+                              field.toLowerCase().includes(q),
+                            ),
+                          )
+                        : users;
                     }}
-                  >
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                      <Chip
-                        size="small"
-                        label={selectedUser.role}
-                        sx={{
-                          bgcolor: alpha(theme.palette.primary.main, 0.12),
-                          color: theme.palette.primary.main,
-                          fontWeight: 600,
+                    renderOption={(props, user) => {
+                      const { key, ...rest } = props as typeof props & { key: string };
+                      return (
+                        <Box component="li" key={key} {...rest}>
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography variant="body2" noWrap>
+                              {user.email}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {user.role} · {user.scope}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      );
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Work email"
+                        placeholder="Search by email, role or site"
+                        autoComplete="username"
+                        InputProps={{
+                          ...params.InputProps,
+                          startAdornment: (
+                            <InputAdornment position="start">
+                              <SearchIcon fontSize="small" />
+                            </InputAdornment>
+                          ),
                         }}
                       />
-                      <Typography variant="caption" color="text.secondary">
-                        {selectedUser.scope}
-                      </Typography>
-                    </Stack>
-                    <Typography variant="body2" color="text.secondary">
-                      {selectedUser.note}
-                    </Typography>
-                  </Box>
-                )}
+                    )}
+                    noOptionsText="No demo user matches. Type a full work email to sign in."
+                    sx={{ mb: 2, "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
+                  />
 
-                <Button
-                  variant="contained"
-                  fullWidth
-                  size="large"
-                  disabled={loading}
-                  onClick={handleLogin}
-                  startIcon={
-                    loading ? (
-                      <CircularProgress size={16} sx={{ color: "inherit" }} />
-                    ) : (
-                      <LoginOutlinedIcon />
-                    )
-                  }
-                  sx={{
-                    borderRadius: 2,
-                    py: 1.1,
-                    textTransform: "none",
-                    fontWeight: 600,
-                    fontSize: 15,
-                    boxShadow: "none",
-                    "&:hover": { boxShadow: "0 8px 20px -8px rgba(15, 61, 99, 0.5)" },
-                  }}
-                >
-                  {loading ? "Signing in..." : "Sign in"}
-                </Button>
+                  {selectedUser && (
+                    <Box
+                      sx={{
+                        mb: 3,
+                        p: 1.5,
+                        borderRadius: 2,
+                        bgcolor: alpha(theme.palette.primary.main, 0.05),
+                        border: "1px solid",
+                        borderColor: alpha(theme.palette.primary.main, 0.12),
+                      }}
+                    >
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                        <Chip
+                          size="small"
+                          label={selectedUser.role}
+                          sx={{
+                            bgcolor: alpha(theme.palette.primary.main, 0.12),
+                            color: theme.palette.primary.main,
+                            fontWeight: 600,
+                          }}
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                          {selectedUser.scope}
+                        </Typography>
+                      </Stack>
+                      <Typography variant="body2" color="text.secondary">
+                        {selectedUser.note}
+                      </Typography>
+                    </Box>
+                  )}
+
+                  <Button
+                    type="submit"
+                    variant="contained"
+                    fullWidth
+                    size="large"
+                    disabled={loading || !typedEmail}
+                    startIcon={
+                      loading ? (
+                        <CircularProgress size={16} sx={{ color: "inherit" }} />
+                      ) : (
+                        <LoginOutlinedIcon />
+                      )
+                    }
+                    sx={{
+                      borderRadius: 2,
+                      py: 1.1,
+                      textTransform: "none",
+                      fontWeight: 600,
+                      fontSize: 15,
+                      boxShadow: "none",
+                      "&:hover": { boxShadow: "0 8px 20px -8px rgba(15, 61, 99, 0.5)" },
+                    }}
+                  >
+                    {loading ? "Signing in..." : "Sign in"}
+                  </Button>
+                </Box>
               </CardContent>
             </Card>
           </Box>
