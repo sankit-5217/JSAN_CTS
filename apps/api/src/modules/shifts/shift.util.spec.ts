@@ -58,9 +58,7 @@ describe("isShiftActiveAt", () => {
     const shift: ShiftWindow = { daysOfWeek: [4], startTime: "06:00", endTime: "14:00" };
     // 10:00 UTC = 06:00 America/New_York (EDT, UTC-4) in September — right
     // at the window's start in that site's local time.
-    expect(isShiftActiveAt(shift, "America/New_York", new Date("2026-09-03T10:00:00Z"))).toBe(
-      true,
-    );
+    expect(isShiftActiveAt(shift, "America/New_York", new Date("2026-09-03T10:00:00Z"))).toBe(true);
     // The same instant is 6pm+ in a UTC+8 zone — well outside the window.
     expect(isShiftActiveAt(shift, "Asia/Shanghai", new Date("2026-09-03T10:00:00Z"))).toBe(false);
   });

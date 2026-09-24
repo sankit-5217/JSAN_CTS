@@ -25,7 +25,12 @@ export function isShiftActiveAt(shift: ShiftWindow, siteTimezone: string, now: D
   const nowLocal = DateTime.fromJSDate(now).setZone(siteTimezone);
   const { hour: startHour, minute: startMinute } = parseClock(shift.startTime);
   const { hour: endHour, minute: endMinute } = parseClock(shift.endTime);
-  const todayStart = nowLocal.set({ hour: startHour, minute: startMinute, second: 0, millisecond: 0 });
+  const todayStart = nowLocal.set({
+    hour: startHour,
+    minute: startMinute,
+    second: 0,
+    millisecond: 0,
+  });
   const todayEnd = nowLocal.set({ hour: endHour, minute: endMinute, second: 0, millisecond: 0 });
   const today = nowLocal.weekday % 7; // Luxon: 1=Mon..7=Sun -> 0=Sun..6=Sat
   const yesterday = (today + 6) % 7;

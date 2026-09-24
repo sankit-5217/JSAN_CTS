@@ -1,5 +1,11 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { CategorySkillRequirement, Skill, UserSkill } from "@prisma/client";
+import { isEngineerRole } from "../auth/engineer-roles";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
@@ -113,17 +119,18 @@ export class SkillsService {
     });
   }
 
-  async assignSkill(
-    skillId: string,
-    dto: AssignSkillDto,
-    actor: ActorContext,
-  ): Promise<UserSkill> {
+  async assignSkill(skillId: string, dto: AssignSkillDto, actor: ActorContext): Promise<UserSkill> {
     const [skill, user] = await Promise.all([
       this.findSkillOrThrow(skillId),
       this.prisma.user.findUnique({ where: { id: dto.userId } }),
     ]);
     if (!user) {
       throw new BadRequestException(`User ${dto.userId} not found`);
+    }
+    if (!isEngineerRole(user.role)) {
+      throw new BadRequestException(
+        `${user.displayName} isn't an engineer; only Site Engineers and Infrastructure Leads hold skills`,
+      );
     }
     if (!skill.isActive) {
       throw new BadRequestException(`Skill "${skill.name}" is retired and can't be assigned`);

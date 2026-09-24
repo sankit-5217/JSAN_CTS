@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { EngineerShift, Prisma } from "@prisma/client";
+import { isEngineerRole } from "../auth/engineer-roles";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
@@ -94,6 +95,11 @@ export class ShiftsService {
     ]);
     if (!user) {
       throw new BadRequestException(`User ${dto.userId} not found`);
+    }
+    if (!isEngineerRole(user.role)) {
+      throw new BadRequestException(
+        `${user.displayName} isn't an engineer; only Site Engineers and Infrastructure Leads work shifts`,
+      );
     }
     if (!site) {
       throw new BadRequestException(`Site ${dto.siteId} not found`);

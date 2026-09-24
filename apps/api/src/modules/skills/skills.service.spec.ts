@@ -36,15 +36,19 @@ function makeService(
       .mockImplementation(({ data }) => Promise.resolve({ ...baseSkill(), ...data })),
   };
   const txUserSkill = {
-    create: jest.fn().mockImplementation(({ data }) =>
-      Promise.resolve({ id: "assignment-1", createdAt: new Date(), ...data }),
-    ),
+    create: jest
+      .fn()
+      .mockImplementation(({ data }) =>
+        Promise.resolve({ id: "assignment-1", createdAt: new Date(), ...data }),
+      ),
     delete: jest.fn().mockResolvedValue(undefined),
   };
   const txCategoryReq = {
-    create: jest.fn().mockImplementation(({ data }) =>
-      Promise.resolve({ id: "requirement-1", createdAt: new Date(), ...data }),
-    ),
+    create: jest
+      .fn()
+      .mockImplementation(({ data }) =>
+        Promise.resolve({ id: "requirement-1", createdAt: new Date(), ...data }),
+      ),
     delete: jest.fn().mockResolvedValue(undefined),
   };
   const tx = { skill: txSkill, userSkill: txUserSkill, categorySkillRequirement: txCategoryReq };
@@ -57,10 +61,13 @@ function makeService(
       findFirst: overrides.skillFindFirst ?? jest.fn().mockResolvedValue(null),
     },
     user: {
-      findUnique: overrides.userFindUnique ?? jest.fn().mockResolvedValue({
-        id: "eng-1",
-        displayName: "Rahul",
-      }),
+      findUnique:
+        overrides.userFindUnique ??
+        jest.fn().mockResolvedValue({
+          id: "eng-1",
+          displayName: "Rahul",
+          role: "SITE_ENGINEER",
+        }),
     },
     userSkill: {
       findUnique: overrides.userSkillFindUnique ?? jest.fn().mockResolvedValue(null),
@@ -71,11 +78,15 @@ function makeService(
       findFirst: overrides.categoryReqFindFirst ?? jest.fn().mockResolvedValue(null),
       findUnique:
         overrides.categoryReqFindUnique ??
-        jest.fn().mockResolvedValue({ id: "requirement-1", category: "DATABASE", skillId: "skill-1" }),
+        jest
+          .fn()
+          .mockResolvedValue({ id: "requirement-1", category: "DATABASE", skillId: "skill-1" }),
     },
   } as unknown as PrismaService;
 
-  const auditService = { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuditService;
+  const auditService = {
+    record: jest.fn().mockResolvedValue(undefined),
+  } as unknown as AuditService;
 
   return { service: new SkillsService(prisma, auditService), prisma, auditService, tx };
 }
@@ -142,6 +153,29 @@ describe("SkillsService.updateSkill", () => {
 });
 
 describe("SkillsService.assignSkill", () => {
+  it.each(["SUPER_ADMIN", "SERVICE_DESK_NOC", "DELIVERY_OPS_MANAGER"])(
+    "refuses to give a skill to a non-engineer (%s)",
+    async (role) => {
+      const { service, tx } = makeService({
+        userFindUnique: jest.fn().mockResolvedValue({ id: "u-1", displayName: "Desk", role }),
+      });
+      await expect(service.assignSkill("skill-1", { userId: "u-1" }, ACTOR)).rejects.toThrow(
+        /isn't an engineer/,
+      );
+      expect(tx.userSkill.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("lets an Infrastructure Lead hold skills", async () => {
+    const { service, tx } = makeService({
+      userFindUnique: jest
+        .fn()
+        .mockResolvedValue({ id: "lead-1", displayName: "Lead", role: "INFRASTRUCTURE_LEAD" }),
+    });
+    await service.assignSkill("skill-1", { userId: "lead-1" }, ACTOR);
+    expect(tx.userSkill.create).toHaveBeenCalled();
+  });
+
   it("assigns a skill to an engineer and audits it", async () => {
     const { service, tx, auditService } = makeService();
     await service.assignSkill("skill-1", { userId: "eng-1" }, ACTOR);
@@ -209,9 +243,7 @@ describe("SkillsService.findAllSkills", () => {
     const findMany = jest.fn().mockResolvedValue([]);
     const { service } = makeService({ skillFindMany: findMany });
     await service.findAllSkills(true);
-    expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { isActive: true } }),
-    );
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { isActive: true } }));
   });
 
   it("returns everything when not filtered", async () => {

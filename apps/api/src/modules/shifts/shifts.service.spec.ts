@@ -30,8 +30,12 @@ function makeService(
   } = {},
 ) {
   const txEngineerShift = {
-    create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...baseShift(), ...data })),
-    update: overrides.txUpdate ?? jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...baseShift(), ...data })),
+    create: jest
+      .fn()
+      .mockImplementation(({ data }) => Promise.resolve({ ...baseShift(), ...data })),
+    update:
+      overrides.txUpdate ??
+      jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...baseShift(), ...data })),
   };
   const tx = { engineerShift: txEngineerShift };
 
@@ -42,14 +46,18 @@ function makeService(
       findUnique: overrides.findUnique ?? jest.fn().mockResolvedValue(baseShift()),
     },
     user: {
-      findUnique: overrides.userFindUnique ?? jest.fn().mockResolvedValue({ id: "eng-1" }),
+      findUnique:
+        overrides.userFindUnique ??
+        jest.fn().mockResolvedValue({ id: "eng-1", displayName: "Sam", role: "SITE_ENGINEER" }),
     },
     site: {
       findUnique: overrides.siteFindUnique ?? jest.fn().mockResolvedValue({ id: "site-1" }),
     },
   } as unknown as PrismaService;
 
-  const auditService = { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuditService;
+  const auditService = {
+    record: jest.fn().mockResolvedValue(undefined),
+  } as unknown as AuditService;
 
   return { service: new ShiftsService(prisma, auditService), prisma, auditService, tx };
 }
@@ -76,6 +84,27 @@ describe("ShiftsService.create", () => {
       expect.objectContaining({ entityType: "EngineerShift", action: "CREATE" }),
       tx,
     );
+  });
+
+  it.each(["SUPER_ADMIN", "SERVICE_DESK_NOC"])(
+    "refuses a shift for a non-engineer (%s)",
+    async (role) => {
+      const { service, tx } = makeService({
+        userFindUnique: jest.fn().mockResolvedValue({ id: "u-1", displayName: "Desk", role }),
+      });
+      await expect(service.create(CREATE_DTO, ACTOR)).rejects.toThrow(/isn't an engineer/);
+      expect(tx.engineerShift.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("lets an Infrastructure Lead take a shift", async () => {
+    const { service, tx } = makeService({
+      userFindUnique: jest
+        .fn()
+        .mockResolvedValue({ id: "lead-1", displayName: "Lead", role: "INFRASTRUCTURE_LEAD" }),
+    });
+    await service.create(CREATE_DTO, ACTOR);
+    expect(tx.engineerShift.create).toHaveBeenCalled();
   });
 
   it("rejects an unknown engineer", async () => {
@@ -108,7 +137,10 @@ describe("ShiftsService.update", () => {
     const { service, tx, auditService } = makeService();
     await service.update("shift-1", { label: "Evening" }, ACTOR);
     expect(tx.engineerShift.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "shift-1" }, data: expect.objectContaining({ label: "Evening" }) }),
+      expect.objectContaining({
+        where: { id: "shift-1" },
+        data: expect.objectContaining({ label: "Evening" }),
+      }),
     );
     expect(auditService.record).toHaveBeenCalledWith(
       expect.objectContaining({ entityType: "EngineerShift", action: "UPDATE" }),

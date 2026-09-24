@@ -32,6 +32,10 @@ import { severityColors } from "../theme/theme";
 // as SupportGroupsPage/SlaPoliciesPage); the backend re-checks this regardless.
 const SHIFT_WRITE_ROLES = ["SUPER_ADMIN", "INFRASTRUCTURE_LEAD", "DELIVERY_OPS_MANAGER"];
 
+// Mirrors ENGINEER_ROLES in the API (auth/engineer-roles.ts): only these
+// roles hold skills and work shifts.
+const ENGINEER_ROLES = ["SITE_ENGINEER", "INFRASTRUCTURE_LEAD"];
+
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const pulse = keyframes`
@@ -257,14 +261,12 @@ export function ShiftsPage() {
   const [formEnd, setFormEnd] = useState("18:00");
   const [formOnCall, setFormOnCall] = useState(false);
 
-  // No role filter — shift coverage can be Service Desk, an engineer, an
-  // infra lead's on-call window, whoever actually covers that block. Same
-  // "customers excluded, everyone else offered" precedent as
-  // SupportGroupsPage's member picker.
+  // Engineers only: shifts decide who routing can offer tickets to. The
+  // backend rejects anyone else regardless.
   useEffect(() => {
     const qParam = engineerQuery ? `&q=${encodeURIComponent(engineerQuery)}` : "";
     apiGet<UserOption[]>(`/users?limit=50${qParam}`)
-      .then((res) => setEngineerOptions(res.filter((u) => u.role !== "CLIENT_MANAGER_VIEWER")))
+      .then((res) => setEngineerOptions(res.filter((u) => ENGINEER_ROLES.includes(u.role))))
       .catch(() => undefined);
   }, [engineerQuery]);
 
@@ -580,10 +582,8 @@ export function ShiftsPage() {
                   inputValue={engineerQuery}
                   onInputChange={(_, v) => setEngineerQuery(v)}
                   openOnFocus
-                  noOptionsText="No matching staff"
-                  renderInput={(params) => (
-                    <TextField {...params} label="Engineer / staff member" size="small" />
-                  )}
+                  noOptionsText="No matching engineers"
+                  renderInput={(params) => <TextField {...params} label="Engineer" size="small" />}
                 />
                 <TextField
                   label="Label"
@@ -752,7 +752,7 @@ export function ShiftsPage() {
                 </TableHead>
                 <TableBody>
                   {staff
-                    .filter((u) => u.role !== "CLIENT_MANAGER_VIEWER")
+                    .filter((u) => ENGINEER_ROLES.includes(u.role))
                     .sort((a, b) => a.displayName.localeCompare(b.displayName))
                     .map((u) => {
                       const userAssignments = assignments.filter((a) => a.userId === u.id);
@@ -801,11 +801,12 @@ export function ShiftsPage() {
                         </TableRow>
                       );
                     })}
-                  {staff.length === 0 && (
+                  {!staff.some((u) => ENGINEER_ROLES.includes(u.role)) && (
                     <TableRow>
                       <TableCell colSpan={canWrite ? 3 : 2}>
                         <Typography variant="body2" color="text.secondary">
-                          No staff loaded yet.
+                          No engineers found. Only Site Engineers and Infrastructure Leads appear
+                          here.
                         </Typography>
                       </TableCell>
                     </TableRow>
