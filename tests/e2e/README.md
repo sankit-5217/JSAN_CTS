@@ -27,7 +27,7 @@ Override the target with `E2E_SCHEMA=<name>` or `E2E_DATABASE_URL=<url>`.
 Each spec `TRUNCATE`s the schema and re-seeds a minimal fixture
 (`test/fixture.ts`: four role-holders, a site, a CI) in `beforeAll`.
 
-- `dev-b-authz` — guards reject (401/403), reads open, `dev-login`, the global
+- `dev-b-authz` — guards reject (401/403), reads open, password sign-in, the global
   `ValidationPipe` rejects at the edge (unknown field, oversized batch), problem
   numbering, idempotent alert ingest.
 - `vendors` — case open, duplicate `vendorCaseNo` -> 409, RMA dispatch lifecycle,

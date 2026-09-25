@@ -147,19 +147,22 @@ enum ChangeType {
 // ---------------------------------------------------------------------------
 
 model User {
-  id          String   @id @default(uuid())
-  idpSubject  String   @unique @map("idp_subject")
-  // OIDC issuer this user's idpSubject belongs to. NULL = not yet linked to
-  // an SSO identity (a pre-provisioned/seeded user): the first successful SSO
-  // login matching the user's email links it; after that only (issuer, sub)
-  // is trusted, never the email alone.
-  idpIssuer   String?  @map("idp_issuer")
-  email       String   @unique
-  displayName String   @map("display_name")
-  role        UserRole
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id               String    @id @default(uuid())
+  email            String    @unique
+  displayName      String    @map("display_name")
+  role             UserRole
+  isActive         Boolean   @default(true) @map("is_active")
+  // Password sign-in. NULL until the user sets one through an invite/reset
+  // link (never set by an admin). scrypt, see auth/password-hasher.ts.
+  passwordHash     String?   @map("password_hash")
+  passwordSetAt    DateTime? @map("password_set_at")
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until")
+  // Carried in every app JWT ("sv"); bumping it (password set/reset)
+  // invalidates all of the user's existing sessions at once.
+  sessionVersion   Int       @default(0) @map("session_version")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   incidentsOwned      Incident[]           @relation("IncidentOwner")
   incidentsReported   Incident[]           @relation("IncidentReportedBy")
@@ -173,16 +176,77 @@ model User {
   userSkills          UserSkill[]
   inAppNotifications  InAppNotification[]
   routingOffers       RoutingOffer[]
-  ssoLoginCodes       SsoLoginCode[]
+  loginHandoffCodes   LoginHandoffCode[]
+  identities          UserIdentity[]
+  passwordTokens      PasswordToken[]      @relation("PasswordTokenUser")
+  apiTokens           ApiToken[]           @relation("ApiTokenUser")
 
   @@map("users")
 }
 
-/// Single-use handoff between the OIDC callback (API origin) and the web
-/// app: the callback redirects the browser with a random code, the web app
-/// trades it for the app JWT via POST /auth/oidc/exchange. Only the SHA-256
-/// of the code is stored; rows expire after ~60s and are consumed once.
-model SsoLoginCode {
+/// A social sign-in (Google / Microsoft / GitHub) linked to a user. Linked
+/// on the first sign-in whose verified email matches an existing user;
+/// afterwards only (issuer, subject) is trusted, never the email alone.
+model UserIdentity {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  provider    String // "google" | "microsoft" | "github"
+  issuer      String
+  subject     String
+  email       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  lastLoginAt DateTime? @map("last_login_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([issuer, subject])
+  @@unique([userId, provider])
+  @@map("user_identities")
+}
+
+/// Single-use invite / password-reset link token. Only its SHA-256 is stored.
+model PasswordToken {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  tokenHash   String    @unique @map("token_hash")
+  purpose     String // "INVITE" | "RESET"
+  expiresAt   DateTime  @map("expires_at")
+  usedAt      DateTime? @map("used_at")
+  createdById String?   @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation("PasswordTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_tokens")
+}
+
+/// Long-lived, revocable API token for a machine account (site collector,
+/// worker). Shown once at creation; only its SHA-256 is stored.
+model ApiToken {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  name        String
+  tokenHash   String    @unique @map("token_hash")
+  /// First characters of the token, to tell tokens apart in the UI.
+  prefix      String
+  expiresAt   DateTime? @map("expires_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdById String    @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation("ApiTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("api_tokens")
+}
+
+/// Single-use handoff between a social sign-in callback (API origin) and the
+/// web app: the callback redirects the browser with a random code, the web
+/// app trades it for the app JWT via POST /auth/social/exchange. Only the
+/// SHA-256 of the code is stored; rows expire after ~60s and are consumed once.
+model LoginHandoffCode {
   id         String    @id @default(uuid())
   codeHash   String    @unique @map("code_hash")
   userId     String    @map("user_id")
@@ -193,7 +257,7 @@ model SsoLoginCode {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
-  @@map("sso_login_codes")
+  @@map("login_handoff_codes")
 }
 
 /// Explicit site-scope grants (spec §4: most roles are "assigned sites"

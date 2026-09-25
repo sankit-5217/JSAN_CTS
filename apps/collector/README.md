@@ -110,9 +110,10 @@ pnpm dev:api
 #    into ./.dev-tls/ on first run)
 pnpm dev:tls-proxy
 
-# 3. Get a token (any seeded user works — see apps/web's LoginPage for the list)
-curl -s -X POST http://localhost:3000/api/v1/auth/dev-login \
-  -H "Content-Type: application/json" -d '{"email":"admin@example.com"}'
+# 3. Get an API token: sign in to the web app as admin@example.com (seed demo
+#    password, default OpsDesk-Demo-2026!), open Administration -> Users, pick a
+#    user with an ingest role (e.g. servicedesk@example.com) -> Tokens -> Create,
+#    and copy the odk_... value (shown once).
 
 # 4. Copy collector.config.example.json to a local, gitignored copy and drop
 #    the token from step 3 into "apiToken"

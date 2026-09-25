@@ -24,7 +24,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    * staying valid until their token expires (least-privilege, spec §6).
    */
   async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
-    // Other tokens signed with the same secret (e.g. the SSO transaction
+    // Other tokens signed with the same secret (e.g. the social sign-in
     // cookie) carry no user subject — never let them through as a session.
     if (typeof payload?.sub !== "string" || !payload.sub) {
       throw new UnauthorizedException("Not an access token");
@@ -32,6 +32,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user || !user.isActive) {
       throw new UnauthorizedException("User is inactive or no longer exists");
+    }
+    // Sessions issued before the user's last password change (or before
+    // session versions existed, e.g. old dev-login tokens) are dead.
+    if (payload.sv !== user.sessionVersion) {
+      throw new UnauthorizedException("Session has been signed out");
     }
     return { id: user.id, email: user.email, role: user.role, isActive: user.isActive };
   }

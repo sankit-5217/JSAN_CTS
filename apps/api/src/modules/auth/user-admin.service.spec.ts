@@ -3,6 +3,7 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 import { Prisma, UserRole } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { PasswordAuthService } from "./password-auth.service";
 import { UserAdminService } from "./user-admin.service";
 import { USER_DEACTIVATION_CHECK_EVENT, USER_ROLE_CHANGE_CHECK_EVENT } from "./user-change-checks";
 
@@ -14,7 +15,9 @@ const row = (over: Record<string, unknown> = {}) => ({
   displayName: "Sam",
   role: UserRole.SITE_ENGINEER,
   isActive: true,
-  idpIssuer: null as string | null,
+  passwordSetAt: null as Date | null,
+  lockedUntil: null as Date | null,
+  identities: [] as { provider: string }[],
   createdAt: new Date("2026-09-01"),
   updatedAt: new Date("2026-09-01"),
   siteAccess: [{ siteId: "site-b" }, { siteId: "site-a" }],
@@ -44,6 +47,7 @@ function makeService(opts: { existing?: unknown; clash?: unknown; blockers?: unk
         ),
       findUniqueOrThrow: jest.fn().mockResolvedValue(row({ siteAccess: [{ siteId: "site-c" }] })),
     },
+    passwordToken: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     userSiteAccess: {
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -61,15 +65,42 @@ function makeService(opts: { existing?: unknown; clash?: unknown; blockers?: unk
   const events = {
     emitAsync: jest.fn().mockResolvedValue(opts.blockers ?? []),
   } as unknown as EventEmitter2;
-  return { service: new UserAdminService(prisma, audit, events), prisma, audit, events, tx };
+  const passwords = {
+    sendSignInLink: jest.fn().mockResolvedValue({
+      link: "http://web/auth/set-password#token=t",
+      expiresAt: new Date("2026-09-28"),
+      purpose: "INVITE",
+      emailQueued: true,
+    }),
+  } as unknown as PasswordAuthService;
+  return {
+    service: new UserAdminService(prisma, audit, events, passwords),
+    prisma,
+    audit,
+    events,
+    passwords,
+    tx,
+  };
 }
 
 describe("UserAdminService.list / findOne", () => {
-  it("never exposes idpIssuer, only whether SSO is linked; site ids sorted", async () => {
-    const { service } = makeService({ existing: row({ idpIssuer: "https://idp" }) });
+  it("reports sign-in methods without exposing secrets; site ids sorted", async () => {
+    const { service } = makeService({
+      existing: row({
+        passwordSetAt: new Date(),
+        identities: [{ provider: "github" }, { provider: "google" }],
+      }),
+    });
     const view = await service.findOne("user-1");
-    expect(view).toMatchObject({ ssoLinked: true, allSites: false, siteIds: ["site-a", "site-b"] });
-    expect(view).not.toHaveProperty("idpIssuer");
+    expect(view).toMatchObject({
+      hasPassword: true,
+      socialProviders: ["github", "google"],
+      lockedUntil: null,
+      allSites: false,
+      siteIds: ["site-a", "site-b"],
+    });
+    expect(view).not.toHaveProperty("passwordHash");
+    expect(view).not.toHaveProperty("passwordSetAt");
   });
 
   it("flags all-sites roles", async () => {
@@ -101,8 +132,8 @@ describe("UserAdminService.list / findOne", () => {
 });
 
 describe("UserAdminService.create", () => {
-  it("creates with a pending SSO placeholder, site grants, and an audit event", async () => {
-    const { service, tx, audit } = makeService();
+  it("creates with site grants and an audit event, then emails an invite", async () => {
+    const { service, tx, audit, passwords } = makeService();
     const view = await service.create(
       {
         email: "new@example.com",
@@ -113,9 +144,15 @@ describe("UserAdminService.create", () => {
       ACTOR,
     );
     const data = tx.user.create.mock.calls[0][0].data;
-    expect(data.idpSubject).toMatch(/^pending\|[0-9a-f-]{36}$/);
+    expect(data).not.toHaveProperty("passwordHash");
     expect(data.siteAccess).toEqual({ create: [{ siteId: "site-a" }] });
-    expect(view).toMatchObject({ email: "new@example.com", ssoLinked: false, siteIds: ["site-a"] });
+    expect(view).toMatchObject({
+      email: "new@example.com",
+      hasPassword: false,
+      siteIds: ["site-a"],
+      invite: { purpose: "INVITE", emailQueued: true },
+    });
+    expect(passwords.sendSignInLink).toHaveBeenCalledWith("new-1", ACTOR);
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "USER_CREATED",
@@ -214,21 +251,44 @@ describe("UserAdminService.update", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("locks the email once the user is SSO-linked, but allows it before", async () => {
-    const linked = makeService({ existing: row({ idpIssuer: "https://idp" }) });
+  it("allows email changes, and kills any pending sign-in link sent to the old address", async () => {
+    const { service, prisma, tx } = makeService();
     await expect(
-      linked.service.update("user-1", { email: "new@example.com" }, ACTOR),
-    ).rejects.toBeInstanceOf(BadRequestException);
-
-    const unlinked = makeService();
-    await expect(
-      unlinked.service.update("user-1", { email: "new@example.com" }, ACTOR),
+      service.update("user-1", { email: "new@example.com" }, ACTOR),
     ).resolves.toMatchObject({ email: "new@example.com" });
-    expect(unlinked.prisma.user.findFirst).toHaveBeenCalledWith(
+    expect(prisma.user.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { email: { equals: "new@example.com", mode: "insensitive" }, id: { not: "user-1" } },
       }),
     );
+    expect(tx.passwordToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", usedAt: null },
+      data: { usedAt: expect.any(Date) },
+    });
+  });
+
+  it("leaves pending links alone when the email doesn't change", async () => {
+    const { service, tx } = makeService();
+    await service.update("user-1", { displayName: "Sam K" }, ACTOR);
+    expect(tx.passwordToken.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("UserAdminService.sendSignInLink", () => {
+  it("delegates for an active user", async () => {
+    const { service, passwords } = makeService();
+    await expect(service.sendSignInLink("user-1", ACTOR)).resolves.toMatchObject({
+      emailQueued: true,
+    });
+    expect(passwords.sendSignInLink).toHaveBeenCalledWith("user-1", ACTOR);
+  });
+
+  it("refuses an inactive user", async () => {
+    const { service, passwords } = makeService({ existing: row({ isActive: false }) });
+    await expect(service.sendSignInLink("user-1", ACTOR)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(passwords.sendSignInLink).not.toHaveBeenCalled();
   });
 });
 

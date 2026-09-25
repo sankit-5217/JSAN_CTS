@@ -14,11 +14,13 @@
   "dependencies": {
     "@cts-dc-opsdesk/email-adapter": "workspace:*",
     "bullmq": "^5.16.0",
-    "ioredis": "^5.4.1"
+    "ioredis": "^5.4.1",
+    "nodemailer": "^6.10.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.13",
     "@types/node": "^20.16.11",
+    "@types/nodemailer": "^6.4.24",
     "@typescript-eslint/eslint-plugin": "^8.8.1",
     "@typescript-eslint/parser": "^8.8.1",
     "eslint": "^8.57.1",

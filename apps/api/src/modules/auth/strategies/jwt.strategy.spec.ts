@@ -10,6 +10,7 @@ describe("JwtStrategy", () => {
     email: "admin@example.com",
     role: UserRole.SUPER_ADMIN,
     isActive: true,
+    sessionVersion: 2,
   };
 
   function makeStrategy(findUniqueResult: unknown) {
@@ -26,6 +27,7 @@ describe("JwtStrategy", () => {
       sub: activeUser.id,
       email: activeUser.email,
       role: activeUser.role,
+      sv: 2,
     });
     expect(result).toEqual({
       id: activeUser.id,
@@ -38,18 +40,28 @@ describe("JwtStrategy", () => {
   it("rejects when the user no longer exists", async () => {
     const { strategy } = makeStrategy(null);
     await expect(
-      strategy.validate({ sub: "gone", email: "gone@example.com", role: UserRole.SITE_ENGINEER }),
+      strategy.validate({
+        sub: "gone",
+        email: "gone@example.com",
+        role: UserRole.SITE_ENGINEER,
+        sv: 0,
+      }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it("rejects a deactivated user even with a still-valid token", async () => {
     const { strategy } = makeStrategy({ ...activeUser, isActive: false });
     await expect(
-      strategy.validate({ sub: activeUser.id, email: activeUser.email, role: activeUser.role }),
+      strategy.validate({
+        sub: activeUser.id,
+        email: activeUser.email,
+        role: activeUser.role,
+        sv: 2,
+      }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it("rejects a same-secret token that carries no user subject (e.g. the SSO tx cookie)", async () => {
+  it("rejects a same-secret token that carries no user subject (e.g. the social sign-in cookie)", async () => {
     const { strategy, prisma } = makeStrategy(activeUser);
     await expect(
       strategy.validate({ state: "s", nonce: "n" } as unknown as Parameters<
@@ -57,5 +69,28 @@ describe("JwtStrategy", () => {
       >[0]),
     ).rejects.toBeInstanceOf(UnauthorizedException);
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("rejects a session issued before the user's last password change", async () => {
+    const { strategy } = makeStrategy(activeUser);
+    await expect(
+      strategy.validate({
+        sub: activeUser.id,
+        email: activeUser.email,
+        role: activeUser.role,
+        sv: 1,
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it("rejects a token with no session version (e.g. an old dev-login token)", async () => {
+    const { strategy } = makeStrategy(activeUser);
+    await expect(
+      strategy.validate({
+        sub: activeUser.id,
+        email: activeUser.email,
+        role: activeUser.role,
+      } as unknown as Parameters<JwtStrategy["validate"]>[0]),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

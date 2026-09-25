@@ -1,4 +1,6 @@
 import { WorkerApiClient } from "./api-client";
+import { createMailTransportFromEnv } from "./mail/transport";
+import { createAccountMailWorker } from "./queues/account-mail.queue";
 import { createNotificationsWorker } from "./queues/notifications.queue";
 import { createSlaTimersWorker } from "./queues/sla-timers.queue";
 import {
@@ -13,14 +15,17 @@ import {
  * collector-polling workers alongside these as those modules land.
  */
 async function main() {
+  const mail = createMailTransportFromEnv();
   const slaWorker = createSlaTimersWorker();
-  const notificationsWorker = createNotificationsWorker();
+  const notificationsWorker = createNotificationsWorker(mail);
+  const accountMailWorker = createAccountMailWorker(mail);
 
   const closers: Array<() => Promise<unknown>> = [
     () => slaWorker.close(),
     () => notificationsWorker.close(),
+    () => accountMailWorker.close(),
   ];
-  const active = ["sla-timers", "notifications"];
+  const active = ["sla-timers", "notifications", "account-mail"];
 
   // Warranty resync drives the API's vendors module over HTTP (it owns the
   // Warranty table + audit), so it only runs when the worker has API creds.

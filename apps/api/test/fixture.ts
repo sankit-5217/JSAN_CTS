@@ -1,4 +1,5 @@
 import { PrismaClient, UserRole } from "@prisma/client";
+import { hashPassword } from "../src/modules/auth/password-hasher";
 
 const SCHEMA = process.env.E2E_SCHEMA || "e2e";
 
@@ -31,6 +32,15 @@ export async function resetSchema(prisma: PrismaClient): Promise<void> {
   }
 }
 
+/** Every fixture user's password; TestApp.tokenFor signs in with it. */
+export const E2E_PASSWORD = "e2e-password-for-tests";
+let hashOnce: Promise<string> | null = null;
+/** scrypt is deliberately slow — hash once per run, reuse for every user. */
+function e2ePasswordHash(): Promise<string> {
+  hashOnce ??= hashPassword(E2E_PASSWORD);
+  return hashOnce;
+}
+
 export interface Fixture {
   users: Record<
     "superAdmin" | "serviceDesk" | "siteEngineer" | "infraLead" | "clientViewer" | "auditor",
@@ -51,9 +61,10 @@ export interface Fixture {
  * a rack, and a CI.
  */
 export async function seedFixture(prisma: PrismaClient): Promise<Fixture> {
+  const passwordHash = await e2ePasswordHash();
   const mk = (email: string, role: UserRole, displayName: string) =>
     prisma.user.create({
-      data: { email, role, displayName, idpSubject: `e2e|${email}` },
+      data: { email, role, displayName, passwordHash, passwordSetAt: new Date() },
     });
 
   const [superAdmin, serviceDesk, siteEngineer, infraLead, clientViewer, auditor] =

@@ -12,8 +12,16 @@ import {
   UserRole,
   WorklogActivityType,
 } from "@prisma/client";
+import { hashPassword, passwordPolicyProblem } from "../src/modules/auth/password-hasher";
 
 const prisma = new PrismaClient();
+
+/**
+ * Local/demo sign-in password for every seeded account (override with
+ * SEED_DEMO_PASSWORD). Never used in production: the seed refuses to set
+ * passwords there — real people choose their own via an emailed invite.
+ */
+const DEMO_PASSWORD = process.env.SEED_DEMO_PASSWORD ?? "OpsDesk-Demo-2026!";
 
 /**
  * Sites/users seeded in Sprint 2; a rack and a couple of CIs per site
@@ -92,7 +100,6 @@ async function main() {
     where: { email: "admin@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-admin",
       email: "admin@example.com",
       displayName: "Seed Admin",
       role: UserRole.SUPER_ADMIN,
@@ -105,7 +112,6 @@ async function main() {
     where: { email: "servicedesk@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-service-desk",
       email: "servicedesk@example.com",
       displayName: "Seed Service Desk",
       role: UserRole.SERVICE_DESK_NOC,
@@ -118,7 +124,6 @@ async function main() {
     where: { email: "engineer@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-site-engineer",
       email: "engineer@example.com",
       displayName: "Seed Site Engineer",
       role: UserRole.SITE_ENGINEER,
@@ -132,7 +137,6 @@ async function main() {
     where: { email: "engineer1@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-site-engineer-1",
       email: "engineer1@example.com",
       displayName: "Seed Site Engineer 1",
       role: UserRole.SITE_ENGINEER,
@@ -148,7 +152,6 @@ async function main() {
     where: { email: "viewer@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-client-viewer",
       email: "viewer@example.com",
       displayName: "Seed Client Manager Viewer",
       role: UserRole.CLIENT_MANAGER_VIEWER,
@@ -343,7 +346,6 @@ async function main() {
     where: { email: "engineer2@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-site-engineer-2",
       email: "engineer2@example.com",
       displayName: "Seed Site Engineer 2",
       role: UserRole.SITE_ENGINEER,
@@ -442,7 +444,6 @@ async function main() {
     where: { email: "rahul@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-rahul",
       email: "rahul@example.com",
       displayName: "Rahul",
       role: UserRole.SITE_ENGINEER,
@@ -452,7 +453,6 @@ async function main() {
     where: { email: "vikas@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-vikas",
       email: "vikas@example.com",
       displayName: "Vikas",
       role: UserRole.SITE_ENGINEER,
@@ -697,6 +697,17 @@ async function main() {
   }
 
   // eslint-disable-next-line no-console
+  await setDemoPasswords([
+    admin.email,
+    serviceDesk.email,
+    siteEngineer.email,
+    siteEngineer1.email,
+    siteEngineer2.email,
+    rahul.email,
+    vikas.email,
+    clientViewer.email,
+  ]);
+
   console.log(
     `Seeded sites ${site1.code}/${site2.code}, users ${admin.email} (SUPER_ADMIN, all sites), ` +
       `${serviceDesk.email} (SERVICE_DESK_NOC, ${site1.code} only), ` +
@@ -712,6 +723,23 @@ async function main() {
       `2 demo teams with 5 category -> team mappings, a database.down alert rule, ` +
       `1 incident (INC-SEED-001, IN_PROGRESS, 5 timeline events, 1 comment, 1 worklog, 1 SLA instance).`,
   );
+}
+
+/** Gives seeded accounts the demo password — only those still without one. */
+async function setDemoPasswords(emails: string[]): Promise<void> {
+  if (process.env.NODE_ENV === "production") {
+    // eslint-disable-next-line no-console
+    console.warn("NODE_ENV=production: not setting demo passwords on seeded accounts.");
+    return;
+  }
+  const problem = passwordPolicyProblem(DEMO_PASSWORD, "seed@example.com");
+  if (problem) throw new Error(`SEED_DEMO_PASSWORD rejected: ${problem}`);
+  const { count } = await prisma.user.updateMany({
+    where: { email: { in: emails }, passwordHash: null },
+    data: { passwordHash: await hashPassword(DEMO_PASSWORD), passwordSetAt: new Date() },
+  });
+  // eslint-disable-next-line no-console
+  console.log(`Demo password set on ${count} seeded account(s) (sign in with ${DEMO_PASSWORD}).`);
 }
 
 main()

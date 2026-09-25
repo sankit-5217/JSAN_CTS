@@ -6,6 +6,7 @@ import request from "supertest";
 import { AppModule } from "../src/app.module";
 import { PrismaService } from "../src/common/prisma/prisma.service";
 import { correlationIdMiddleware } from "../src/common/middleware/correlation-id.middleware";
+import { E2E_PASSWORD } from "./fixture";
 
 type Agent = ReturnType<typeof request>;
 
@@ -13,7 +14,7 @@ export interface TestApp {
   app: INestApplication;
   prisma: PrismaService;
   http: () => Agent;
-  /** dev-login as a seeded e2e user, return the bearer token. */
+  /** Password sign-in as a fixture user (E2E_PASSWORD), return the bearer token. */
   tokenFor: (email: string) => Promise<string>;
   close: () => Promise<void>;
 }
@@ -22,12 +23,12 @@ export interface TestApp {
  * Boot the real AppModule the way `main.ts` does (global prefix, the same
  * ValidationPipe, correlation middleware) — minus Swagger, and with the
  * app-wide rate limiter disabled so a test file can make more than 100
- * requests / 5 dev-logins a minute.
+ * requests / 10 sign-ins a minute.
  */
 export async function createTestApp(): Promise<TestApp> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     // App-wide rate limiter off for e2e: a spec makes far more than 100 req /
-    // 5 dev-logins a minute. Stub the guard, and the storage it leans on, so
+    // 10 sign-ins a minute. Stub the guard, and the storage it leans on, so
     // the APP_GUARD registration in AppModule can't re-throttle.
     .overrideGuard(ThrottlerGuard)
     .useValue({ canActivate: () => true })
@@ -54,7 +55,10 @@ export async function createTestApp(): Promise<TestApp> {
   const http = (): Agent => request(app.getHttpServer() as Server);
 
   const tokenFor = async (email: string): Promise<string> => {
-    const res = await http().post("/api/v1/auth/dev-login").send({ email }).expect(201);
+    const res = await http()
+      .post("/api/v1/auth/login")
+      .send({ email, password: E2E_PASSWORD })
+      .expect(200);
     return res.body.accessToken as string;
   };
 

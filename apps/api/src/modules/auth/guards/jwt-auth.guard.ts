@@ -2,9 +2,10 @@ import { Injectable } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 
 /**
- * Validates the Bearer JWT (via JwtStrategy) and attaches the resolved
- * user to `req.user`. Apply this before RolesGuard/SiteScopeGuard on every
- * protected route — those guards assume `req.user` is already populated.
+ * Authenticates the Bearer credential and attaches the resolved user to
+ * `req.user`: a machine API token (`odk_...`, ApiTokenStrategy) or a signed-in
+ * person's JWT (JwtStrategy). Apply this before RolesGuard/SiteScopeGuard on
+ * every protected route — those guards assume `req.user` is populated.
  */
 @Injectable()
-export class JwtAuthGuard extends AuthGuard("jwt") {}
+export class JwtAuthGuard extends AuthGuard(["api-token", "jwt"]) {}

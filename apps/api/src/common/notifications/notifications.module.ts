@@ -1,4 +1,5 @@
 import { Global, Module } from "@nestjs/common";
+import { AccountMailPublisher } from "./account-mail.publisher";
 import { NotificationsPublisher } from "./notifications.publisher";
 
 /**
@@ -8,7 +9,7 @@ import { NotificationsPublisher } from "./notifications.publisher";
  */
 @Global()
 @Module({
-  providers: [NotificationsPublisher],
-  exports: [NotificationsPublisher],
+  providers: [NotificationsPublisher, AccountMailPublisher],
+  exports: [NotificationsPublisher, AccountMailPublisher],
 })
 export class NotificationsModule {}

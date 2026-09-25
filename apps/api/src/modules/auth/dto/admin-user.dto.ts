@@ -8,11 +8,14 @@ import {
   IsEmail,
   IsEnum,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
   IsUUID,
   Length,
+  Max,
   MaxLength,
+  Min,
 } from "class-validator";
 
 const trim = ({ value }: { value: unknown }) => (typeof value === "string" ? value.trim() : value);
@@ -22,7 +25,7 @@ const normalizeEmail = ({ value }: { value: unknown }) =>
 export class CreateAdminUserDto {
   @ApiProperty({
     example: "person@jsan.example",
-    description: "Must match the email the SSO provider sends",
+    description: "Their sign-in email; also how Google/Microsoft/GitHub accounts are matched",
   })
   @Transform(normalizeEmail)
   @IsEmail()
@@ -55,7 +58,7 @@ export class CreateAdminUserDto {
 export class UpdateAdminUserDto {
   @ApiProperty({
     required: false,
-    description: "Only editable until the user's first SSO login links them",
+    description: "Changing it cancels any pending invite/reset link",
   })
   @IsOptional()
   @Transform(normalizeEmail)
@@ -101,4 +104,19 @@ export class ListAdminUsersQueryDto {
   @IsOptional()
   @IsIn(["active", "inactive", "all"])
   status?: "active" | "inactive" | "all";
+}
+
+export class CreateApiTokenDto {
+  @ApiProperty({ example: "SITE01 collector", description: "What uses this token" })
+  @Transform(trim)
+  @IsString()
+  @Length(1, 80)
+  name!: string;
+
+  @ApiProperty({ required: false, description: "Omit for no expiry; rotate at least yearly" })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(730)
+  expiresInDays?: number;
 }

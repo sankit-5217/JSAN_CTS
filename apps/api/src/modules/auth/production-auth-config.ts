@@ -2,9 +2,9 @@
  * Refuse-to-start checks for the auth configuration in production (spec
  * §17: no weak secrets, TLS for all central traffic). The code keeps
  * convenient dev defaults (JWT_SECRET falls back to "change-me-dev-only",
- * the dev realm's client secret is "change-me"); in production any of those
- * would let someone forge a session, so main.ts runs this before listening
- * and exits on errors.
+ * URLs default to localhost); in production those would let someone forge a
+ * session or send sign-in links over plain http, so main.ts runs this
+ * before listening and exits on errors.
  */
 
 /** Values that ship in this repo or are common placeholders — never valid in production. */
@@ -17,6 +17,12 @@ const KNOWN_WEAK_SECRETS = new Set([
   "jwt-secret",
 ]);
 const MIN_JWT_SECRET_LENGTH = 32;
+
+const PROVIDER_SECRETS = [
+  "GOOGLE_CLIENT_SECRET",
+  "MICROSOFT_CLIENT_SECRET",
+  "GITHUB_CLIENT_SECRET",
+];
 
 export interface AuthConfigProblems {
   /** Unsafe to run: the API must not start. */
@@ -44,25 +50,9 @@ export function findProductionAuthConfigProblems(env: Env): AuthConfigProblems {
     );
   }
 
-  if (env.OIDC_ENABLED !== "true") {
-    warnings.push(
-      "OIDC_ENABLED is not true — dev-login is off in production, so no person can sign in (service tokens still work)",
-    );
-    return { errors, warnings };
-  }
-
-  const clientSecret = env.OIDC_CLIENT_SECRET ?? "";
-  if (KNOWN_WEAK_SECRETS.has(clientSecret.toLowerCase())) {
-    errors.push(
-      "OIDC_CLIENT_SECRET is a known placeholder (the dev realm's value) — use the secret from your production IdP",
-    );
-  } else if (!clientSecret) {
-    warnings.push(
-      "OIDC_CLIENT_SECRET is empty — the API will act as a public OIDC client; a confidential client is recommended",
-    );
-  }
-
-  for (const key of ["OIDC_ISSUER_URL", "OIDC_REDIRECT_URI", "WEB_APP_URL"] as const) {
+  // WEB_APP_URL goes into every invite/reset email; API_PUBLIC_URL is where
+  // Google/Microsoft/GitHub send people back to. Both must be real https.
+  for (const key of ["WEB_APP_URL", "API_PUBLIC_URL"] as const) {
     const value = env[key] ?? "";
     if (!value) {
       errors.push(`${key} is not set`);
@@ -71,6 +61,19 @@ export function findProductionAuthConfigProblems(env: Env): AuthConfigProblems {
     } else if (/^https:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(value)) {
       errors.push(`${key} points at localhost (${value}) — use the real production address`);
     }
+  }
+
+  for (const key of PROVIDER_SECRETS) {
+    const value = env[key];
+    if (value && KNOWN_WEAK_SECRETS.has(value.toLowerCase())) {
+      errors.push(`${key} is a placeholder — use the secret from the provider's developer console`);
+    }
+  }
+
+  if (!env.REDIS_URL) {
+    warnings.push(
+      "REDIS_URL is not set — invite and password-reset emails can't be queued; admins must copy links by hand",
+    );
   }
 
   return { errors, warnings };

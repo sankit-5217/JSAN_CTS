@@ -2,11 +2,10 @@ import { findProductionAuthConfigProblems } from "./production-auth-config";
 
 const GOOD = {
   JWT_SECRET: "k3v9Qm2xT8wLr5Zp7yNc4Hb6Jd1Fg0Sa",
-  OIDC_ENABLED: "true",
-  OIDC_ISSUER_URL: "https://sso.jsan.example/realms/opsdesk",
-  OIDC_CLIENT_SECRET: "a-real-random-client-secret-from-keycloak",
-  OIDC_REDIRECT_URI: "https://opsdesk.jsan.example/api/v1/auth/oidc/callback",
   WEB_APP_URL: "https://opsdesk.jsan.example",
+  API_PUBLIC_URL: "https://opsdesk.jsan.example",
+  REDIS_URL: "redis://redis:6379",
+  GOOGLE_CLIENT_SECRET: "GOCSPX-real-looking-secret",
 };
 
 describe("findProductionAuthConfigProblems", () => {
@@ -24,37 +23,32 @@ describe("findProductionAuthConfigProblems", () => {
     expect(errors).toEqual([expect.stringMatching(message)]);
   });
 
-  it("rejects the dev realm's client secret", () => {
+  it("requires https, non-localhost web and API addresses", () => {
     const { errors } = findProductionAuthConfigProblems({
       ...GOOD,
-      OIDC_CLIENT_SECRET: "change-me",
-    });
-    expect(errors).toEqual([expect.stringContaining("OIDC_CLIENT_SECRET")]);
-  });
-
-  it("only warns about an empty client secret (public client)", () => {
-    const result = findProductionAuthConfigProblems({ ...GOOD, OIDC_CLIENT_SECRET: "" });
-    expect(result.errors).toEqual([]);
-    expect(result.warnings).toEqual([expect.stringContaining("public OIDC client")]);
-  });
-
-  it("requires https, non-localhost addresses for the IdP, callback and web app", () => {
-    const { errors } = findProductionAuthConfigProblems({
-      ...GOOD,
-      OIDC_ISSUER_URL: "http://localhost:8080/realms/opsdesk",
-      OIDC_REDIRECT_URI: "https://127.0.0.1:3000/api/v1/auth/oidc/callback",
-      WEB_APP_URL: undefined,
+      WEB_APP_URL: "http://localhost:5173",
+      API_PUBLIC_URL: "https://127.0.0.1:3000",
     });
     expect(errors).toEqual([
-      expect.stringContaining("OIDC_ISSUER_URL must use https://"),
-      expect.stringContaining("OIDC_REDIRECT_URI points at localhost"),
-      "WEB_APP_URL is not set",
+      expect.stringContaining("WEB_APP_URL must use https://"),
+      expect.stringContaining("API_PUBLIC_URL points at localhost"),
     ]);
+    expect(findProductionAuthConfigProblems({ ...GOOD, API_PUBLIC_URL: undefined }).errors).toEqual(
+      ["API_PUBLIC_URL is not set"],
+    );
   });
 
-  it("warns (doesn't fail) when SSO is off, and skips the OIDC checks", () => {
-    const result = findProductionAuthConfigProblems({ JWT_SECRET: GOOD.JWT_SECRET });
+  it("rejects placeholder provider secrets", () => {
+    const { errors } = findProductionAuthConfigProblems({
+      ...GOOD,
+      GITHUB_CLIENT_SECRET: "change-me",
+    });
+    expect(errors).toEqual([expect.stringContaining("GITHUB_CLIENT_SECRET")]);
+  });
+
+  it("warns (doesn't fail) without Redis", () => {
+    const result = findProductionAuthConfigProblems({ ...GOOD, REDIS_URL: undefined });
     expect(result.errors).toEqual([]);
-    expect(result.warnings).toEqual([expect.stringContaining("no person can sign in")]);
+    expect(result.warnings).toEqual([expect.stringContaining("copy links by hand")]);
   });
 });

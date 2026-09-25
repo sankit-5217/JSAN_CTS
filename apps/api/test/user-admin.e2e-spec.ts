@@ -1,5 +1,5 @@
 import { createTestApp, TestApp } from "./app";
-import { Fixture, resetSchema, seedFixture } from "./fixture";
+import { E2E_PASSWORD, Fixture, resetSchema, seedFixture } from "./fixture";
 
 /**
  * User administration over HTTP: Super-Admin-only access, provisioning,
@@ -46,7 +46,17 @@ describe("User admin API (e2e)", () => {
     await t.http().get("/api/v1/admin/users").expect(401);
   });
 
-  it("provisions a user who can then dev-login, and audits it; duplicate email is 409", async () => {
+  /** Completes a created user's invite with the shared test password. */
+  const acceptInvite = async (created: { invite: { link: string } }) => {
+    const token = created.invite.link.split("#token=")[1];
+    await t
+      .http()
+      .post("/api/v1/auth/password/set")
+      .send({ token, password: E2E_PASSWORD })
+      .expect(200);
+  };
+
+  it("adds a user with an invite they can accept, and audits it; duplicate email is 409", async () => {
     const created = await as(admin)
       .post("/api/v1/admin/users", {
         email: "  New.Person@Example.com ",
@@ -59,12 +69,14 @@ describe("User admin API (e2e)", () => {
       email: "new.person@example.com",
       displayName: "New Person",
       isActive: true,
-      ssoLinked: false,
+      hasPassword: false,
+      socialProviders: [],
       allSites: false,
       siteIds: [fx.site.id],
     });
-    expect(created.body).not.toHaveProperty("idpSubject");
+    expect(created.body.invite).toMatchObject({ purpose: "INVITE" });
 
+    await acceptInvite(created.body);
     await t.tokenFor("new.person@example.com"); // throws unless login works
 
     await as(admin)
@@ -98,6 +110,7 @@ describe("User admin API (e2e)", () => {
         siteIds: [fx.site.id],
       })
       .expect(201);
+    await acceptInvite(created.body);
     const token = await t.tokenFor("scoped@example.com");
     await as(token).get(`/api/v1/sites/${fx.siteB.id}`).expect(403);
 

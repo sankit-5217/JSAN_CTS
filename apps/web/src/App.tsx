@@ -59,7 +59,8 @@ import { InsightsPage } from "./pages/InsightsPage";
 import { KnowledgeDetailPage } from "./pages/KnowledgeDetailPage";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { LoginPage } from "./pages/LoginPage";
-import { SsoCallbackPage } from "./pages/SsoCallbackPage";
+import { SetPasswordPage } from "./pages/SetPasswordPage";
+import { SocialCallbackPage } from "./pages/SocialCallbackPage";
 import { UsersPage } from "./pages/UsersPage";
 import { MonitoringPage } from "./pages/MonitoringPage";
 import { ProblemDetailPage } from "./pages/ProblemDetailPage";
@@ -393,7 +394,8 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/auth/callback" element={<SsoCallbackPage />} />
+      <Route path="/auth/callback" element={<SocialCallbackPage />} />
+      <Route path="/auth/set-password" element={<SetPasswordPage />} />
       <Route element={<ClientLayout />}>
         <Route path="/client/report" element={<ReportIssuePage />} />
         <Route path="/client/tickets" element={<MyTicketsPage />} />

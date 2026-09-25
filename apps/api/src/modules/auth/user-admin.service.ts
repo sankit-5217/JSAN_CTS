@@ -6,11 +6,11 @@ import {
 } from "@nestjs/common";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { Prisma, UserRole } from "@prisma/client";
-import { randomUUID } from "crypto";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import { isAllSitesRole } from "./authz.service";
+import { PasswordAuthService, SignInLinkResult } from "./password-auth.service";
 import {
   CreateAdminUserDto,
   ListAdminUsersQueryDto,
@@ -25,15 +25,19 @@ import {
   UserRoleChangeCheck,
 } from "./user-change-checks";
 
-/** What the Users admin screen sees — never idpSubject/idpIssuer themselves. */
+/** What the Users admin screen sees — never password hashes or token values. */
 export interface AdminUserView {
   id: string;
   email: string;
   displayName: string;
   role: UserRole;
   isActive: boolean;
-  /** Linked to an SSO identity (email is then locked). */
-  ssoLinked: boolean;
+  /** Has chosen a password (via an invite/reset link). */
+  hasPassword: boolean;
+  /** Linked social sign-ins, e.g. ["google", "github"]. */
+  socialProviders: string[];
+  /** Set while the account is locked after too many wrong passwords. */
+  lockedUntil: Date | null;
   /** Role sees every site regardless of `siteIds`. */
   allSites: boolean;
   siteIds: string[];
@@ -47,10 +51,12 @@ const USER_SELECT = {
   displayName: true,
   role: true,
   isActive: true,
-  idpIssuer: true,
+  passwordSetAt: true,
+  lockedUntil: true,
   createdAt: true,
   updatedAt: true,
   siteAccess: { select: { siteId: true } },
+  identities: { select: { provider: true }, orderBy: { provider: "asc" } },
 } satisfies Prisma.UserSelect;
 
 type UserRow = Prisma.UserGetPayload<{ select: typeof USER_SELECT }>;
@@ -75,6 +81,7 @@ export class UserAdminService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly events: EventEmitter2,
+    private readonly passwords: PasswordAuthService,
   ) {}
 
   async list(query: ListAdminUsersQueryDto): Promise<AdminUserView[]> {
@@ -101,7 +108,11 @@ export class UserAdminService {
     return toView(await this.findRow(id));
   }
 
-  async create(dto: CreateAdminUserDto, actor: ActorContext): Promise<AdminUserView> {
+  /** Creates the user and emails them an invite to choose a password. */
+  async create(
+    dto: CreateAdminUserDto,
+    actor: ActorContext,
+  ): Promise<AdminUserView & { invite: SignInLinkResult }> {
     await this.assertEmailFree(dto.email);
     const siteIds = dto.siteIds ?? [];
     const created = await this.writeOrTranslate(() =>
@@ -111,8 +122,6 @@ export class UserAdminService {
             email: dto.email,
             displayName: dto.displayName,
             role: dto.role,
-            // Placeholder until the first SSO login links the real (issuer, subject).
-            idpSubject: `pending|${randomUUID()}`,
             siteAccess: { create: siteIds.map((siteId) => ({ siteId })) },
           },
           select: USER_SELECT,
@@ -131,7 +140,17 @@ export class UserAdminService {
         return user;
       }),
     );
-    return toView(created);
+    const invite = await this.passwords.sendSignInLink(created.id, actor);
+    return { ...toView(created), invite };
+  }
+
+  /** (Re)sends a set-password link: an invite, or a reset if they already have a password. */
+  async sendSignInLink(id: string, actor: ActorContext): Promise<SignInLinkResult> {
+    const user = await this.findRow(id);
+    if (!user.isActive) {
+      throw new BadRequestException(`${user.displayName} is inactive — reactivate them first`);
+    }
+    return this.passwords.sendSignInLink(id, actor);
   }
 
   async update(id: string, dto: UpdateAdminUserDto, actor: ActorContext): Promise<AdminUserView> {
@@ -143,11 +162,6 @@ export class UserAdminService {
       throw new BadRequestException("You can't change your own role");
     }
     if (emailChanging) {
-      if (before.idpIssuer !== null) {
-        throw new BadRequestException(
-          "Email is locked once the user has signed in with SSO — it's matched to their SSO identity",
-        );
-      }
       await this.assertEmailFree(dto.email!, id);
     }
     if (roleChanging) {
@@ -165,6 +179,14 @@ export class UserAdminService {
           data: { email: dto.email, displayName: dto.displayName, role: dto.role },
           select: USER_SELECT,
         });
+        if (emailChanging) {
+          // A pending invite/reset link went to the old address — it must not
+          // still be able to set this account's password.
+          await tx.passwordToken.updateMany({
+            where: { userId: id, usedAt: null },
+            data: { usedAt: new Date() },
+          });
+        }
         await this.audit.record(
           {
             actorId: actor.actorId,
@@ -326,7 +348,9 @@ function toView(row: UserRow): AdminUserView {
     displayName: row.displayName,
     role: row.role,
     isActive: row.isActive,
-    ssoLinked: row.idpIssuer !== null,
+    hasPassword: row.passwordSetAt !== null,
+    socialProviders: row.identities.map((i) => i.provider),
+    lockedUntil: row.lockedUntil && row.lockedUntil > new Date() ? row.lockedUntil : null,
     allSites: isAllSitesRole(row.role),
     siteIds: row.siteAccess.map((a) => a.siteId).sort(),
     createdAt: row.createdAt,

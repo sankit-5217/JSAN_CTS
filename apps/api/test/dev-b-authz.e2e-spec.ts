@@ -3,7 +3,7 @@ import { Fixture, resetSchema, seedFixture } from "./fixture";
 
 /**
  * End-to-end coverage of the Dev B request path over a real HTTP socket and a
- * real database: the guards actually reject, `dev-login` mints a usable token,
+ * real database: the guards actually reject, password sign-in mints a usable token,
  * the global ValidationPipe rejects at the edge, and a couple of module happy
  * paths (problem numbering, idempotent alert ingest) work through the stack.
  */
@@ -27,20 +27,15 @@ describe("Dev B API (e2e)", () => {
       await t.http().post("/api/v1/problems").send({ title: "x", symptoms: "y" }).expect(401);
     });
 
-    it("dev-login issues a token for a seeded user", async () => {
-      const res = await t
-        .http()
-        .post("/api/v1/auth/dev-login")
-        .send({ email: fx.users.superAdmin.email })
-        .expect(201);
-      expect(typeof res.body.accessToken).toBe("string");
+    it("password sign-in issues a token for a fixture user", async () => {
+      expect(typeof (await t.tokenFor(fx.users.superAdmin.email))).toBe("string");
     });
 
-    it("rejects dev-login for an unknown user (401)", async () => {
+    it("rejects sign-in for an unknown user (401)", async () => {
       await t
         .http()
-        .post("/api/v1/auth/dev-login")
-        .send({ email: "nobody@example.com" })
+        .post("/api/v1/auth/login")
+        .send({ email: "nobody@example.com", password: "irrelevant-password" })
         .expect(401);
     });
   });

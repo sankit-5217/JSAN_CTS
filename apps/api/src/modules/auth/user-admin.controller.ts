@@ -16,8 +16,10 @@ import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { Roles } from "./decorators/roles.decorator";
+import { ApiTokensService } from "./api-tokens.service";
 import {
   CreateAdminUserDto,
+  CreateApiTokenDto,
   ListAdminUsersQueryDto,
   SetUserSitesDto,
   UpdateAdminUserDto,
@@ -38,7 +40,10 @@ import { UserAdminService } from "./user-admin.service";
 @Roles(UserRole.SUPER_ADMIN)
 @Controller("admin/users")
 export class UserAdminController {
-  constructor(private readonly userAdmin: UserAdminService) {}
+  constructor(
+    private readonly userAdmin: UserAdminService,
+    private readonly apiTokens: ApiTokensService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: "All users, including inactive, with role and site grants" })
@@ -53,7 +58,7 @@ export class UserAdminController {
   }
 
   @Post()
-  @ApiOperation({ summary: "Provision a user so they can sign in with SSO" })
+  @ApiOperation({ summary: "Add a user and email them an invite to choose a password" })
   create(
     @Body() dto: CreateAdminUserDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -63,7 +68,7 @@ export class UserAdminController {
   }
 
   @Patch(":id")
-  @ApiOperation({ summary: "Edit name/role (email only until first SSO login)" })
+  @ApiOperation({ summary: "Edit email, name or role" })
   update(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: UpdateAdminUserDto,
@@ -104,5 +109,48 @@ export class UserAdminController {
     @CorrelationId() correlationId?: string,
   ) {
     return this.userAdmin.reactivate(id, { actorId: user.id, correlationId });
+  }
+
+  @Post(":id/sign-in-link")
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      "Email a set-password link (invite, or reset if they have a password); also returned for sharing",
+  })
+  sendSignInLink(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.userAdmin.sendSignInLink(id, { actorId: user.id, correlationId });
+  }
+
+  @Get(":id/api-tokens")
+  @ApiOperation({ summary: "The user's machine API tokens (never the token values)" })
+  listApiTokens(@Param("id", ParseUUIDPipe) id: string) {
+    return this.apiTokens.list(id);
+  }
+
+  @Post(":id/api-tokens")
+  @ApiOperation({ summary: "Create a machine API token — the value is returned once, only here" })
+  createApiToken(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: CreateApiTokenDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.apiTokens.create(id, dto, { actorId: user.id, correlationId });
+  }
+
+  @Post(":id/api-tokens/:tokenId/revoke")
+  @HttpCode(200)
+  @ApiOperation({ summary: "Revoke a machine API token immediately" })
+  revokeApiToken(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("tokenId", ParseUUIDPipe) tokenId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.apiTokens.revoke(id, tokenId, { actorId: user.id, correlationId });
   }
 }

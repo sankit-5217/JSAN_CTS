@@ -11,7 +11,7 @@ A centralized data-center infrastructure operations and service-management platf
 ## Architecture guardrails (non-negotiable)
 
 - **Modular monolith**, not microservices: one NestJS API, strict module boundaries, background jobs as a separate worker process from the same codebase.
-- **Stack**: React+TS+Vite+MUI frontend, NestJS+TS backend, PostgreSQL via Prisma, Redis+BullMQ, S3/MinIO for attachments, OIDC/Keycloak for auth.
+- **Stack**: React+TS+Vite+MUI frontend, NestJS+TS backend, PostgreSQL via Prisma, Redis+BullMQ, S3/MinIO for attachments; sign-in by email + password or Google / Microsoft / GitHub, with admin-issued API tokens for machines.
 - **Don't rebuild monitoring/logging** — integrate Zabbix/Prometheus/Grafana and Loki/OpenSearch.
 - **Site Collector pattern**: a local agent talks to iDRAC/iLO/SNMP and pushes outbound over TLS; never expose management ports to the internet.
 - **CMDB-first, audit-everything, config-over-hardcode**: SLA times, priorities, calendars are DB-driven; every mutation is append-only audited.
@@ -39,7 +39,7 @@ tests/
   integration/, e2e/
 ```
 
-**Current status**: all 16 backend modules (`apps/api/src/modules/*`) are implemented with tests (465+ passing), the frontend covers every module with a working page, and Sprint 12 (Hardening/UAT) work — rate limiting, CI dependency/secret/container scanning, DB and object-storage backup/restore drills (`docs/runbooks/`) — is done. Real SSO is in: any OIDC IdP via a backend authorization-code + PKCE flow, pre-provisioned users only (`docs/runbooks/README.md`, "SSO (OIDC) setup"); `dev-login` remains for local/dev and is disabled in production. See `CLAUDE.md` for the guardrails AI/human contributors should follow, and `README.md` for local dev setup.
+**Current status**: all 16 backend modules (`apps/api/src/modules/*`) are implemented with tests (465+ passing), the frontend covers every module with a working page, and Sprint 12 (Hardening/UAT) work — rate limiting, CI dependency/secret/container scanning, DB and object-storage backup/restore drills (`docs/runbooks/`) — is done. Sign-in is email + password (emailed invites and resets, lockout) plus optional Google / Microsoft / GitHub for existing users, and admin-issued API tokens for machines; the old email-only `dev-login` is gone (`docs/runbooks/README.md`, "Sign-in"). See `CLAUDE.md` for the guardrails AI/human contributors should follow, and `README.md` for local dev setup.
 
 ## Two-developer task split
 
@@ -51,7 +51,7 @@ The system-of-record backbone. Everything else depends on this being solid first
 
 | Module      | Responsibility                                                                   |
 | ----------- | -------------------------------------------------------------------------------- |
-| `auth`      | Identity (OIDC/Keycloak), RBAC, site-scoped permissions                          |
+| `auth`      | Sign-in (password, Google/Microsoft/GitHub, API tokens), RBAC, site scope        |
 | `sites`     | Site master, contacts, support calendars _(scaffolded as the reference pattern)_ |
 | `cmdb`      | Configuration Items, racks, relationships, lifecycle, bulk import                |
 | `incidents` | State machine, assignment, comments, transitions                                 |
@@ -83,7 +83,7 @@ Everything that talks to the outside world, plus operational governance.
 ### Shared / collaborative
 
 - **Sprint 1 (Foundation)** — done; both devs should read it end-to-end before extending it.
-- **Sprint 12 (Hardening/UAT)** — done: rate limiting, CI dependency/secret/container scanning, `SiteScopeGuard` test coverage, and DB + object-storage backup/restore drills (`docs/runbooks/`). Real SSO/OIDC login has since landed (generic OIDC, Keycloak for local dev); `dev-login` stays for local/dev only.
+- **Sprint 12 (Hardening/UAT)** — done: rate limiting, CI dependency/secret/container scanning, `SiteScopeGuard` test coverage, and DB + object-storage backup/restore drills (`docs/runbooks/`). Sign-in has since been rebuilt: passwords, Google/Microsoft/GitHub and API tokens replace `dev-login`.
 - `cmdb` is a shared dependency: Dev A builds it first since `incidents` needs it (target: stable by end of Sprint 3), but Dev B's hardware/alert work all links back to CIs — sync when the CMDB schema stabilizes.
 - Both developers independently satisfy the **Definition of Done** (spec §24) on every story: backend authorization, audit events, tests, no hardcoded values, OpenAPI docs, UI error/empty/loading states, peer review. This isn't divisible — it's the bar both clear on every PR.
 

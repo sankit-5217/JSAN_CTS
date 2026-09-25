@@ -265,194 +265,136 @@ No secret-manager integration exists yet, so there's no rotation-without-
 restart and no audit trail of _who_ rotated a credential _when_ beyond
 whatever the OS/deployment platform logs for the env var change itself.
 
-## SSO (OIDC) setup and user linking
+## Sign-in: passwords, Google / Microsoft / GitHub, API tokens
 
-**When to use this**: connecting an environment to an identity provider,
-onboarding a user, or fixing a user whose SSO login is refused.
+**When to use this**: onboarding or offboarding someone, connecting a sign-in
+provider, fixing a refused sign-in, issuing a machine token, or the first
+production deploy of this sign-in system.
 
-**How login works**: `GET /api/v1/auth/oidc/login` → IdP (authorization
-code + PKCE) → `GET /api/v1/auth/oidc/callback` verifies the ID token and
-maps it to an **existing** OpsDesk user → the browser lands on the web app's
-`/auth/callback` with a 60-second single-use code → `POST
-/api/v1/auth/oidc/exchange` returns the normal app JWT. Nobody is
-auto-created: a Super Admin adds the user first under **Administration →
-Users** (email, name, role, site access). The email must match what the IdP
-sends; it locks once their first SSO login links them. Every login,
-refusal and first-time link writes an audit event (`USER_SSO_LOGIN`,
-`USER_SSO_LOGIN_REJECTED`, `USER_IDP_LINKED`).
+**How sign-in works**
 
-**Connecting an IdP** (Entra ID, Okta, Keycloak, ...). Register a
-confidential web client with:
+- **Password.** A Super Admin adds the person under **Administration →
+  Users** (email, name, role, sites). OpsDesk emails them an invite link
+  (valid 3 days, single use) to choose their own password — admins never see
+  or set passwords. "Forgot password?" on the login page emails a 1-hour reset
+  link. Passwords: at least 12 characters, stored as scrypt hashes. 5 wrong
+  passwords lock the account for 15 minutes; login routes are also rate
+  limited per IP. Setting a new password signs the user out everywhere else.
+- **Google / Microsoft / GitHub.** Only for people who already exist in
+  OpsDesk: the first sign-in whose **verified** email matches a user links
+  that account; afterwards the linked account is trusted even if its email
+  changes. One account per provider per user; a user can use several
+  providers plus a password.
+- **Machines** (site collector, worker) use **API tokens** (`odk_...`)
+  created under Users → **Tokens** for a dedicated service account. A token
+  acts as that account (same role and sites), is shown once, and can be
+  revoked instantly. There is no email-only / passwordless login any more.
 
-- redirect URI `https://<api-host>/api/v1/auth/oidc/callback`
-- post-logout redirect URI `https://<web-host>/login`
-- scopes `openid email profile`; PKCE S256
+Every sign-in, failure, lockout, invite, reset, identity link and token
+change is an audit event (`USER_PASSWORD_LOGIN`, `USER_LOGIN_FAILED`,
+`USER_LOCKED_OUT`, `USER_INVITE_SENT`, `USER_PASSWORD_RESET_SENT`,
+`USER_PASSWORD_SET`, `USER_SOCIAL_LOGIN`, `USER_SOCIAL_LOGIN_REJECTED`,
+`USER_IDENTITY_LINKED`, `API_TOKEN_CREATED`, `API_TOKEN_REVOKED`).
 
-Then set on the API (see `.env.example`): `OIDC_ENABLED=true`,
-`OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` (from the secret
-manager, never committed), `OIDC_REDIRECT_URI` (same host as the web app's
-`VITE_API_BASE_URL`, since the login cookie is scoped to that host),
-`WEB_APP_URL`, optionally `OIDC_PROVIDER_LABEL`. `dev-login` is always off
-when `NODE_ENV=production`.
+**Email (needed for invites and resets).** Set on the **worker**:
+`SMTP_HOST`, `SMTP_PORT` (587 STARTTLS or 465 with `SMTP_SECURE=true`),
+`SMTP_USER`, `SMTP_PASS` (from the secret manager), `MAIL_FROM`. The API
+needs `REDIS_URL` to queue emails. Without SMTP the worker prints emails to
+its log; without Redis the admin screen says so and shows the link to copy
+and send by hand. Verify: send yourself a reset link from the login page.
 
-**Local dev**: `docker compose up -d keycloak`, set `OIDC_ENABLED=true` in
-`apps/api/.env`, restart the API. The realm in
-`infra/keycloak/opsdesk-realm.json` has every seeded user (password
-`opsdesk-dev`) plus `not-provisioned@example.com` for testing a refused
-login.
+**Connecting providers.** Each needs the API's callback URL,
+`<API_PUBLIC_URL>/api/v1/auth/social/<provider>/callback`, where
+`API_PUBLIC_URL` is the API origin the browser uses (same host as the web
+app's `VITE_API_BASE_URL`). Put the secrets in the secret manager; a
+provider switches on when both its `*_CLIENT_ID` and `*_CLIENT_SECRET` are
+set, then restart the API.
 
-**Verify**: `GET /api/v1/auth/providers` returns `sso.enabled: true`; a
-sign-in via the login page's SSO button lands on the dashboard; the audit
-log shows `USER_SSO_LOGIN` for that user.
+- **Google** — Google Cloud Console → APIs & Services → Credentials →
+  Create OAuth client ID → _Web application_. Authorized redirect URI: the
+  callback above with `google`. (First configure the OAuth consent screen:
+  internal for a Google Workspace org, or external with your domain.) Set
+  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+- **Microsoft** — Entra admin center → App registrations → New
+  registration. Supported account types: _this organizational directory
+  only_ (or _personal Microsoft accounts only_). Redirect URI (Web): the
+  callback with `microsoft`. Certificates & secrets → New client secret.
+  Set `MICROSOFT_CLIENT_ID` (Application ID), `MICROSOFT_CLIENT_SECRET`,
+  and `MICROSOFT_TENANT_ID` = your Directory (tenant) ID, or `consumers`
+  for personal accounts. `common`/`organizations` are refused on purpose:
+  any company's Microsoft admin could set an account's email to one of
+  your users' and sign in as them.
+- **GitHub** — GitHub → Settings → Developer settings → OAuth Apps → New
+  OAuth App (create it under the JSAN organization). Authorization callback
+  URL: the callback with `github`. Generate a client secret. Set
+  `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`. Only the account's
+  **verified primary** email is used for matching. (GitHub Enterprise
+  Server: also `GITHUB_WEB_URL`, `GITHUB_API_URL`.)
 
-**Login refused** — the login page shows the reason (`?sso_error=`):
+Verify: `GET /api/v1/auth/providers` lists the provider and the login page
+shows its button; sign in with a test user.
 
-| Reason              | Fix                                                                     |
-| ------------------- | ----------------------------------------------------------------------- |
-| `not_provisioned`   | Add the user under Administration → Users with the IdP's exact email.   |
-| `inactive`          | Reactivate the user under Administration → Users.                       |
-| `identity_mismatch` | Email is linked to another IdP account — unlink it (below) if intended. |
-| `email_missing`     | IdP isn't releasing the `email` claim; add it to the client's scopes.   |
-| `invalid_state`     | Cookie blocked or login took >10 min; retry.                            |
-| `idp_unavailable`   | API can't reach `OIDC_ISSUER_URL` — check DNS/egress.                   |
+**Refused social sign-in** — the login page shows why (`?social_error=`):
 
-**Unlinking a user** (IdP account recreated, IdP migrated, wrong person
-linked). Users are matched by `(idp_issuer, idp_subject)` once linked,
-never by email alone. Clearing the link makes the next SSO login re-link by
-email. The Users screen deliberately doesn't offer this, so it's SQL —
-record the reason in the change ticket:
+| Reason                 | Fix                                                                        |
+| ---------------------- | -------------------------------------------------------------------------- |
+| `not_provisioned`      | Add the user with exactly the email the provider sends.                    |
+| `inactive`             | Reactivate the user.                                                       |
+| `identity_mismatch`    | Another account from that provider is already linked (see below).          |
+| `email_unverified`     | They must verify the email with the provider first.                        |
+| `email_missing`        | The provider didn't release an email (check the app's scopes/permissions). |
+| `invalid_state`        | Blocked cookies or a sign-in left open >10 minutes; retry.                 |
+| `provider_unavailable` | The API can't reach the provider — check outbound HTTPS from the API.      |
+
+**Unlinking a social account** (someone changed Google/GitHub accounts).
+No UI yet — SQL, with the reason in the change ticket:
 
 ```sql
-UPDATE users SET idp_issuer = NULL WHERE email = 'person@example.com';
+DELETE FROM user_identities
+WHERE provider = 'github'
+  AND user_id = (SELECT id FROM users WHERE email = 'person@example.com');
 ```
 
-## Production Keycloak
+**Offboarding**: deactivate the user (takes effect on their next request,
+including their API tokens) and revoke any API tokens you no longer need.
 
-**When to use this**: standing up (or auditing) the production identity
-provider when JSAN runs its own Keycloak instead of pointing OpsDesk at an
-existing enterprise IdP (Entra ID/Okta — if JSAN already has one, prefer
-it: "Connecting an IdP" above, no Keycloak to operate).
+**Machine tokens**: create a service account user (e.g.
+`collector-site01@<domain>`, role with the ingest/vendor permissions it
+needs, the right site), then Users → Tokens → create, copy the `odk_...`
+value into the collector's `apiToken` / the worker's
+`OPSDESK_SERVICE_TOKEN`. Rotate yearly: create the new token, deploy it,
+revoke the old one.
 
-Keycloak is production-grade; what is **not** is the local dev setup
-(`start-dev`, the built-in H2 database, plain HTTP, `admin`/`admin`, and
-`infra/keycloak/opsdesk-realm.json` with its test users and `change-me`
-secret). Never import that dev realm into production.
-
-**1. Database.** A dedicated PostgreSQL database for Keycloak (not the
-OpsDesk database), with its own user and backups:
-
-```sql
-CREATE USER keycloak WITH PASSWORD '<from secret manager>';
-CREATE DATABASE keycloak OWNER keycloak;
-```
-
-**2. Configuration** (`conf/keycloak.conf`, or the same keys as `KC_*`
-environment variables in a container). Secrets come from the secret
-manager, never this file in git:
-
-```properties
-db=postgres
-db-url=jdbc:postgresql://<db-host>:5432/keycloak
-db-username=keycloak
-# db-password -> KC_DB_PASSWORD from the secret manager
-hostname=https://sso.<jsan-domain>
-# TLS terminated by Keycloak itself...
-https-certificate-file=/etc/keycloak/tls/fullchain.pem
-https-certificate-key-file=/etc/keycloak/tls/privkey.pem
-# ...or by a reverse proxy in front of it (then drop the two lines above):
-# proxy-headers=xforwarded
-# http-enabled=true
-health-enabled=true
-metrics-enabled=true
-```
-
-**3. Build and start in production mode** (never `start-dev`):
-
-```bash
-bin/kc.sh build --db=postgres --health-enabled=true --metrics-enabled=true
-bin/kc.sh start --optimized
-```
-
-Health and metrics are served on the management port (9000): `/health/ready`,
-`/metrics`. Point monitoring at them; keep port 9000 internal.
-
-**4. Admin account.** Start the first time with
-`KC_BOOTSTRAP_ADMIN_USERNAME`/`KC_BOOTSTRAP_ADMIN_PASSWORD` set to a
-one-time strong value, sign in to `https://sso.<jsan-domain>/admin`, create a
-permanent named admin in the `master` realm with OTP configured, then
-delete the temporary bootstrap admin and remove those two variables. Don't
-expose `/admin` to the Internet — block it at the reverse proxy or firewall
-so only the ops network reaches it.
-
-**5. Realm.** Import `infra/keycloak/opsdesk-realm.production.json`. It has
-no users and reads its secret and addresses from the environment when
-imported:
-
-```bash
-export OPSDESK_OIDC_CLIENT_SECRET="$(openssl rand -base64 48)"   # store it in the secret manager
-export OPSDESK_API_URL=https://opsdesk.<jsan-domain>             # the API's public origin
-export OPSDESK_WEB_URL=https://opsdesk.<jsan-domain>             # the web app's origin
-bin/kc.sh import --file opsdesk-realm.production.json
-```
-
-What it sets up: HTTPS required everywhere, no self-registration,
-brute-force lockout (5 failures, growing to 15 min), a 12-character
-password policy with history, **OTP (MFA) required on every new user's first
-sign-in**, 30-minute idle / 12-hour max sessions, login and admin event
-logging (90 days), and a confidential `opsdesk-web` client with PKCE and
-exactly one redirect URI. Password reset by email is off until SMTP is
-configured (Realm settings → Email), then turn on "Forgot password".
-
-**6. OpsDesk API settings** (production environment, from the secret
-manager):
+**Production settings** (the API refuses to start in production if any is
+missing or unsafe; errors are printed at startup — see
+`apps/api/src/modules/auth/production-auth-config.ts`):
 
 ```bash
 NODE_ENV=production
 JWT_SECRET=<openssl rand -base64 48>
-OIDC_ENABLED=true
-OIDC_ISSUER_URL=https://sso.<jsan-domain>/realms/opsdesk
-OIDC_CLIENT_ID=opsdesk-web
-OIDC_CLIENT_SECRET=<the OPSDESK_OIDC_CLIENT_SECRET above>
-OIDC_REDIRECT_URI=https://opsdesk.<jsan-domain>/api/v1/auth/oidc/callback
 WEB_APP_URL=https://opsdesk.<jsan-domain>
+API_PUBLIC_URL=https://opsdesk.<jsan-domain>
+REDIS_URL=redis://<redis-host>:6379
 ```
 
-The API **refuses to start** in production if `JWT_SECRET` is missing, a
-known placeholder or under 32 characters, if the client secret is the dev
-`change-me`, or if any of the three URLs isn't `https://` (see
-`apps/api/src/modules/auth/production-auth-config.ts`). The errors are
-printed at startup.
+**First deploy of this sign-in system** (it replaces the old email-only
+dev-login):
 
-**7. Onboarding a person**: create them in Keycloak (Users → Add user,
-email = username, "Email verified" on, set a temporary password) **and** in
-OpsDesk (Administration → Users) with the same email. Their first sign-in
-forces a password change and OTP setup, then links their OpsDesk account.
-Offboarding: disable them in Keycloak **and** deactivate them in OpsDesk
-(deactivation takes effect on the next request; Keycloak alone only stops
-new logins).
+1. Set the production settings above and SMTP on the worker. Deploy;
+   `prisma migrate deploy` runs the new migration.
+2. **Every existing session is signed out** (tokens now carry a session
+   version) and **nobody has a password yet**. On the API host, send the
+   first Super Admin their link (it's printed too, in case email isn't
+   working yet):
 
-**Verify** after every deploy:
+   ```bash
+   node dist/cli/send-sign-in-link.js admin@<jsan-domain>
+   # dev checkout: pnpm --filter @cts-dc-opsdesk/api auth:sign-in-link admin@example.com
+   ```
 
-```bash
-# dev-login must be off -> 403
-curl -s -o /dev/null -w "%{http_code}\n" -X POST https://opsdesk.<jsan-domain>/api/v1/auth/dev-login \
-  -H 'content-type: application/json' -d '{"email":"admin@example.com"}'
-# SSO advertised -> "sso":{"enabled":true...}, "devLogin":false
-curl -s https://opsdesk.<jsan-domain>/api/v1/auth/providers
-# Keycloak ready
-curl -s https://sso.<jsan-domain>:9000/health/ready
-```
-
-Then sign in through the web app with a test account and confirm a
-`USER_SSO_LOGIN` audit event.
-
-**Backups and upgrades**: back up the Keycloak database with the same
-`pg_dump` procedure as "Database restore" (it holds users, OTP secrets and
-sessions). Apply Keycloak security releases promptly: stop, back up the
-database, replace the distribution, `kc.sh build`, `kc.sh start --optimized`
-(schema migrates on start). Keep one major version at a time.
-
-**Switching issuers** (e.g. dev Keycloak → production Keycloak, or Keycloak
-→ Entra): users already linked to the old issuer get `identity_mismatch`.
-Clear their link (see "Unlinking a user") so their next sign-in re-links to
-the new IdP.
+3. That admin signs in, then uses **Users → Invite** for everyone else
+   (or everyone uses "Forgot password?" on the login page).
+4. Machines: create API tokens (above) and replace any token the collector
+   or worker used before — old ones no longer work.
+5. Verify: `POST /api/v1/auth/dev-login` → **404**; a password sign-in works;
+   the audit log shows `USER_PASSWORD_LOGIN`.

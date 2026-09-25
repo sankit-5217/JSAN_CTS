@@ -60,9 +60,10 @@ pnpm install
 # start infra dependencies only
 docker compose up -d postgres redis minio
 
-# run migrations + generate client
+# run migrations + generate client, then load demo data (incl. demo logins)
 pnpm prisma:migrate
 pnpm prisma:generate
+pnpm --filter @cts-dc-opsdesk/api prisma:seed
 
 # run api, worker, web in separate terminals
 pnpm dev:api
@@ -73,6 +74,28 @@ pnpm dev:web
 API health check: `GET http://localhost:3000/api/v1/health`
 Swagger/OpenAPI: `http://localhost:3000/api/docs`
 Web: `http://localhost:5173`
+
+### Demo logins (local/dev only)
+
+`prisma:seed` gives every seeded account the password **`OpsDesk-Demo-2026!`**
+(override with `SEED_DEMO_PASSWORD`). The seed never sets passwords when
+`NODE_ENV=production`; real people choose their own through the invite email
+(Administration → Users).
+
+| Email                     | Role                         | Sites  |
+| ------------------------- | ---------------------------- | ------ |
+| `admin@example.com`       | Super Admin                  | All    |
+| `servicedesk@example.com` | Service Desk / NOC           | SITE01 |
+| `engineer1@example.com`   | Site Engineer                | SITE01 |
+| `engineer2@example.com`   | Site Engineer                | SITE01 |
+| `rahul@example.com`       | Site Engineer (routing demo) | SITE01 |
+| `vikas@example.com`       | Site Engineer (routing demo) | SITE01 |
+| `engineer@example.com`    | Site Engineer                | SITE02 |
+| `viewer@example.com`      | Client Manager (viewer)      | SITE01 |
+
+Google / Microsoft / GitHub buttons appear once their client IDs are set
+(`.env.example`, and `docs/runbooks/README.md` → "Sign-in" for setup). Without
+`SMTP_HOST`, invite and reset emails are printed in the worker's log.
 
 ## Non-negotiable guardrails
 

@@ -52,22 +52,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # Local/dev identity provider only (spec §7) — production points
-  # OIDC_ISSUER_URL at the enterprise IdP instead. Realm, client and dev users
-  # (password: opsdesk-dev) are imported from infra/keycloak on first start.
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.0
-    container_name: opsdesk-keycloak
-    restart: unless-stopped
-    command: start-dev --import-realm
-    environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./infra/keycloak/opsdesk-realm.json:/opt/keycloak/data/import/opsdesk-realm.json:ro
-
   api:
     build:
       context: .

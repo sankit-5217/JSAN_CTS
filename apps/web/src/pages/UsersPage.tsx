@@ -35,10 +35,25 @@ interface AdminUser {
   displayName: string;
   role: string;
   isActive: boolean;
-  ssoLinked: boolean;
+  hasPassword: boolean;
+  socialProviders: string[];
+  lockedUntil: string | null;
   allSites: boolean;
   siteIds: string[];
 }
+
+interface SignInLinkResult {
+  link: string;
+  expiresAt: string;
+  purpose: "INVITE" | "RESET";
+  emailQueued: boolean;
+}
+
+const PROVIDER_LABEL: Record<string, string> = {
+  google: "Google",
+  microsoft: "Microsoft",
+  github: "GitHub",
+};
 
 interface Site {
   id: string;
@@ -98,6 +113,11 @@ export function UsersPage() {
 
   const [editing, setEditing] = useState<AdminUser | "new" | null>(null);
   const [toggling, setToggling] = useState<AdminUser | null>(null);
+  const [linkFor, setLinkFor] = useState<{
+    user: Pick<AdminUser, "id" | "displayName" | "email" | "hasPassword">;
+    result?: SignInLinkResult;
+  } | null>(null);
+  const [tokensFor, setTokensFor] = useState<AdminUser | null>(null);
 
   const refetch = useCallback(() => {
     setError(null);
@@ -136,8 +156,8 @@ export function UsersPage() {
             Users
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Add people before they sign in with SSO, and manage their role, site access and status.
-            Users are deactivated, never deleted.
+            Add people (they get an email invite to choose a password) and manage their role, site
+            access and status. Users are deactivated, never deleted.
           </Typography>
         </Box>
         <Button
@@ -211,7 +231,7 @@ export function UsersPage() {
                 <TableCell>User</TableCell>
                 <TableCell>Role</TableCell>
                 <TableCell>Site access</TableCell>
-                <TableCell>SSO</TableCell>
+                <TableCell>Sign-in</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
@@ -261,13 +281,29 @@ export function UsersPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {u.ssoLinked ? (
-                        <Chip size="small" color="success" variant="outlined" label="Linked" />
-                      ) : (
-                        <Typography variant="caption" color="text.secondary">
-                          Not signed in yet
-                        </Typography>
-                      )}
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                        {u.hasPassword && <Chip size="small" variant="outlined" label="Password" />}
+                        {u.socialProviders.map((p) => (
+                          <Chip
+                            key={p}
+                            size="small"
+                            variant="outlined"
+                            label={PROVIDER_LABEL[p] ?? p}
+                          />
+                        ))}
+                        {!u.hasPassword && u.socialProviders.length === 0 && (
+                          <Typography variant="caption" color="text.secondary">
+                            Invite pending
+                          </Typography>
+                        )}
+                        {u.lockedUntil && (
+                          <Tooltip
+                            title={`Too many wrong passwords — locked until ${new Date(u.lockedUntil).toLocaleTimeString()}. Sending a reset link lets them in sooner.`}
+                          >
+                            <Chip size="small" color="warning" label="Locked" />
+                          </Tooltip>
+                        )}
+                      </Stack>
                     </TableCell>
                     <TableCell>
                       <Chip
@@ -280,6 +316,24 @@ export function UsersPage() {
                       <Button size="small" onClick={() => setEditing(u)}>
                         Edit
                       </Button>
+                      {u.isActive && (
+                        <Tooltip
+                          title={
+                            u.hasPassword
+                              ? "Email a password reset link"
+                              : "Email (or re-send) the invite to choose a password"
+                          }
+                        >
+                          <Button size="small" onClick={() => setLinkFor({ user: u })}>
+                            {u.hasPassword ? "Reset link" : "Invite"}
+                          </Button>
+                        </Tooltip>
+                      )}
+                      <Tooltip title="API tokens for machine accounts (site collector, worker)">
+                        <Button size="small" onClick={() => setTokensFor(u)}>
+                          Tokens
+                        </Button>
+                      </Tooltip>
                       <Tooltip title={isSelf ? "You can't deactivate your own account" : ""}>
                         <span>
                           <Button
@@ -307,12 +361,24 @@ export function UsersPage() {
           sites={sites}
           isSelf={editing !== "new" && editing.id === currentUserId}
           onClose={() => setEditing(null)}
-          onSaved={() => {
+          onSaved={(created) => {
             setEditing(null);
+            refetch();
+            if (created) setLinkFor({ user: created, result: created.invite });
+          }}
+        />
+      )}
+      {linkFor && (
+        <SignInLinkDialog
+          user={linkFor.user}
+          initialResult={linkFor.result}
+          onClose={() => {
+            setLinkFor(null);
             refetch();
           }}
         />
       )}
+      {tokensFor && <ApiTokensDialog user={tokensFor} onClose={() => setTokensFor(null)} />}
       {toggling && (
         <ToggleActiveDialog
           user={toggling}
@@ -358,7 +424,7 @@ function UserDialog({
   sites: Site[];
   isSelf: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (created?: AdminUser & { invite: SignInLinkResult }) => void;
 }) {
   const [email, setEmail] = useState(user?.email ?? "");
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
@@ -378,7 +444,14 @@ function UserDialog({
     setBlockers([]);
     try {
       if (!user) {
-        await apiPost("/admin/users", { email, displayName, role, siteIds });
+        const created = await apiPost<AdminUser & { invite: SignInLinkResult }>("/admin/users", {
+          email,
+          displayName,
+          role,
+          siteIds,
+        });
+        onSaved(created);
+        return;
       } else {
         const patch: Record<string, string> = {};
         if (email.trim().toLowerCase() !== user.email) patch.email = email;
@@ -426,11 +499,10 @@ function UserDialog({
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            disabled={user?.ssoLinked}
             helperText={
-              user?.ssoLinked
-                ? "Locked: this user has signed in with SSO and is matched to that identity."
-                : "Must match the email your SSO provider sends for this person."
+              user
+                ? "Changing it cancels any invite or reset link not used yet."
+                : "They'll get an invite here to choose a password. Google/Microsoft/GitHub sign-ins are matched on this address too."
             }
           />
           <TextField
@@ -558,6 +630,286 @@ function ToggleActiveDialog({
             {busy ? "Working…" : deactivating ? "Deactivate" : "Reactivate"}
           </Button>
         )}
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+function CopyField({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <TextField
+      label={label}
+      value={value}
+      fullWidth
+      size="small"
+      InputProps={{
+        readOnly: true,
+        endAdornment: (
+          <Button size="small" onClick={copy} sx={{ flexShrink: 0 }}>
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        ),
+      }}
+      onFocus={(e) => e.target.select()}
+    />
+  );
+}
+
+/** Confirm, then email an invite / reset link; always offers the link to copy as a fallback. */
+function SignInLinkDialog({
+  user,
+  initialResult,
+  onClose,
+}: {
+  user: Pick<AdminUser, "id" | "displayName" | "email" | "hasPassword">;
+  initialResult?: SignInLinkResult;
+  onClose: () => void;
+}) {
+  const [result, setResult] = useState<SignInLinkResult | null>(initialResult ?? null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isReset = result ? result.purpose === "RESET" : user.hasPassword;
+
+  const send = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await apiPost<SignInLinkResult>(`/admin/users/${user.id}/sign-in-link`));
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onClose={busy ? undefined : onClose} fullWidth maxWidth="sm">
+      <DialogTitle>
+        {isReset ? "Password reset link" : "Invite"} for {user.displayName}
+      </DialogTitle>
+      <DialogContent>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+        {result ? (
+          <Stack spacing={2} sx={{ mt: 0.5 }}>
+            {result.emailQueued ? (
+              <Alert severity="success">
+                Emailed to {user.email}. The link works once and expires{" "}
+                {new Date(result.expiresAt).toLocaleString()}.
+              </Alert>
+            ) : (
+              <Alert severity="warning">
+                The email couldn&apos;t be sent from here. Copy the link below and send it to{" "}
+                {user.email} yourself (it expires {new Date(result.expiresAt).toLocaleString()}).
+              </Alert>
+            )}
+            <CopyField label="Sign-in link (works once)" value={result.link} />
+            <Typography variant="caption" color="text.secondary">
+              Anyone with this link can set this account&apos;s password — share it only with{" "}
+              {user.displayName}. Sending a new link cancels this one.
+            </Typography>
+          </Stack>
+        ) : (
+          <Typography variant="body2">
+            {isReset
+              ? `Email ${user.email} a link to choose a new password? It works once, for one hour.`
+              : `Email ${user.email} an invite to choose a password? It works once, for 3 days.`}
+          </Typography>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={busy}>
+          {result ? "Done" : "Cancel"}
+        </Button>
+        {!result && (
+          <Button variant="contained" onClick={send} disabled={busy}>
+            {busy ? "Sending…" : "Send link"}
+          </Button>
+        )}
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+interface ApiTokenRow {
+  id: string;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+function tokenStatus(t: ApiTokenRow): { label: string; color: "success" | "default" | "warning" } {
+  if (t.revokedAt) return { label: "Revoked", color: "default" };
+  if (t.expiresAt && new Date(t.expiresAt) <= new Date()) {
+    return { label: "Expired", color: "warning" };
+  }
+  return { label: "Active", color: "success" };
+}
+
+/** Long-lived tokens for machine accounts. The value is shown once, right after creation. */
+function ApiTokensDialog({ user, onClose }: { user: AdminUser; onClose: () => void }) {
+  const [tokens, setTokens] = useState<ApiTokenRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [expiry, setExpiry] = useState("365");
+  const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    apiGet<ApiTokenRow[]>(`/admin/users/${user.id}/api-tokens`)
+      .then(setTokens)
+      .catch((err: Error) => setError(err.message));
+  }, [user.id]);
+  useEffect(load, [load]);
+
+  const create = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await apiPost<ApiTokenRow & { token: string }>(
+        `/admin/users/${user.id}/api-tokens`,
+        { name: name.trim(), ...(expiry ? { expiresInDays: Number(expiry) } : {}) },
+      );
+      setCreated(res.token);
+      setName("");
+      load();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async (t: ApiTokenRow) => {
+    if (!window.confirm(`Revoke "${t.name}"? Anything using it stops working immediately.`)) {
+      return;
+    }
+    setError(null);
+    try {
+      await apiPost(`/admin/users/${user.id}/api-tokens/${t.id}/revoke`);
+      load();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
+  const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString() : "—");
+
+  return (
+    <Dialog open onClose={busy ? undefined : onClose} fullWidth maxWidth="md">
+      <DialogTitle>API tokens for {user.displayName}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 0.5 }}>
+          <Typography variant="body2" color="text.secondary">
+            For machines that can&apos;t sign in, like a site collector or the worker. A token acts
+            as {user.displayName} with their role and site access, and stops working if they&apos;re
+            deactivated. Use a dedicated service account, not a person&apos;s account.
+          </Typography>
+          {error && <Alert severity="error">{error}</Alert>}
+          {created && (
+            <Alert severity="success" onClose={() => setCreated(null)}>
+              <Stack spacing={1}>
+                <span>Copy this token now — it won&apos;t be shown again.</span>
+                <CopyField label="API token" value={created} />
+              </Stack>
+            </Alert>
+          )}
+          {user.isActive && (
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <TextField
+                size="small"
+                label="What uses it (e.g. SITE01 collector)"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                sx={{ flex: 1 }}
+              />
+              <TextField
+                select
+                size="small"
+                label="Expires"
+                value={expiry}
+                onChange={(e) => setExpiry(e.target.value)}
+                sx={{ minWidth: 150 }}
+              >
+                <MenuItem value="90">In 90 days</MenuItem>
+                <MenuItem value="365">In 1 year</MenuItem>
+                <MenuItem value="">Never</MenuItem>
+              </TextField>
+              <Button variant="contained" onClick={create} disabled={busy || !name.trim()}>
+                {busy ? "Creating…" : "Create token"}
+              </Button>
+            </Stack>
+          )}
+          {tokens === null && !error ? (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
+              <CircularProgress size={22} />
+            </Box>
+          ) : tokens && tokens.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No tokens yet.
+            </Typography>
+          ) : tokens ? (
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Name</TableCell>
+                    <TableCell>Token</TableCell>
+                    <TableCell>Created</TableCell>
+                    <TableCell>Last used</TableCell>
+                    <TableCell>Expires</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell />
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {tokens.map((t) => {
+                    const status = tokenStatus(t);
+                    return (
+                      <TableRow key={t.id}>
+                        <TableCell>{t.name}</TableCell>
+                        <TableCell sx={{ fontFamily: "monospace" }}>{t.prefix}…</TableCell>
+                        <TableCell>{fmt(t.createdAt)}</TableCell>
+                        <TableCell>{fmt(t.lastUsedAt)}</TableCell>
+                        <TableCell>{t.expiresAt ? fmt(t.expiresAt) : "Never"}</TableCell>
+                        <TableCell>
+                          <Chip size="small" color={status.color} label={status.label} />
+                        </TableCell>
+                        <TableCell align="right">
+                          {!t.revokedAt && (
+                            <Button size="small" color="error" onClick={() => revoke(t)}>
+                              Revoke
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          ) : null}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={busy}>
+          Close
+        </Button>
       </DialogActions>
     </Dialog>
   );
