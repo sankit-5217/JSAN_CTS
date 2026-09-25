@@ -156,6 +156,25 @@ describe("ShiftsService.update", () => {
     );
   });
 
+  it("won't re-enable a shift whose holder is no longer an engineer", async () => {
+    const { service, tx } = makeService({
+      findUnique: jest.fn().mockResolvedValue(baseShift({ isActive: false })),
+      userFindUnique: jest.fn().mockResolvedValue({ displayName: "Sam", role: "SERVICE_DESK_NOC" }),
+    });
+    await expect(service.update("shift-1", { isActive: true }, ACTOR)).rejects.toThrow(
+      "Sam isn't an engineer",
+    );
+    expect(tx.engineerShift.update).not.toHaveBeenCalled();
+  });
+
+  it("re-enables a shift for an engineer", async () => {
+    const { service, tx } = makeService({
+      findUnique: jest.fn().mockResolvedValue(baseShift({ isActive: false })),
+    });
+    await service.update("shift-1", { isActive: true }, ACTOR);
+    expect(tx.engineerShift.update).toHaveBeenCalled();
+  });
+
   it("rejects a zero-duration window even when only one side changes", async () => {
     const { service } = makeService({
       findUnique: jest.fn().mockResolvedValue(baseShift({ startTime: "09:00", endTime: "17:00" })),

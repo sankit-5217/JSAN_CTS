@@ -12,6 +12,8 @@ import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 import { RolesGuard } from "./guards/roles.guard";
 import { SiteScopeGuard } from "./guards/site-scope.guard";
 import { JwtStrategy } from "./strategies/jwt.strategy";
+import { UserAdminController } from "./user-admin.controller";
+import { UserAdminService } from "./user-admin.service";
 import { UsersController } from "./users.controller";
 import { UsersService } from "./users.service";
 
@@ -42,13 +44,14 @@ import { UsersService } from "./users.service";
       }),
     }),
   ],
-  controllers: [AuthController, OidcController, UsersController],
+  controllers: [AuthController, OidcController, UsersController, UserAdminController],
   providers: [
     AuthService,
     AuthzService,
     OidcClientService,
     SsoService,
     UsersService,
+    UserAdminService,
     JwtStrategy,
     JwtAuthGuard,
     RolesGuard,

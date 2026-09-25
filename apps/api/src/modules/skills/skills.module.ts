@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
 import { SkillsController } from "./skills.controller";
 import { SkillsService } from "./skills.service";
+import { SkillUserChecksListener } from "./skill-user-checks.listener";
 
 /**
  * Owner: Dev A (Platform & Ticketing Core).
@@ -13,7 +14,7 @@ import { SkillsService } from "./skills.service";
 @Module({
   imports: [AuthModule],
   controllers: [SkillsController],
-  providers: [SkillsService],
+  providers: [SkillsService, SkillUserChecksListener],
   exports: [SkillsService],
 })
 export class SkillsModule {}

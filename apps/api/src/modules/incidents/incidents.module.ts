@@ -5,6 +5,7 @@ import { InboxModule } from "../inbox/inbox.module";
 import { SlaModule } from "../sla/sla.module";
 import { IncidentsController } from "./incidents.controller";
 import { IncidentsService } from "./incidents.service";
+import { IncidentUserChecksListener } from "./incident-user-checks.listener";
 
 /**
  * Owner: Dev A (Platform & Ticketing Core).
@@ -25,7 +26,7 @@ import { IncidentsService } from "./incidents.service";
 @Module({
   imports: [AuthModule, StorageModule, SlaModule, InboxModule],
   controllers: [IncidentsController],
-  providers: [IncidentsService],
+  providers: [IncidentsService, IncidentUserChecksListener],
   exports: [IncidentsService],
 })
 export class IncidentsModule {}

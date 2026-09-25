@@ -135,6 +135,19 @@ export class ShiftsService {
   async update(id: string, dto: UpdateShiftDto, actor: ActorContext): Promise<EngineerShift> {
     const before = await this.findOne(id);
     this.assertUsableWindow(dto.startTime ?? before.startTime, dto.endTime ?? before.endTime);
+    if (dto.isActive === true && !before.isActive) {
+      // Same engineer-only rule as create: a shift disabled so its holder
+      // could move to a non-engineer role must not come back to life.
+      const user = await this.prisma.user.findUnique({
+        where: { id: before.userId },
+        select: { displayName: true, role: true },
+      });
+      if (!user || !isEngineerRole(user.role)) {
+        throw new BadRequestException(
+          `${user?.displayName ?? "This user"} isn't an engineer; only Site Engineers and Infrastructure Leads work shifts`,
+        );
+      }
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const after = await tx.engineerShift.update({

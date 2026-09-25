@@ -30,6 +30,7 @@ import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import PolicyOutlinedIcon from "@mui/icons-material/PolicyOutlined";
+import ManageAccountsOutlinedIcon from "@mui/icons-material/ManageAccountsOutlined";
 import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
@@ -59,6 +60,7 @@ import { KnowledgeDetailPage } from "./pages/KnowledgeDetailPage";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { LoginPage } from "./pages/LoginPage";
 import { SsoCallbackPage } from "./pages/SsoCallbackPage";
+import { UsersPage } from "./pages/UsersPage";
 import { MonitoringPage } from "./pages/MonitoringPage";
 import { ProblemDetailPage } from "./pages/ProblemDetailPage";
 import { ProblemsPage } from "./pages/ProblemsPage";
@@ -95,6 +97,8 @@ interface NavItem {
 interface NavGroup {
   label: string;
   items: NavItem[];
+  /** Only shown to these roles (display only — the API enforces access). */
+  roles?: string[];
 }
 
 // Grouped by module ownership (CLAUDE.md's Dev A/Dev B split) so a user
@@ -157,7 +161,19 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "BCP plans", to: "/bcp-plans", icon: <PolicyOutlinedIcon fontSize="small" /> },
     ],
   },
+  {
+    label: "Administration",
+    roles: ["SUPER_ADMIN"],
+    items: [
+      { label: "Users", to: "/users", icon: <ManageAccountsOutlinedIcon fontSize="small" /> },
+    ],
+  },
 ];
+
+function visibleNavGroups(): NavGroup[] {
+  const role = getCurrentUserRole();
+  return NAV_GROUPS.filter((g) => !g.roles || (role !== null && g.roles.includes(role)));
+}
 
 /** Exact match for "/" (else every route would highlight it too); prefix match otherwise. */
 function isActive(pathname: string, to: string): boolean {
@@ -191,7 +207,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
       </Toolbar>
       <Divider sx={{ borderColor: SIDEBAR_BORDER }} />
       <Box sx={{ flex: 1, overflowY: "auto", py: 1.5 }}>
-        {NAV_GROUPS.map((group, groupIndex) => (
+        {visibleNavGroups().map((group, groupIndex) => (
           <Box key={group.label}>
             {groupIndex > 0 && (
               <Divider sx={{ my: 1.5, mx: 2, borderColor: alpha("#ffffff", 0.06) }} />
@@ -411,6 +427,7 @@ export function App() {
         <Route path="/risks/:id" element={<RiskDetailPage />} />
         <Route path="/bcp-plans" element={<BcpPlansPage />} />
         <Route path="/bcp-plans/:id" element={<BcpPlanDetailPage />} />
+        <Route path="/users" element={<UsersPage />} />
       </Route>
     </Routes>
   );

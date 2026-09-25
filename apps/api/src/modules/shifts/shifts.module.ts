@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
 import { ShiftsController } from "./shifts.controller";
 import { ShiftsService } from "./shifts.service";
+import { ShiftUserChecksListener } from "./shift-user-checks.listener";
 
 /**
  * Owns: recurring weekly engineer shift schedules (EngineerShift) and the
@@ -14,7 +15,7 @@ import { ShiftsService } from "./shifts.service";
 @Module({
   imports: [AuthModule],
   controllers: [ShiftsController],
-  providers: [ShiftsService],
+  providers: [ShiftsService, ShiftUserChecksListener],
   exports: [ShiftsService],
 })
 export class ShiftsModule {}

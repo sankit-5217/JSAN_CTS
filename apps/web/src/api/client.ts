@@ -35,6 +35,29 @@ export function signOut(): void {
   window.location.assign(wasSso ? `${API_BASE_URL}/auth/oidc/logout` : "/login");
 }
 
+/**
+ * A non-2xx response. `message` keeps the old "<METHOD> <path> failed: <status>"
+ * prefix and appends the API's own explanation when it sent one (Nest's
+ * `{ message }` body), so existing error banners get more useful for free;
+ * `body` carries any structured detail (e.g. a 409's `blockers`).
+ */
+export class ApiError extends Error {
+  constructor(
+    prefix: string,
+    readonly status: number,
+    readonly body: unknown,
+  ) {
+    const detail = (body as { message?: unknown } | null)?.message;
+    const text = Array.isArray(detail)
+      ? detail.join("; ")
+      : typeof detail === "string"
+        ? detail
+        : "";
+    super(text ? `${prefix} — ${text}` : prefix);
+    this.name = "ApiError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getStoredToken();
   // A FormData body must NOT get an explicit Content-Type — the browser
@@ -50,7 +73,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    throw new Error(`${init?.method ?? "GET"} ${path} failed: ${res.status}`);
+    const body = await res.json().catch(() => null);
+    throw new ApiError(`${init?.method ?? "GET"} ${path} failed: ${res.status}`, res.status, body);
   }
   if (res.status === 204) {
     return undefined as T;
@@ -68,6 +92,10 @@ export function apiPost<T>(path: string, body?: unknown): Promise<T> {
 
 export function apiPatch<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
+}
+
+export function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, { method: "PUT", body: body ? JSON.stringify(body) : undefined });
 }
 
 export function apiDelete<T>(path: string): Promise<T> {

@@ -275,14 +275,11 @@ code + PKCE) → `GET /api/v1/auth/oidc/callback` verifies the ID token and
 maps it to an **existing** OpsDesk user → the browser lands on the web app's
 `/auth/callback` with a 60-second single-use code → `POST
 /api/v1/auth/oidc/exchange` returns the normal app JWT. Nobody is
-auto-created: the user (email + role + site access) must exist first.
-There is no user-admin API/UI yet, so provisioning is seed data or SQL, e.g.
-`INSERT INTO users (id, idp_subject, email, display_name, role, updated_at)
-VALUES (gen_random_uuid(), 'pending|person@example.com',
-'person@example.com', 'Person Name', 'SITE_ENGINEER', now());` (plus
-`user_site_access` rows for site-scoped roles). `idp_subject` is a
-placeholder until the first SSO login links the real one. Every login, refusal and first-time link writes an audit event
-(`USER_SSO_LOGIN`, `USER_SSO_LOGIN_REJECTED`, `USER_IDP_LINKED`).
+auto-created: a Super Admin adds the user first under **Administration →
+Users** (email, name, role, site access). The email must match what the IdP
+sends; it locks once their first SSO login links them. Every login,
+refusal and first-time link writes an audit event (`USER_SSO_LOGIN`,
+`USER_SSO_LOGIN_REJECTED`, `USER_IDP_LINKED`).
 
 **Connecting an IdP** (Entra ID, Okta, Keycloak, ...). Register a
 confidential web client with:
@@ -312,8 +309,8 @@ log shows `USER_SSO_LOGIN` for that user.
 
 | Reason              | Fix                                                                     |
 | ------------------- | ----------------------------------------------------------------------- |
-| `not_provisioned`   | Provision the user (above) with the exact email the IdP sends.          |
-| `inactive`          | Reactivate the user (`is_active`).                                      |
+| `not_provisioned`   | Add the user under Administration → Users with the IdP's exact email.   |
+| `inactive`          | Reactivate the user under Administration → Users.                       |
 | `identity_mismatch` | Email is linked to another IdP account — unlink it (below) if intended. |
 | `email_missing`     | IdP isn't releasing the `email` claim; add it to the client's scopes.   |
 | `invalid_state`     | Cookie blocked or login took >10 min; retry.                            |
@@ -322,8 +319,8 @@ log shows `USER_SSO_LOGIN` for that user.
 **Unlinking a user** (IdP account recreated, IdP migrated, wrong person
 linked). Users are matched by `(idp_issuer, idp_subject)` once linked,
 never by email alone. Clearing the link makes the next SSO login re-link by
-email. No admin UI exists yet, so this is SQL — record the reason in the
-change ticket:
+email. The Users screen deliberately doesn't offer this, so it's SQL —
+record the reason in the change ticket:
 
 ```sql
 UPDATE users SET idp_issuer = NULL WHERE email = 'person@example.com';
