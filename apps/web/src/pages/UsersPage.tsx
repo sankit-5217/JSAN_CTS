@@ -706,8 +706,9 @@ function SignInLinkDialog({
           <Stack spacing={2} sx={{ mt: 0.5 }}>
             {result.emailQueued ? (
               <Alert severity="success">
-                Emailed to {user.email}. The link works once and expires{" "}
-                {new Date(result.expiresAt).toLocaleString()}.
+                Queued to email to {user.email}. The link works once and expires{" "}
+                {new Date(result.expiresAt).toLocaleString()}. If it doesn&apos;t arrive, copy the
+                link below and send it to them yourself.
               </Alert>
             ) : (
               <Alert severity="warning">

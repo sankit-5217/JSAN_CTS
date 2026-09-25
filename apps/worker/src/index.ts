@@ -1,3 +1,6 @@
+// Load apps/worker/.env for local runs. Variables already set in the real
+// environment (docker-compose env_file, production) take precedence.
+import "dotenv/config";
 import { WorkerApiClient } from "./api-client";
 import { createMailTransportFromEnv } from "./mail/transport";
 import { createAccountMailWorker } from "./queues/account-mail.queue";
