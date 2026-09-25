@@ -48,4 +48,14 @@ describe("JwtStrategy", () => {
       strategy.validate({ sub: activeUser.id, email: activeUser.email, role: activeUser.role }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it("rejects a same-secret token that carries no user subject (e.g. the SSO tx cookie)", async () => {
+    const { strategy, prisma } = makeStrategy(activeUser);
+    await expect(
+      strategy.validate({ state: "s", nonce: "n" } as unknown as Parameters<
+        JwtStrategy["validate"]
+      >[0]),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
 });

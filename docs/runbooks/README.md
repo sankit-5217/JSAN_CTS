@@ -264,3 +264,67 @@ backing and "a real deployment points this at a vault client instead."
 No secret-manager integration exists yet, so there's no rotation-without-
 restart and no audit trail of _who_ rotated a credential _when_ beyond
 whatever the OS/deployment platform logs for the env var change itself.
+
+## SSO (OIDC) setup and user linking
+
+**When to use this**: connecting an environment to an identity provider,
+onboarding a user, or fixing a user whose SSO login is refused.
+
+**How login works**: `GET /api/v1/auth/oidc/login` → IdP (authorization
+code + PKCE) → `GET /api/v1/auth/oidc/callback` verifies the ID token and
+maps it to an **existing** OpsDesk user → the browser lands on the web app's
+`/auth/callback` with a 60-second single-use code → `POST
+/api/v1/auth/oidc/exchange` returns the normal app JWT. Nobody is
+auto-created: the user (email + role + site access) must exist first.
+There is no user-admin API/UI yet, so provisioning is seed data or SQL, e.g.
+`INSERT INTO users (id, idp_subject, email, display_name, role, updated_at)
+VALUES (gen_random_uuid(), 'pending|person@example.com',
+'person@example.com', 'Person Name', 'SITE_ENGINEER', now());` (plus
+`user_site_access` rows for site-scoped roles). `idp_subject` is a
+placeholder until the first SSO login links the real one. Every login, refusal and first-time link writes an audit event
+(`USER_SSO_LOGIN`, `USER_SSO_LOGIN_REJECTED`, `USER_IDP_LINKED`).
+
+**Connecting an IdP** (Entra ID, Okta, Keycloak, ...). Register a
+confidential web client with:
+
+- redirect URI `https://<api-host>/api/v1/auth/oidc/callback`
+- post-logout redirect URI `https://<web-host>/login`
+- scopes `openid email profile`; PKCE S256
+
+Then set on the API (see `.env.example`): `OIDC_ENABLED=true`,
+`OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` (from the secret
+manager, never committed), `OIDC_REDIRECT_URI` (same host as the web app's
+`VITE_API_BASE_URL`, since the login cookie is scoped to that host),
+`WEB_APP_URL`, optionally `OIDC_PROVIDER_LABEL`. `dev-login` is always off
+when `NODE_ENV=production`.
+
+**Local dev**: `docker compose up -d keycloak`, set `OIDC_ENABLED=true` in
+`apps/api/.env`, restart the API. The realm in
+`infra/keycloak/opsdesk-realm.json` has every seeded user (password
+`opsdesk-dev`) plus `not-provisioned@example.com` for testing a refused
+login.
+
+**Verify**: `GET /api/v1/auth/providers` returns `sso.enabled: true`; a
+sign-in via the login page's SSO button lands on the dashboard; the audit
+log shows `USER_SSO_LOGIN` for that user.
+
+**Login refused** — the login page shows the reason (`?sso_error=`):
+
+| Reason              | Fix                                                                     |
+| ------------------- | ----------------------------------------------------------------------- |
+| `not_provisioned`   | Provision the user (above) with the exact email the IdP sends.          |
+| `inactive`          | Reactivate the user (`is_active`).                                      |
+| `identity_mismatch` | Email is linked to another IdP account — unlink it (below) if intended. |
+| `email_missing`     | IdP isn't releasing the `email` claim; add it to the client's scopes.   |
+| `invalid_state`     | Cookie blocked or login took >10 min; retry.                            |
+| `idp_unavailable`   | API can't reach `OIDC_ISSUER_URL` — check DNS/egress.                   |
+
+**Unlinking a user** (IdP account recreated, IdP migrated, wrong person
+linked). Users are matched by `(idp_issuer, idp_subject)` once linked,
+never by email alone. Clearing the link makes the next SSO login re-link by
+email. No admin UI exists yet, so this is SQL — record the reason in the
+change ticket:
+
+```sql
+UPDATE users SET idp_issuer = NULL WHERE email = 'person@example.com';
+```

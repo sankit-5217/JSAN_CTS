@@ -5,6 +5,9 @@ import { PassportModule } from "@nestjs/passport";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { AuthzService } from "./authz.service";
+import { OidcController } from "./oidc.controller";
+import { OidcClientService } from "./oidc/oidc-client.service";
+import { SsoService } from "./sso.service";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 import { RolesGuard } from "./guards/roles.guard";
 import { SiteScopeGuard } from "./guards/site-scope.guard";
@@ -17,10 +20,11 @@ import { UsersService } from "./users.service";
  * Owns: identity mapping, sessions/tokens, roles (spec §12).
  * Must not own: incident business rules.
  *
- * Auth is JWT-based for now (dev-login bootstrap, no password store) —
- * see docs/PROJECT_OVERVIEW.md Sprint 2 notes. The guards/strategy here
- * are the long-lived piece; only AuthController.devLogin gets replaced
- * when real OIDC/IdP integration lands.
+ * Login is SSO via any OIDC IdP (OidcController + SsoService, backend
+ * authorization-code + PKCE flow; users must be pre-provisioned). Both SSO
+ * and the dev-only AuthController.devLogin end in the same app JWT, so the
+ * guards/strategy below don't care which path a user signed in through.
+ * No password store, by design (spec §17).
  *
  * Site-scope authorization: AuthzService resolves which sites a user can
  * see (spec §4's per-role "Typical Access" column); SiteScopeGuard
@@ -38,10 +42,12 @@ import { UsersService } from "./users.service";
       }),
     }),
   ],
-  controllers: [AuthController, UsersController],
+  controllers: [AuthController, OidcController, UsersController],
   providers: [
     AuthService,
     AuthzService,
+    OidcClientService,
+    SsoService,
     UsersService,
     JwtStrategy,
     JwtAuthGuard,

@@ -14,8 +14,8 @@ export class AuthService {
   /**
    * Dev-login lookup: no password store (spec §17 forbids a custom weak
    * password store in production, so we don't build one at all — this is
-   * a bootstrap path for local dev/testing only, replaced by a real
-   * OIDC/IdP login in a later sprint).
+   * a bootstrap path for local dev/testing only; real login is SSO, see
+   * OidcController).
    */
   async validateUserByEmail(email: string): Promise<User> {
     const user = await this.prisma.user.findUnique({ where: { email } });

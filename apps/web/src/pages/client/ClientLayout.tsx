@@ -3,7 +3,7 @@ import { AppBar, Box, Button, Stack, Toolbar, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import { AccountMenu, roleMeta } from "../../components/AccountMenu";
 import { NotificationBell } from "../../components/NotificationBell";
-import { clearStoredToken, getStoredToken } from "../../api/client";
+import { getStoredToken, signOut } from "../../api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "../../api/jwt";
 import { theme } from "../../theme/theme";
 
@@ -105,10 +105,7 @@ export function ClientLayout() {
               email={user.email}
               roleLabel="Client"
               roleColor={roleMeta("CLIENT_MANAGER_VIEWER").color}
-              onLogout={() => {
-                clearStoredToken();
-                window.location.assign("/login");
-              }}
+              onLogout={signOut}
             />
           )}
         </Toolbar>

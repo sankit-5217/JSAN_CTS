@@ -1,22 +1,38 @@
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:3000/api/v1";
 
-// Dev-mode auth (Sprint 7 plan, Decision 4) — LoginPage stores the token
-// here after POSTing /auth/dev-login; every request reads it back. Swapping
-// in real OIDC later only touches how this key gets populated, not the
-// request layer.
+// The app JWT lives here whichever way the user signed in: SSO
+// (SsoCallbackPage, after the API's OIDC callback) or dev-login (LoginPage,
+// local/dev only). Every request reads it back from this one key.
 const TOKEN_STORAGE_KEY = "opsdesk_token";
+// Remembers *how* the session started, so sign-out also ends the IdP
+// session for SSO users instead of leaving them silently signed in there.
+const AUTH_METHOD_STORAGE_KEY = "opsdesk_auth_method";
+
+export type AuthMethod = "sso" | "dev";
 
 export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_STORAGE_KEY);
 }
 
-export function storeToken(token: string): void {
+export function storeToken(token: string, method: AuthMethod = "dev"): void {
   localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  localStorage.setItem(AUTH_METHOD_STORAGE_KEY, method);
 }
 
 export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_STORAGE_KEY);
+  localStorage.removeItem(AUTH_METHOD_STORAGE_KEY);
+}
+
+/** Full-page navigation target that starts the API's OIDC login redirect. */
+export const SSO_LOGIN_URL = `${API_BASE_URL}/auth/oidc/login`;
+
+/** Clears the local session; SSO sessions also go through the IdP's logout. */
+export function signOut(): void {
+  const wasSso = localStorage.getItem(AUTH_METHOD_STORAGE_KEY) === "sso";
+  clearStoredToken();
+  window.location.assign(wasSso ? `${API_BASE_URL}/auth/oidc/logout` : "/login");
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

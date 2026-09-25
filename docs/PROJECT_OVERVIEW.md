@@ -39,7 +39,7 @@ tests/
   integration/, e2e/
 ```
 
-**Current status**: all 16 backend modules (`apps/api/src/modules/*`) are implemented with tests (465+ passing), the frontend covers every module with a working page, and Sprint 12 (Hardening/UAT) work — rate limiting, CI dependency/secret/container scanning, DB and object-storage backup/restore drills (`docs/runbooks/`) — is done. Real SSO/OIDC integration is the one deferred item; `dev-login` (disabled outside dev/local) stands in for it. See `CLAUDE.md` for the guardrails AI/human contributors should follow, and `README.md` for local dev setup.
+**Current status**: all 16 backend modules (`apps/api/src/modules/*`) are implemented with tests (465+ passing), the frontend covers every module with a working page, and Sprint 12 (Hardening/UAT) work — rate limiting, CI dependency/secret/container scanning, DB and object-storage backup/restore drills (`docs/runbooks/`) — is done. Real SSO is in: any OIDC IdP via a backend authorization-code + PKCE flow, pre-provisioned users only (`docs/runbooks/README.md`, "SSO (OIDC) setup"); `dev-login` remains for local/dev and is disabled in production. See `CLAUDE.md` for the guardrails AI/human contributors should follow, and `README.md` for local dev setup.
 
 ## Two-developer task split
 
@@ -83,7 +83,7 @@ Everything that talks to the outside world, plus operational governance.
 ### Shared / collaborative
 
 - **Sprint 1 (Foundation)** — done; both devs should read it end-to-end before extending it.
-- **Sprint 12 (Hardening/UAT)** — done: rate limiting, CI dependency/secret/container scanning, `SiteScopeGuard` test coverage, and DB + object-storage backup/restore drills (`docs/runbooks/`). Real SSO/OIDC (spec's auth integration) remains open — `dev-login` stands in for it, disabled outside dev/local.
+- **Sprint 12 (Hardening/UAT)** — done: rate limiting, CI dependency/secret/container scanning, `SiteScopeGuard` test coverage, and DB + object-storage backup/restore drills (`docs/runbooks/`). Real SSO/OIDC login has since landed (generic OIDC, Keycloak for local dev); `dev-login` stays for local/dev only.
 - `cmdb` is a shared dependency: Dev A builds it first since `incidents` needs it (target: stable by end of Sprint 3), but Dev B's hardware/alert work all links back to CIs — sync when the CMDB schema stabilizes.
 - Both developers independently satisfy the **Definition of Done** (spec §24) on every story: backend authorization, audit events, tests, no hardcoded values, OpenAPI docs, UI error/empty/loading states, peer review. This isn't divisible — it's the bar both clear on every PR.
 

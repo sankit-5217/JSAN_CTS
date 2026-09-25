@@ -35,7 +35,7 @@ import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
 import { AccountMenu, roleMeta } from "./components/AccountMenu";
 import { NotificationBell } from "./components/NotificationBell";
-import { clearStoredToken, getStoredToken } from "./api/client";
+import { getStoredToken, signOut } from "./api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "./api/jwt";
 import { theme } from "./theme/theme";
 import { ClientLayout } from "./pages/client/ClientLayout";
@@ -58,6 +58,7 @@ import { InsightsPage } from "./pages/InsightsPage";
 import { KnowledgeDetailPage } from "./pages/KnowledgeDetailPage";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { LoginPage } from "./pages/LoginPage";
+import { SsoCallbackPage } from "./pages/SsoCallbackPage";
 import { MonitoringPage } from "./pages/MonitoringPage";
 import { ProblemDetailPage } from "./pages/ProblemDetailPage";
 import { ProblemsPage } from "./pages/ProblemsPage";
@@ -338,10 +339,7 @@ function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
             email={user.email}
             roleLabel={meta.label}
             roleColor={meta.color}
-            onLogout={() => {
-              clearStoredToken();
-              window.location.assign("/login");
-            }}
+            onLogout={signOut}
           />
         )}
       </Toolbar>
@@ -379,6 +377,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/auth/callback" element={<SsoCallbackPage />} />
       <Route element={<ClientLayout />}>
         <Route path="/client/report" element={<ReportIssuePage />} />
         <Route path="/client/tickets" element={<MyTicketsPage />} />

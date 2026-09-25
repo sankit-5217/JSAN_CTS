@@ -149,6 +149,11 @@ enum ChangeType {
 model User {
   id          String   @id @default(uuid())
   idpSubject  String   @unique @map("idp_subject")
+  // OIDC issuer this user's idpSubject belongs to. NULL = not yet linked to
+  // an SSO identity (a pre-provisioned/seeded user): the first successful SSO
+  // login matching the user's email links it; after that only (issuer, sub)
+  // is trusted, never the email alone.
+  idpIssuer   String?  @map("idp_issuer")
   email       String   @unique
   displayName String   @map("display_name")
   role        UserRole
@@ -168,8 +173,27 @@ model User {
   userSkills          UserSkill[]
   inAppNotifications  InAppNotification[]
   routingOffers       RoutingOffer[]
+  ssoLoginCodes       SsoLoginCode[]
 
   @@map("users")
+}
+
+/// Single-use handoff between the OIDC callback (API origin) and the web
+/// app: the callback redirects the browser with a random code, the web app
+/// trades it for the app JWT via POST /auth/oidc/exchange. Only the SHA-256
+/// of the code is stored; rows expire after ~60s and are consumed once.
+model SsoLoginCode {
+  id         String    @id @default(uuid())
+  codeHash   String    @unique @map("code_hash")
+  userId     String    @map("user_id")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("sso_login_codes")
 }
 
 /// Explicit site-scope grants (spec §4: most roles are "assigned sites"

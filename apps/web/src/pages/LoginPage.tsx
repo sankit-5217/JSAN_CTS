@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState, type FormEvent } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Alert,
   Autocomplete,
@@ -31,7 +31,7 @@ import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import SecurityOutlinedIcon from "@mui/icons-material/SecurityOutlined";
 import VerifiedUserOutlinedIcon from "@mui/icons-material/VerifiedUserOutlined";
-import { apiPost, storeToken } from "../api/client";
+import { apiGet, apiPost, SSO_LOGIN_URL, storeToken } from "../api/client";
 import { decodeJwtPayload } from "../api/jwt";
 import { severityColors, theme } from "../theme/theme";
 
@@ -39,51 +39,27 @@ interface DevLoginResponse {
   accessToken: string;
 }
 
-// No OAuth app is registered yet (no client id/secret for any provider, no
-// passport strategy on the backend) — these render disabled with a "Soon"
-// chip rather than being left out, so the intended sign-in surface is real
-// but never pretends to work. Swap in real handlers once credentials exist.
-const SOCIAL_PROVIDERS = [
-  {
-    name: "Google",
-    icon: (
-      <svg viewBox="0 0 48 48" width={19} height={19}>
-        <path
-          fill="#4285F4"
-          d="M45.1 24.5c0-1.6-.1-3.1-.4-4.6H24v9h11.8c-.5 2.7-2.1 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.5 6.6-16.5Z"
-        />
-        <path
-          fill="#34A853"
-          d="M24 46c6 0 11-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8 41 15.4 46 24 46Z"
-        />
-        <path
-          fill="#FBBC05"
-          d="M11.8 28.2A13.6 13.6 0 0 1 11.1 24c0-1.5.3-2.9.7-4.2v-5.7H4.5A22 22 0 0 0 2 24c0 3.5.8 6.9 2.5 9.9l7.3-5.7Z"
-        />
-        <path
-          fill="#EA4335"
-          d="M24 10.7c3.3 0 6.2 1.1 8.5 3.3l6.3-6.3C34.9 4.2 30 2 24 2 15.4 2 8 7 4.5 14.1l7.3 5.7c1.7-5.2 6.5-9.1 12.2-9.1Z"
-        />
-      </svg>
-    ),
-  },
-  {
-    name: "GitHub",
-    icon: (
-      <svg viewBox="0 0 24 24" width={19} height={19} fill="#181717">
-        <path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2 0 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.4-1.3-5.4-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.7 5.6-5.4 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5Z" />
-      </svg>
-    ),
-  },
-  {
-    name: "Apple",
-    icon: (
-      <svg viewBox="0 0 24 24" width={19} height={19} fill="#000">
-        <path d="M16.7 1c.1 1.2-.4 2.4-1.1 3.2-.7.9-1.9 1.6-3 1.5-.1-1.2.5-2.4 1.2-3.2C14.5 1.6 15.7 1 16.7 1Zm3.9 16.9c-.5 1.2-.8 1.7-1.5 2.7-1 1.4-2.3 3.2-4 3.2-1.5 0-1.9-1-3.9-1s-2.5 1-4 1c-1.7 0-3-1.6-4-3-1.7-2.5-3-7-1.2-10 .9-1.5 2.4-2.5 4.1-2.5 1.6 0 2.6 1 3.9 1 1.3 0 2.1-1 3.9-1 1.4 0 3 .8 4 2.1-3.5 1.9-2.9 6.8 1.7 8.5Z" />
-      </svg>
-    ),
-  },
-];
+/** GET /auth/providers — which sign-in paths this environment offers. */
+interface AuthProviders {
+  sso: { enabled: boolean; label: string };
+  devLogin: boolean;
+}
+
+// Reasons the API's OIDC callback can bounce back with (`?sso_error=`).
+const SSO_ERROR_MESSAGES: Record<string, string> = {
+  not_provisioned:
+    "Your account isn't set up in OpsDesk yet. Ask an OpsDesk administrator to add you.",
+  inactive: "Your OpsDesk account is deactivated. Contact an OpsDesk administrator.",
+  identity_mismatch:
+    "This email is already linked to a different SSO account. Contact an OpsDesk administrator.",
+  email_missing: "Your identity provider didn't share an email address, so we can't match you.",
+  email_unverified: "Your email address isn't verified with your identity provider.",
+  idp_error: "Sign-in was cancelled or refused by your identity provider.",
+  invalid_state: "Your sign-in session expired. Please try again.",
+  idp_unavailable: "The identity provider is unreachable right now. Please try again shortly.",
+  sso_disabled: "SSO isn't configured for this environment.",
+  login_failed: "SSO sign-in failed. Please try again.",
+};
 
 // Same dark-navy-derived-from-primary palette as the app shell's sidebar
 // (App.tsx) — each page derives its own tokens from theme/theme.ts rather
@@ -280,21 +256,23 @@ function BrandMark({ height = 24, on = "dark" }: { height?: number; on?: "dark" 
 }
 
 /**
- * Dev-mode login (Sprint 7 plan, Decision 4) — wraps the existing
- * `POST /auth/dev-login` (server-side disabled outside dev/local) behind a
- * real UI instead of a browser-console snippet. Real OIDC login is a
- * separate, later piece of work; this page goes away once that lands.
+ * Sign-in page. Primary path is SSO (a full-page hop through the API's
+ * OIDC login, back via SsoCallbackPage); `POST /auth/dev-login` is only
+ * offered where the API reports it enabled (never in production).
  */
 export function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const ssoError = searchParams.get("sso_error");
+  const [providers, setProviders] = useState<AuthProviders | null>(null);
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const typedEmail = email.trim().toLowerCase();
   const selectedUser = SEEDED_USERS.find((u) => u.email === typedEmail);
 
-  // Contact form is decorative — same honesty rule as the social buttons:
-  // nothing on a real page should look functional and silently do nothing.
+  // Contact form is decorative — nothing on a real page should look
+  // functional and silently do nothing.
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactMessage, setContactMessage] = useState("");
@@ -307,6 +285,15 @@ export function LoginPage() {
     setContactEmail("");
     setContactMessage("");
   };
+
+  useEffect(() => {
+    apiGet<AuthProviders>("/auth/providers")
+      .then(setProviders)
+      // API unreachable: offer nothing clickable rather than guessing.
+      .catch(() =>
+        setProviders({ sso: { enabled: false, label: "Sign in with SSO" }, devLogin: false }),
+      );
+  }, []);
 
   const scrollToHero = () => {
     document.getElementById("hero")?.scrollIntoView({ behavior: "smooth" });
@@ -321,7 +308,7 @@ export function LoginPage() {
       const { accessToken } = await apiPost<DevLoginResponse>("/auth/dev-login", {
         email: typedEmail,
       });
-      storeToken(accessToken);
+      storeToken(accessToken, "dev");
       const role = decodeJwtPayload(accessToken)?.role;
       navigate(role === "CLIENT_MANAGER_VIEWER" ? "/client/report" : "/");
     } catch (err) {
@@ -508,7 +495,7 @@ export function LoginPage() {
           </Stack>
 
           <Typography sx={{ mt: 4, fontSize: 12, color: "text.disabled" }}>
-            Local/dev environment — real SSO lands in a later sprint.
+            Sign in with your organization's SSO account.
           </Typography>
         </Box>
 
@@ -569,183 +556,183 @@ export function LoginPage() {
                   Sign in to JSAN OpsDesk
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-                  Continue with your organization account, or use email below.
+                  Continue with your organization account.
                 </Typography>
 
-                <Stack spacing={1.1} sx={{ mb: 2.5 }}>
-                  {SOCIAL_PROVIDERS.map((provider) => (
-                    <Tooltip
-                      key={provider.name}
-                      title={`${provider.name} sign-in isn't wired up yet — use email below.`}
-                    >
-                      <span>
-                        <Button
-                          fullWidth
-                          disabled
-                          startIcon={provider.icon}
-                          sx={{
-                            justifyContent: "flex-start",
-                            gap: 0.5,
-                            py: 1.1,
-                            px: 2,
-                            borderRadius: 2,
-                            border: "1px solid",
-                            borderColor: "divider",
-                            textTransform: "none",
-                            fontWeight: 600,
-                            fontSize: 14,
-                            color: "text.primary",
-                            "&.Mui-disabled": { color: "text.primary", opacity: 0.6 },
-                          }}
-                        >
-                          <Box component="span" sx={{ flex: 1, textAlign: "left" }}>
-                            Continue with {provider.name}
-                          </Box>
-                          <Chip
-                            size="small"
-                            label="Soon"
-                            sx={{
-                              height: 20,
-                              fontSize: 10.5,
-                              fontWeight: 600,
-                              bgcolor: alpha(theme.palette.text.primary, 0.06),
-                            }}
-                          />
-                        </Button>
-                      </span>
-                    </Tooltip>
-                  ))}
-                </Stack>
-
-                <Divider sx={{ mb: 2.5, fontSize: 12, color: "text.secondary" }}>
-                  or continue with email
-                </Divider>
-
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Dev-mode sign-in — type or search your work email, no password. Disabled
-                  server-side outside local/dev.
-                </Typography>
-
-                {error && (
+                {ssoError && (
                   <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>
-                    Sign-in failed: {error}
+                    {SSO_ERROR_MESSAGES[ssoError] ?? SSO_ERROR_MESSAGES.login_failed}
                   </Alert>
                 )}
 
-                <Box component="form" onSubmit={handleLogin} noValidate>
-                  <Autocomplete
-                    id="dev-login-user"
-                    freeSolo
-                    openOnFocus
-                    options={SEEDED_USERS}
-                    inputValue={email}
-                    onInputChange={(_, value) => setEmail(value)}
-                    onChange={(_, value) =>
-                      setEmail(typeof value === "string" ? value : (value?.email ?? ""))
+                {providers === null ? (
+                  <Box sx={{ display: "flex", justifyContent: "center", py: 1.5, mb: 2.5 }}>
+                    <CircularProgress size={22} />
+                  </Box>
+                ) : (
+                  <Tooltip
+                    title={
+                      providers.sso.enabled ? "" : "SSO isn't configured for this environment."
                     }
-                    getOptionLabel={(user) => (typeof user === "string" ? user : user.email)}
-                    filterOptions={(users, { inputValue }) => {
-                      const q = inputValue.trim().toLowerCase();
-                      return q
-                        ? users.filter((u) =>
-                            [u.email, u.role, u.scope, u.note].some((field) =>
-                              field.toLowerCase().includes(q),
-                            ),
-                          )
-                        : users;
-                    }}
-                    renderOption={(props, user) => {
-                      const { key, ...rest } = props as typeof props & { key: string };
-                      return (
-                        <Box component="li" key={key} {...rest}>
-                          <Box sx={{ minWidth: 0 }}>
-                            <Typography variant="body2" noWrap>
-                              {user.email}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {user.role} · {user.scope}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      );
-                    }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Work email"
-                        placeholder="Search by email, role or site"
-                        autoComplete="username"
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <InputAdornment position="start">
-                              <SearchIcon fontSize="small" />
-                            </InputAdornment>
-                          ),
-                        }}
-                      />
-                    )}
-                    noOptionsText="No demo user matches. Type a full work email to sign in."
-                    sx={{ mb: 2, "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
-                  />
-
-                  {selectedUser && (
-                    <Box
-                      sx={{
-                        mb: 3,
-                        p: 1.5,
-                        borderRadius: 2,
-                        bgcolor: alpha(theme.palette.primary.main, 0.05),
-                        border: "1px solid",
-                        borderColor: alpha(theme.palette.primary.main, 0.12),
-                      }}
-                    >
-                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                        <Chip
-                          size="small"
-                          label={selectedUser.role}
-                          sx={{
-                            bgcolor: alpha(theme.palette.primary.main, 0.12),
-                            color: theme.palette.primary.main,
-                            fontWeight: 600,
-                          }}
-                        />
-                        <Typography variant="caption" color="text.secondary">
-                          {selectedUser.scope}
-                        </Typography>
-                      </Stack>
-                      <Typography variant="body2" color="text.secondary">
-                        {selectedUser.note}
-                      </Typography>
-                    </Box>
-                  )}
-
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    fullWidth
-                    size="large"
-                    disabled={loading || !typedEmail}
-                    startIcon={
-                      loading ? (
-                        <CircularProgress size={16} sx={{ color: "inherit" }} />
-                      ) : (
-                        <LoginOutlinedIcon />
-                      )
-                    }
-                    sx={{
-                      borderRadius: 2,
-                      py: 1.1,
-                      textTransform: "none",
-                      fontWeight: 600,
-                      fontSize: 15,
-                      boxShadow: "none",
-                      "&:hover": { boxShadow: "0 8px 20px -8px rgba(15, 61, 99, 0.5)" },
-                    }}
                   >
-                    {loading ? "Signing in..." : "Sign in"}
-                  </Button>
-                </Box>
+                    <span>
+                      <Button
+                        fullWidth
+                        variant="contained"
+                        size="large"
+                        disabled={!providers.sso.enabled}
+                        startIcon={<VerifiedUserOutlinedIcon />}
+                        // Full-page navigation: the API redirects on to the IdP.
+                        href={SSO_LOGIN_URL}
+                        sx={{
+                          mb: 2.5,
+                          borderRadius: 2,
+                          py: 1.1,
+                          textTransform: "none",
+                          fontWeight: 600,
+                          fontSize: 15,
+                          boxShadow: "none",
+                        }}
+                      >
+                        {providers.sso.label}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                )}
+
+                {providers?.devLogin && (
+                  <>
+                    <Divider sx={{ mb: 2.5, fontSize: 12, color: "text.secondary" }}>
+                      or dev-mode sign-in
+                    </Divider>
+
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      Type or search a seeded work email, no password. Disabled server-side outside
+                      local/dev.
+                    </Typography>
+
+                    {error && (
+                      <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>
+                        Sign-in failed: {error}
+                      </Alert>
+                    )}
+
+                    <Box component="form" onSubmit={handleLogin} noValidate>
+                      <Autocomplete
+                        id="dev-login-user"
+                        freeSolo
+                        openOnFocus
+                        options={SEEDED_USERS}
+                        inputValue={email}
+                        onInputChange={(_, value) => setEmail(value)}
+                        onChange={(_, value) =>
+                          setEmail(typeof value === "string" ? value : (value?.email ?? ""))
+                        }
+                        getOptionLabel={(user) => (typeof user === "string" ? user : user.email)}
+                        filterOptions={(users, { inputValue }) => {
+                          const q = inputValue.trim().toLowerCase();
+                          return q
+                            ? users.filter((u) =>
+                                [u.email, u.role, u.scope, u.note].some((field) =>
+                                  field.toLowerCase().includes(q),
+                                ),
+                              )
+                            : users;
+                        }}
+                        renderOption={(props, user) => {
+                          const { key, ...rest } = props as typeof props & { key: string };
+                          return (
+                            <Box component="li" key={key} {...rest}>
+                              <Box sx={{ minWidth: 0 }}>
+                                <Typography variant="body2" noWrap>
+                                  {user.email}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {user.role} · {user.scope}
+                                </Typography>
+                              </Box>
+                            </Box>
+                          );
+                        }}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            label="Work email"
+                            placeholder="Search by email, role or site"
+                            autoComplete="username"
+                            InputProps={{
+                              ...params.InputProps,
+                              startAdornment: (
+                                <InputAdornment position="start">
+                                  <SearchIcon fontSize="small" />
+                                </InputAdornment>
+                              ),
+                            }}
+                          />
+                        )}
+                        noOptionsText="No demo user matches. Type a full work email to sign in."
+                        sx={{ mb: 2, "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
+                      />
+
+                      {selectedUser && (
+                        <Box
+                          sx={{
+                            mb: 3,
+                            p: 1.5,
+                            borderRadius: 2,
+                            bgcolor: alpha(theme.palette.primary.main, 0.05),
+                            border: "1px solid",
+                            borderColor: alpha(theme.palette.primary.main, 0.12),
+                          }}
+                        >
+                          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                            <Chip
+                              size="small"
+                              label={selectedUser.role}
+                              sx={{
+                                bgcolor: alpha(theme.palette.primary.main, 0.12),
+                                color: theme.palette.primary.main,
+                                fontWeight: 600,
+                              }}
+                            />
+                            <Typography variant="caption" color="text.secondary">
+                              {selectedUser.scope}
+                            </Typography>
+                          </Stack>
+                          <Typography variant="body2" color="text.secondary">
+                            {selectedUser.note}
+                          </Typography>
+                        </Box>
+                      )}
+
+                      <Button
+                        type="submit"
+                        variant="contained"
+                        fullWidth
+                        size="large"
+                        disabled={loading || !typedEmail}
+                        startIcon={
+                          loading ? (
+                            <CircularProgress size={16} sx={{ color: "inherit" }} />
+                          ) : (
+                            <LoginOutlinedIcon />
+                          )
+                        }
+                        sx={{
+                          borderRadius: 2,
+                          py: 1.1,
+                          textTransform: "none",
+                          fontWeight: 600,
+                          fontSize: 15,
+                          boxShadow: "none",
+                          "&:hover": { boxShadow: "0 8px 20px -8px rgba(15, 61, 99, 0.5)" },
+                        }}
+                      >
+                        {loading ? "Signing in..." : "Sign in"}
+                      </Button>
+                    </Box>
+                  </>
+                )}
               </CardContent>
             </Card>
           </Box>
@@ -1080,8 +1067,7 @@ export function LoginPage() {
             </Typography>
           </Stack>
           <Typography sx={{ fontSize: 11.5, color: "text.secondary", maxWidth: 420 }}>
-            Local/dev environment — real SSO lands in a later sprint. The contact form above is
-            illustrative and doesn't send anywhere yet.
+            The contact form above is illustrative and doesn't send anywhere yet.
           </Typography>
         </Stack>
       </Box>
