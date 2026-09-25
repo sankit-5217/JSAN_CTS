@@ -325,3 +325,134 @@ record the reason in the change ticket:
 ```sql
 UPDATE users SET idp_issuer = NULL WHERE email = 'person@example.com';
 ```
+
+## Production Keycloak
+
+**When to use this**: standing up (or auditing) the production identity
+provider when JSAN runs its own Keycloak instead of pointing OpsDesk at an
+existing enterprise IdP (Entra ID/Okta — if JSAN already has one, prefer
+it: "Connecting an IdP" above, no Keycloak to operate).
+
+Keycloak is production-grade; what is **not** is the local dev setup
+(`start-dev`, the built-in H2 database, plain HTTP, `admin`/`admin`, and
+`infra/keycloak/opsdesk-realm.json` with its test users and `change-me`
+secret). Never import that dev realm into production.
+
+**1. Database.** A dedicated PostgreSQL database for Keycloak (not the
+OpsDesk database), with its own user and backups:
+
+```sql
+CREATE USER keycloak WITH PASSWORD '<from secret manager>';
+CREATE DATABASE keycloak OWNER keycloak;
+```
+
+**2. Configuration** (`conf/keycloak.conf`, or the same keys as `KC_*`
+environment variables in a container). Secrets come from the secret
+manager, never this file in git:
+
+```properties
+db=postgres
+db-url=jdbc:postgresql://<db-host>:5432/keycloak
+db-username=keycloak
+# db-password -> KC_DB_PASSWORD from the secret manager
+hostname=https://sso.<jsan-domain>
+# TLS terminated by Keycloak itself...
+https-certificate-file=/etc/keycloak/tls/fullchain.pem
+https-certificate-key-file=/etc/keycloak/tls/privkey.pem
+# ...or by a reverse proxy in front of it (then drop the two lines above):
+# proxy-headers=xforwarded
+# http-enabled=true
+health-enabled=true
+metrics-enabled=true
+```
+
+**3. Build and start in production mode** (never `start-dev`):
+
+```bash
+bin/kc.sh build --db=postgres --health-enabled=true --metrics-enabled=true
+bin/kc.sh start --optimized
+```
+
+Health and metrics are served on the management port (9000): `/health/ready`,
+`/metrics`. Point monitoring at them; keep port 9000 internal.
+
+**4. Admin account.** Start the first time with
+`KC_BOOTSTRAP_ADMIN_USERNAME`/`KC_BOOTSTRAP_ADMIN_PASSWORD` set to a
+one-time strong value, sign in to `https://sso.<jsan-domain>/admin`, create a
+permanent named admin in the `master` realm with OTP configured, then
+delete the temporary bootstrap admin and remove those two variables. Don't
+expose `/admin` to the Internet — block it at the reverse proxy or firewall
+so only the ops network reaches it.
+
+**5. Realm.** Import `infra/keycloak/opsdesk-realm.production.json`. It has
+no users and reads its secret and addresses from the environment when
+imported:
+
+```bash
+export OPSDESK_OIDC_CLIENT_SECRET="$(openssl rand -base64 48)"   # store it in the secret manager
+export OPSDESK_API_URL=https://opsdesk.<jsan-domain>             # the API's public origin
+export OPSDESK_WEB_URL=https://opsdesk.<jsan-domain>             # the web app's origin
+bin/kc.sh import --file opsdesk-realm.production.json
+```
+
+What it sets up: HTTPS required everywhere, no self-registration,
+brute-force lockout (5 failures, growing to 15 min), a 12-character
+password policy with history, **OTP (MFA) required on every new user's first
+sign-in**, 30-minute idle / 12-hour max sessions, login and admin event
+logging (90 days), and a confidential `opsdesk-web` client with PKCE and
+exactly one redirect URI. Password reset by email is off until SMTP is
+configured (Realm settings → Email), then turn on "Forgot password".
+
+**6. OpsDesk API settings** (production environment, from the secret
+manager):
+
+```bash
+NODE_ENV=production
+JWT_SECRET=<openssl rand -base64 48>
+OIDC_ENABLED=true
+OIDC_ISSUER_URL=https://sso.<jsan-domain>/realms/opsdesk
+OIDC_CLIENT_ID=opsdesk-web
+OIDC_CLIENT_SECRET=<the OPSDESK_OIDC_CLIENT_SECRET above>
+OIDC_REDIRECT_URI=https://opsdesk.<jsan-domain>/api/v1/auth/oidc/callback
+WEB_APP_URL=https://opsdesk.<jsan-domain>
+```
+
+The API **refuses to start** in production if `JWT_SECRET` is missing, a
+known placeholder or under 32 characters, if the client secret is the dev
+`change-me`, or if any of the three URLs isn't `https://` (see
+`apps/api/src/modules/auth/production-auth-config.ts`). The errors are
+printed at startup.
+
+**7. Onboarding a person**: create them in Keycloak (Users → Add user,
+email = username, "Email verified" on, set a temporary password) **and** in
+OpsDesk (Administration → Users) with the same email. Their first sign-in
+forces a password change and OTP setup, then links their OpsDesk account.
+Offboarding: disable them in Keycloak **and** deactivate them in OpsDesk
+(deactivation takes effect on the next request; Keycloak alone only stops
+new logins).
+
+**Verify** after every deploy:
+
+```bash
+# dev-login must be off -> 403
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://opsdesk.<jsan-domain>/api/v1/auth/dev-login \
+  -H 'content-type: application/json' -d '{"email":"admin@example.com"}'
+# SSO advertised -> "sso":{"enabled":true...}, "devLogin":false
+curl -s https://opsdesk.<jsan-domain>/api/v1/auth/providers
+# Keycloak ready
+curl -s https://sso.<jsan-domain>:9000/health/ready
+```
+
+Then sign in through the web app with a test account and confirm a
+`USER_SSO_LOGIN` audit event.
+
+**Backups and upgrades**: back up the Keycloak database with the same
+`pg_dump` procedure as "Database restore" (it holds users, OTP secrets and
+sessions). Apply Keycloak security releases promptly: stop, back up the
+database, replace the distribution, `kc.sh build`, `kc.sh start --optimized`
+(schema migrates on start). Keep one major version at a time.
+
+**Switching issuers** (e.g. dev Keycloak → production Keycloak, or Keycloak
+→ Entra): users already linked to the old issuer get `identity_mismatch`.
+Clear their link (see "Unlinking a user") so their next sign-in re-links to
+the new IdP.

@@ -6,8 +6,12 @@
  *     e2e run can TRUNCATE freely without touching `public`. Override the
  *     schema with E2E_SCHEMA; override the whole URL with E2E_DATABASE_URL.
  *  2. NODE_ENV=test — not "production", so POST /auth/dev-login stays enabled.
+ *  3. SSO off, whatever a developer's local apps/api/.env says — the SSO
+ *     specs assert the disabled behaviour and must not reach a real IdP.
+ *     (Real env vars take precedence over .env in @nestjs/config.)
  */
 process.env.NODE_ENV = process.env.NODE_ENV || "test";
+process.env.OIDC_ENABLED = "false";
 
 if (process.env.E2E_DATABASE_URL) {
   process.env.DATABASE_URL = process.env.E2E_DATABASE_URL;

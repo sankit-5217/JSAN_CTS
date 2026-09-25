@@ -1,12 +1,26 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
-import { ValidationPipe } from "@nestjs/common";
+import { Logger, ValidationPipe } from "@nestjs/common";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 import { correlationIdMiddleware } from "./common/middleware/correlation-id.middleware";
+import { findProductionAuthConfigProblems } from "./modules/auth/production-auth-config";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: true });
+
+  // After create(): ConfigModule has loaded .env into process.env by now.
+  if (process.env.NODE_ENV === "production") {
+    const logger = new Logger("AuthConfig");
+    const { errors, warnings } = findProductionAuthConfigProblems(process.env);
+    warnings.forEach((w) => logger.warn(w));
+    if (errors.length > 0) {
+      errors.forEach((e) => logger.error(e));
+      logger.error("Refusing to start with an unsafe production auth configuration.");
+      await app.close();
+      process.exit(1);
+    }
+  }
 
   app.use(correlationIdMiddleware);
   app.setGlobalPrefix("api/v1");
