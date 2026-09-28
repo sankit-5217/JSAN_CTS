@@ -192,7 +192,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
             component="img"
             src="/jsan-logo-white.png"
             alt="JSAN"
-            sx={{ height: 30, width: "auto", display: "block" }}
+            sx={{ height: 30, width: 100, display: "block" }}
           />
           <Typography
             sx={{
@@ -219,6 +219,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
               subheader={
                 <ListSubheader
                   component="div"
+                  disableSticky
                   sx={{
                     bgcolor: "transparent",
                     color: SIDEBAR_TEXT_MUTED,
