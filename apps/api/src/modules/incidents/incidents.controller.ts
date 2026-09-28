@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -20,6 +23,7 @@ import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { CreateIncidentAsCustomerDto } from "./dto/create-incident-as-customer.dto";
 import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
@@ -38,6 +42,21 @@ export const INCIDENT_WRITE_ROLES = [
   UserRole.SERVICE_DESK_NOC,
 ] as const;
 
+// Comments are one of two writes a customer gets: replying to Service Desk
+// on their own ticket. Every other write (create, update, transition) stays
+// on INCIDENT_WRITE_ROLES only — this constant is deliberately scoped to
+// just the comment route, not merged into the list above.
+const INCIDENT_COMMENT_ROLES = [...INCIDENT_WRITE_ROLES, UserRole.CTS_MANAGER_VIEWER] as const;
+
+// The second customer write: attaching evidence (a photo of a fault light,
+// a screenshot) to their own report. Upload only — deleting an attachment
+// stays internal-only (INCIDENT_WRITE_ROLES), same reasoning as comments
+// never letting the customer mark something internal.
+const INCIDENT_ATTACHMENT_UPLOAD_ROLES = [
+  ...INCIDENT_WRITE_ROLES,
+  UserRole.CTS_MANAGER_VIEWER,
+] as const;
+
 @ApiTags("incidents")
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -51,7 +70,7 @@ export class IncidentsController {
   @Get()
   async findAll(@Query() query: ListIncidentsQueryDto, @CurrentUser() user: AuthenticatedUser) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
-    return this.incidentsService.findAll(query, accessibleSiteIds);
+    return this.incidentsService.findAll(query, accessibleSiteIds, user);
   }
 
   @Get(":id")
@@ -69,6 +88,16 @@ export class IncidentsController {
     return this.incidentsService.create(dto, { actorId: user.id, correlationId });
   }
 
+  @Post("customer-report")
+  @Roles(UserRole.CTS_MANAGER_VIEWER)
+  createAsCustomer(
+    @Body() dto: CreateIncidentAsCustomerDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.incidentsService.createFromCustomer(dto, { actorId: user.id, correlationId }, user);
+  }
+
   @Patch(":id")
   @Roles(...INCIDENT_WRITE_ROLES)
   update(
@@ -78,6 +107,11 @@ export class IncidentsController {
     @CorrelationId() correlationId?: string,
   ) {
     return this.incidentsService.update(id, dto, user, { actorId: user.id, correlationId });
+  }
+
+  @Get(":id/transitions")
+  listAvailableTransitions(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.incidentsService.getAvailableTransitions(id, user);
   }
 
   @Post(":id/transition")
@@ -102,7 +136,7 @@ export class IncidentsController {
   }
 
   @Post(":id/comments")
-  @Roles(...INCIDENT_WRITE_ROLES)
+  @Roles(...INCIDENT_COMMENT_ROLES)
   createComment(
     @Param("id") id: string,
     @Body() dto: CreateIncidentCommentDto,
@@ -123,7 +157,7 @@ export class IncidentsController {
   }
 
   @Post(":id/attachments")
-  @Roles(...INCIDENT_WRITE_ROLES)
+  @Roles(...INCIDENT_ATTACHMENT_UPLOAD_ROLES)
   @ApiConsumes("multipart/form-data")
   @UseInterceptors(FileInterceptor("file"))
   uploadAttachment(
@@ -152,5 +186,22 @@ export class IncidentsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.incidentsService.getAttachmentDownloadUrl(id, attachmentId, user);
+  }
+
+  @Delete(":id/attachments/:attachmentId")
+  @Roles(...INCIDENT_WRITE_ROLES)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteAttachment(
+    @Param("id") id: string,
+    @Param("attachmentId") attachmentId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    await this.incidentsService.deleteAttachment(
+      id,
+      attachmentId,
+      { actorId: user.id, correlationId },
+      user,
+    );
   }
 }

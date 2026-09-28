@@ -31,6 +31,12 @@ export class UpdateChangeDto {
   @IsOptional()
   @IsString()
   @Length(3, 4000)
+  validationPlan?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @Length(3, 4000)
   rollbackPlan?: string;
 
   @ApiPropertyOptional()

@@ -39,6 +39,7 @@ function createDto(overrides: Record<string, unknown> = {}) {
     changeType: "NORMAL" as const,
     reason: "Replace failed PSU",
     implementationPlan: "swap the unit",
+    validationPlan: "confirm redundancy LED green",
     rollbackPlan: "run on PSU1",
     risk: "low",
     windowStart: FAR_FUTURE_START,
@@ -53,6 +54,7 @@ function storedChange(overrides: Record<string, unknown> = {}) {
     changeType: "NORMAL",
     reason: "r",
     implementationPlan: "i",
+    validationPlan: "v",
     rollbackPlan: "b",
     risk: "low",
     windowStart: new Date(FAR_FUTURE_START),
@@ -115,6 +117,14 @@ describe("ChangesService", () => {
       expect(prisma.change.create.mock.calls[0][0].data.affectedCiIds).toEqual([
         "c1a11111-1111-1111-1111-111111111111",
       ]);
+    });
+
+    it("persists the validation plan (spec §10.6)", async () => {
+      prisma.change.create.mockResolvedValue(storedChange());
+      await service.create(createDto({ validationPlan: "smoke-test the ingest path" }), ACTOR);
+      expect(prisma.change.create.mock.calls[0][0].data.validationPlan).toBe(
+        "smoke-test the ingest path",
+      );
     });
   });
 
@@ -198,6 +208,28 @@ describe("ChangesService", () => {
       await expect(
         service.update("chg-1", { implementationPlan: "new plan" }, ACTOR),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it("treats a validationPlan edit as a plan edit — blocked once work is in progress", async () => {
+      prisma.change.findUnique.mockResolvedValue(
+        storedChange({
+          approverId: "user-3",
+          windowStart: new Date("2020-01-01T00:00:00.000Z"),
+          windowEnd: new Date("2099-01-01T00:00:00.000Z"),
+        }),
+      );
+      await expect(
+        service.update("chg-1", { validationPlan: "add a POST check" }, ACTOR),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it("persists a validationPlan edit before work starts", async () => {
+      prisma.change.findUnique.mockResolvedValue(storedChange());
+      prisma.change.update.mockResolvedValue(storedChange({ validationPlan: "add a POST check" }));
+      await service.update("chg-1", { validationPlan: "add a POST check" }, ACTOR);
+      expect(prisma.change.update.mock.calls[0][0].data).toEqual({
+        validationPlan: "add a POST check",
+      });
     });
 
     it("rejects an outcome recorded before the window begins", async () => {

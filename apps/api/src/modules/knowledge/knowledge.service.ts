@@ -35,6 +35,9 @@ export class KnowledgeService {
           title: dto.title,
           body: dto.body,
           ...(dto.ownerId !== undefined ? { ownerId: dto.ownerId } : {}),
+          ...(dto.siteId !== undefined ? { siteId: dto.siteId } : {}),
+          ...(dto.incidentCategory !== undefined ? { incidentCategory: dto.incidentCategory } : {}),
+          ...(dto.ciType !== undefined ? { ciType: dto.ciType } : {}),
         },
       });
       await this.audit.record(
@@ -64,6 +67,15 @@ export class KnowledgeService {
     }
     if (query.ownerId) {
       and.push({ ownerId: query.ownerId });
+    }
+    if (query.siteId) {
+      and.push({ siteId: query.siteId });
+    }
+    if (query.incidentCategory) {
+      and.push({ incidentCategory: query.incidentCategory });
+    }
+    if (query.ciType) {
+      and.push({ ciType: query.ciType });
     }
     if (query.q) {
       and.push({
@@ -105,6 +117,9 @@ export class KnowledgeService {
       ...(dto.title !== undefined ? { title: dto.title } : {}),
       ...(dto.body !== undefined ? { body: dto.body } : {}),
       ...(dto.ownerId !== undefined ? { ownerId: dto.ownerId } : {}),
+      ...(dto.siteId !== undefined ? { siteId: dto.siteId || null } : {}),
+      ...(dto.incidentCategory !== undefined ? { incidentCategory: dto.incidentCategory } : {}),
+      ...(dto.ciType !== undefined ? { ciType: dto.ciType } : {}),
     };
 
     if (contentChanged) {

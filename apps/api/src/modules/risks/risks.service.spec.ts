@@ -40,6 +40,7 @@ function storedRisk(overrides: Record<string, unknown> = {}) {
     impact: 4,
     score: 12,
     mitigation: null as string | null,
+    evidence: null as string | null,
     ownerId: null,
     dueDate: null as Date | null,
     status: "OPEN",
@@ -79,6 +80,21 @@ describe("RisksService", () => {
       );
       expect(result.severity).toBe("HIGH");
       expect(result.overdue).toBe(false);
+    });
+
+    it("persists evidence when given (spec §10.15)", async () => {
+      prisma.risk.create.mockResolvedValue(storedRisk());
+      await service.create(
+        { description: "d", likelihood: 3, impact: 4, evidence: "power audit 2026-08, p.4" },
+        ACTOR,
+      );
+      expect(prisma.risk.create.mock.calls[0][0].data.evidence).toBe("power audit 2026-08, p.4");
+    });
+
+    it("omits evidence from the write when not given", async () => {
+      prisma.risk.create.mockResolvedValue(storedRisk());
+      await service.create({ description: "d", likelihood: 3, impact: 4 }, ACTOR);
+      expect("evidence" in prisma.risk.create.mock.calls[0][0].data).toBe(false);
     });
   });
 
@@ -142,6 +158,13 @@ describe("RisksService", () => {
       prisma.risk.update.mockResolvedValue(storedRisk());
       await service.update("risk-1", { description: "clearer wording of the exposure" }, ACTOR);
       expect(prisma.risk.update.mock.calls[0][0].data.score).toBeUndefined();
+    });
+
+    it("persists an evidence edit", async () => {
+      prisma.risk.findUnique.mockResolvedValue(storedRisk());
+      prisma.risk.update.mockResolvedValue(storedRisk({ evidence: "see BCP drill report" }));
+      await service.update("risk-1", { evidence: "see BCP drill report" }, ACTOR);
+      expect(prisma.risk.update.mock.calls[0][0].data.evidence).toBe("see BCP drill report");
     });
   });
 

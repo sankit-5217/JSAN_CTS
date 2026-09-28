@@ -80,6 +80,7 @@ export function RisksPage() {
     likelihood: "3",
     impact: "3",
     mitigation: "",
+    evidence: "",
     ownerId: "",
     siteId: "",
     dueDate: "",
@@ -95,6 +96,7 @@ export function RisksPage() {
         likelihood: Number(form.likelihood),
         impact: Number(form.impact),
         mitigation: form.mitigation || undefined,
+        evidence: form.evidence || undefined,
         ownerId: form.ownerId || undefined,
         siteId: form.siteId || undefined,
         dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : undefined,
@@ -103,6 +105,7 @@ export function RisksPage() {
         ...f,
         description: "",
         mitigation: "",
+        evidence: "",
         ownerId: "",
         siteId: "",
         dueDate: "",
@@ -169,6 +172,13 @@ export function RisksPage() {
                 label="Mitigation (optional)"
                 value={form.mitigation}
                 onChange={(e) => set("mitigation", e.target.value)}
+              />
+              <TextField
+                size="small"
+                multiline
+                label="Evidence (optional)"
+                value={form.evidence}
+                onChange={(e) => set("evidence", e.target.value)}
               />
               <TextField
                 size="small"

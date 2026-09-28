@@ -27,6 +27,14 @@ export class CreateRiskDto {
   @Length(3, 4000)
   mitigation?: string;
 
+  @ApiPropertyOptional({
+    description: "Evidence backing the assessment — link, doc reference or note.",
+  })
+  @IsOptional()
+  @IsString()
+  @Length(3, 4000)
+  evidence?: string;
+
   @ApiPropertyOptional({ format: "uuid", description: "Risk owner (accountable person)." })
   @IsOptional()
   @IsUUID()

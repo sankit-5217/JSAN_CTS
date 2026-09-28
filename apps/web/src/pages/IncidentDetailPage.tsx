@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link as RouterLink, useParams } from "react-router-dom";
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Card,
@@ -11,34 +12,39 @@ import {
   Divider,
   FormControlLabel,
   Grid,
+  Link,
   MenuItem,
   Paper,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
-import { apiGet, apiPatch, apiPost, apiUpload } from "../api/client";
+import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "../api/client";
 
-// Literal string unions mirroring the Prisma enums (same CJS/ESM-interop
-// workaround as IncidentsPage.tsx/CisPage.tsx — see IncidentsPage's comment).
-const INCIDENT_STATUSES = [
-  "NEW",
-  "ASSIGNED",
-  "ACKNOWLEDGED",
-  "IN_PROGRESS",
-  "PENDING_VENDOR",
-  "PENDING_CUSTOMER",
-  "RESOLVED",
-  "CLOSED",
-  "REOPENED",
-  "CANCELLED",
-];
 const WORKLOG_ACTIVITY_TYPES = ["REMOTE_WORK", "ONSITE", "TRAVEL", "VENDOR_CALL"];
+const IMPACT_URGENCY_VALUES = ["HIGH", "MEDIUM", "LOW"];
+const PRIORITY_VALUES = ["P1", "P2", "P3", "P4"];
+
+// A field name as it appears in TransitionRule.requiredFields on the
+// backend (apps/api/src/modules/incidents/incident-transitions.ts).
+type TransitionField = "reason" | "resolutionCategory" | "rootCauseSummary";
+
+interface AvailableTransition {
+  toStatus: string;
+  requiredFields: TransitionField[];
+  allowed: boolean;
+  blockedReason?: string;
+  /** E.g. NEW -> ASSIGNED needs an owner resolved — not a requiredFields
+   * entry (that's reason/resolutionCategory/rootCauseSummary only), so the
+   * backend surfaces it here instead. */
+  hint?: string;
+}
 
 interface Incident {
   id: string;
   incidentNo: string;
   siteId: string;
+  ciId: string | null;
   status: string;
   priority: string;
   category: string;
@@ -100,6 +106,32 @@ interface Attachment {
   createdAt: string;
 }
 
+interface CiOption {
+  id: string;
+  ciCode: string;
+  name: string;
+}
+
+interface EngineerOption {
+  id: string;
+  displayName: string;
+  email: string;
+}
+
+interface GroupOption {
+  id: string;
+  name: string;
+}
+
+interface VendorCase {
+  id: string;
+  vendorCaseNo: string;
+  vendorId: string;
+  dispatchStatus: string | null;
+  rmaRequired: boolean;
+  closedAt: string | null;
+}
+
 const PRIORITY_COLOR: Record<string, "error" | "warning" | "info" | "default"> = {
   P1: "error",
   P2: "warning",
@@ -129,12 +161,89 @@ function slaCountdown(
 }
 
 /**
+ * Assign-to-engineer picker, used in both the edit panel and the transition
+ * panel — each instance keeps its own query/options so picking a different
+ * engineer while assigning doesn't affect what the edit panel shows. Scoped
+ * to `siteId` server-side (GET /users?role=SITE_ENGINEER&siteId=...), same
+ * "no q at all when empty" pattern as the CI picker so it lists the site's
+ * whole engineer roster by default instead of requiring a name first.
+ */
+function EngineerPicker({
+  siteId,
+  value,
+  onChange,
+  label,
+}: {
+  siteId: string;
+  value: EngineerOption | null;
+  onChange: (value: EngineerOption | null) => void;
+  label: string;
+}) {
+  const [query, setQuery] = useState("");
+  const [options, setOptions] = useState<EngineerOption[]>([]);
+
+  useEffect(() => {
+    const qParam = query ? `&q=${encodeURIComponent(query)}` : "";
+    apiGet<EngineerOption[]>(`/users?role=SITE_ENGINEER&siteId=${siteId}${qParam}`)
+      .then(setOptions)
+      .catch(() => undefined);
+  }, [query, siteId]);
+
+  return (
+    <Autocomplete
+      options={options}
+      getOptionLabel={(o) => `${o.displayName} (${o.email})`}
+      isOptionEqualToValue={(o, v) => o.id === v.id}
+      value={value}
+      onChange={(_, v) => onChange(v)}
+      inputValue={query}
+      onInputChange={(_, v) => setQuery(v)}
+      openOnFocus
+      noOptionsText="No engineers assigned to this site"
+      renderInput={(params) => <TextField {...params} label={label} size="small" />}
+    />
+  );
+}
+
+/** Support groups are a short, site-independent list (GET /support-groups
+ * has no query params at all) — client-side filtering is enough, no search
+ * round-trip needed. `options` is fetched once at the page level and shared
+ * by every instance instead of each picker re-fetching the same list. */
+function GroupPicker({
+  options,
+  value,
+  onChange,
+  label,
+}: {
+  options: GroupOption[];
+  value: GroupOption | null;
+  onChange: (value: GroupOption | null) => void;
+  label: string;
+}) {
+  return (
+    <Autocomplete
+      options={options}
+      getOptionLabel={(o) => o.name}
+      isOptionEqualToValue={(o, v) => o.id === v.id}
+      value={value}
+      onChange={(_, v) => onChange(v)}
+      openOnFocus
+      noOptionsText="No support groups yet"
+      renderInput={(params) => <TextField {...params} label={label} size="small" />}
+    />
+  );
+}
+
+/**
  * Incident workspace (frontend-depth plan, Steps 3-4): header, SLA
  * countdown snapshot, status transition, comments, worklogs (add +
  * correct), attachments (upload + download), and a merged timeline.
  * Every write submits straight to its existing, already-authorized/
- * audited backend endpoint and refetches on success — no client-side
- * transition-rule mirroring (plan Decision 2) or optimistic local state.
+ * audited backend endpoint and refetches on success — no optimistic
+ * local state. The transition dropdown doesn't mirror the rule table
+ * client-side either (plan Decision 2) — it renders whatever
+ * GET /incidents/:id/transitions computes from the one rule table the
+ * transition endpoint itself enforces.
  */
 export function IncidentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -144,8 +253,19 @@ export function IncidentDetailPage() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [worklogs, setWorklogs] = useState<Worklog[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [availableTransitions, setAvailableTransitions] = useState<AvailableTransition[]>([]);
+  const [vendorCases, setVendorCases] = useState<VendorCase[]>([]);
+  const [supportGroups, setSupportGroups] = useState<GroupOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Fetched once, not per-incident — the whole app shares one support-group
+  // register (GET /support-groups isn't site-scoped, see support-groups.controller.ts).
+  useEffect(() => {
+    apiGet<GroupOption[]>("/support-groups")
+      .then(setSupportGroups)
+      .catch(() => undefined);
+  }, []);
 
   const refetch = useCallback(() => {
     if (!id) return;
@@ -157,14 +277,18 @@ export function IncidentDetailPage() {
       apiGet<Comment[]>(`/incidents/${id}/comments`),
       apiGet<Worklog[]>(`/incidents/${id}/worklogs`),
       apiGet<Attachment[]>(`/incidents/${id}/attachments`),
+      apiGet<AvailableTransition[]>(`/incidents/${id}/transitions`),
+      apiGet<VendorCase[]>(`/vendor-cases?linkedIncidentId=${id}`),
     ])
-      .then(([inc, slaState, evts, cmts, wls, atts]) => {
+      .then(([inc, slaState, evts, cmts, wls, atts, transitions, vCases]) => {
         setIncident(inc);
         setSla(slaState);
         setEvents(evts);
         setComments(cmts);
         setWorklogs(wls);
         setAttachments(atts);
+        setAvailableTransitions(transitions);
+        setVendorCases(vCases);
       })
       .catch((err: Error) => setError(err.message));
   }, [id]);
@@ -173,13 +297,109 @@ export function IncidentDetailPage() {
     refetch();
   }, [refetch]);
 
+  // --- Edit incident form --------------------------------------------------
+  // Seeded from the incident once per incident id, not on every refetch, so
+  // a mid-edit refetch (e.g. someone else posts a comment) doesn't clobber
+  // what's being typed.
+  const [editShortDescription, setEditShortDescription] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editImpact, setEditImpact] = useState("");
+  const [editUrgency, setEditUrgency] = useState("");
+  const [editPriority, setEditPriority] = useState("");
+  const [editPriorityChangeReason, setEditPriorityChangeReason] = useState("");
+  const [editOwnerUser, setEditOwnerUser] = useState<EngineerOption | null>(null);
+  const [editOwnerGroup, setEditOwnerGroup] = useState<GroupOption | null>(null);
+  const [ciQuery, setCiQuery] = useState("");
+  const [ciOptions, setCiOptions] = useState<CiOption[]>([]);
+  const [selectedCi, setSelectedCi] = useState<CiOption | null>(null);
+
+  useEffect(() => {
+    if (!incident) return;
+    setEditShortDescription(incident.shortDescription);
+    setEditCategory(incident.category);
+    setEditImpact(incident.impact);
+    setEditUrgency(incident.urgency);
+    setEditPriority(incident.priority);
+    setEditPriorityChangeReason("");
+    // The incident only carries owner/CI ids, not readable names — resolve
+    // each to show a name instead of a raw UUID. Not `refetch`'s problem to
+    // fold in: this only needs to happen once per incident, same as
+    // everything else in this effect.
+    if (incident.ownerUserId) {
+      apiGet<EngineerOption>(`/users/${incident.ownerUserId}`)
+        .then(setEditOwnerUser)
+        .catch(() => setEditOwnerUser(null));
+    } else {
+      setEditOwnerUser(null);
+    }
+    setEditOwnerGroup(
+      incident.ownerGroupId
+        ? (supportGroups.find((g) => g.id === incident.ownerGroupId) ?? null)
+        : null,
+    );
+    if (incident.ciId) {
+      apiGet<CiOption>(`/cis/${incident.ciId}`)
+        .then(setSelectedCi)
+        .catch(() => setSelectedCi(null));
+    } else {
+      setSelectedCi(null);
+    }
+    setCiQuery("");
+    // Only re-seed when a different incident loads, not on every refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incident?.id, supportGroups]);
+
+  useEffect(() => {
+    if (!incident) {
+      setCiOptions([]);
+      return;
+    }
+    // No `q` filter at all when the field's empty — the backend already
+    // treats that as "no filter" (cmdb.service.ts's findAll), so this
+    // lists the site's whole CMDB inventory by default rather than
+    // requiring the engineer to already know a code before anything shows.
+    const qParam = ciQuery ? `&q=${encodeURIComponent(ciQuery)}` : "";
+    apiGet<{ items: CiOption[] }>(`/cis?siteId=${incident.siteId}${qParam}`)
+      .then((res) => setCiOptions(res.items))
+      .catch(() => undefined);
+  }, [ciQuery, incident]);
+
+  const priorityChanged = incident !== null && editPriority !== incident.priority;
+
+  const submitEdit = async () => {
+    if (!id) return;
+    setActionError(null);
+    try {
+      await apiPatch(`/incidents/${id}`, {
+        shortDescription: editShortDescription,
+        category: editCategory,
+        impact: editImpact,
+        urgency: editUrgency,
+        // The backend requires priorityChangeReason whenever `priority` is
+        // present in the body at all (spec §16), not just when it differs
+        // from the current value — so only include the key when it's
+        // actually being changed, same as priorityChangeReason itself.
+        priority: priorityChanged ? editPriority : undefined,
+        priorityChangeReason: priorityChanged ? editPriorityChangeReason : undefined,
+        ciId: selectedCi?.id,
+        ownerUserId: editOwnerUser?.id,
+        ownerGroupId: editOwnerGroup?.id,
+      });
+      refetch();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   // --- Transition form ---------------------------------------------------
   const [toStatus, setToStatus] = useState("");
   const [reason, setReason] = useState("");
   const [resolutionCategory, setResolutionCategory] = useState("");
   const [rootCauseSummary, setRootCauseSummary] = useState("");
-  const [ownerUserId, setOwnerUserId] = useState("");
-  const [ownerGroupId, setOwnerGroupId] = useState("");
+  const [transitionOwnerUser, setTransitionOwnerUser] = useState<EngineerOption | null>(null);
+  const [transitionOwnerGroup, setTransitionOwnerGroup] = useState<GroupOption | null>(null);
+  const selectedTransition = availableTransitions.find((t) => t.toStatus === toStatus);
+  const requiredFields = selectedTransition?.requiredFields ?? [];
 
   const submitTransition = async () => {
     if (!id || !toStatus) return;
@@ -190,15 +410,15 @@ export function IncidentDetailPage() {
         reason: reason || undefined,
         resolutionCategory: resolutionCategory || undefined,
         rootCauseSummary: rootCauseSummary || undefined,
-        ownerUserId: ownerUserId || undefined,
-        ownerGroupId: ownerGroupId || undefined,
+        ownerUserId: transitionOwnerUser?.id,
+        ownerGroupId: transitionOwnerGroup?.id,
       });
       setToStatus("");
       setReason("");
       setResolutionCategory("");
       setRootCauseSummary("");
-      setOwnerUserId("");
-      setOwnerGroupId("");
+      setTransitionOwnerUser(null);
+      setTransitionOwnerGroup(null);
       refetch();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -291,6 +511,18 @@ export function IncidentDetailPage() {
     }
   };
 
+  const removeAttachment = async (attachmentId: string) => {
+    if (!id) return;
+    if (!window.confirm("Remove this attachment? It won't be downloadable anymore.")) return;
+    setActionError(null);
+    try {
+      await apiDelete(`/incidents/${id}/attachments/${attachmentId}`);
+      refetch();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   if (error) {
     return (
       <Alert severity="error">
@@ -318,8 +550,9 @@ export function IncidentDetailPage() {
             {incident.category} · impact {incident.impact} · urgency {incident.urgency}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Owner user: {incident.ownerUserId ?? "unassigned"} · Owner group:{" "}
-            {incident.ownerGroupId ?? "unassigned"}
+            Owner: {editOwnerUser?.displayName ?? (incident.ownerUserId ? "…" : "unassigned")}
+            {" · "}
+            Group: {editOwnerGroup?.name ?? (incident.ownerGroupId ? "…" : "unassigned")}
           </Typography>
           {sla && (
             <Typography variant="body2" sx={{ mt: 1 }}>
@@ -339,61 +572,232 @@ export function IncidentDetailPage() {
         </Alert>
       )}
 
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Edit incident
+        </Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={6}>
+            <TextField
+              label="Short description"
+              size="small"
+              fullWidth
+              value={editShortDescription}
+              onChange={(e) => setEditShortDescription(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <TextField
+              label="Category"
+              size="small"
+              fullWidth
+              value={editCategory}
+              onChange={(e) => setEditCategory(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <TextField
+              select
+              label="Impact"
+              size="small"
+              fullWidth
+              value={editImpact}
+              onChange={(e) => setEditImpact(e.target.value)}
+            >
+              {IMPACT_URGENCY_VALUES.map((v) => (
+                <MenuItem key={v} value={v}>
+                  {v}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <TextField
+              select
+              label="Urgency"
+              size="small"
+              fullWidth
+              value={editUrgency}
+              onChange={(e) => setEditUrgency(e.target.value)}
+            >
+              {IMPACT_URGENCY_VALUES.map((v) => (
+                <MenuItem key={v} value={v}>
+                  {v}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <TextField
+              select
+              label="Priority"
+              size="small"
+              fullWidth
+              value={editPriority}
+              onChange={(e) => setEditPriority(e.target.value)}
+            >
+              {PRIORITY_VALUES.map((v) => (
+                <MenuItem key={v} value={v}>
+                  {v}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+          {priorityChanged && (
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="Reason for priority change"
+                size="small"
+                fullWidth
+                required
+                value={editPriorityChangeReason}
+                onChange={(e) => setEditPriorityChangeReason(e.target.value)}
+              />
+            </Grid>
+          )}
+          <Grid item xs={12}>
+            <Autocomplete
+              options={ciOptions}
+              getOptionLabel={(o) => `${o.ciCode} — ${o.name}`}
+              isOptionEqualToValue={(o, v) => o.id === v.id}
+              value={selectedCi}
+              onChange={(_, value) => setSelectedCi(value)}
+              inputValue={ciQuery}
+              onInputChange={(_, value) => setCiQuery(value)}
+              openOnFocus
+              noOptionsText="No CIs found at this site"
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Affected CI (search by code or name, or click to browse)"
+                  size="small"
+                  helperText="Which server/rack/PDU this ticket is actually about — links it into the CMDB for alert correlation and history."
+                />
+              )}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <EngineerPicker
+              siteId={incident.siteId}
+              value={editOwnerUser}
+              onChange={setEditOwnerUser}
+              label="Owner (engineer)"
+            />
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <GroupPicker
+              options={supportGroups}
+              value={editOwnerGroup}
+              onChange={setEditOwnerGroup}
+              label="Owner group"
+            />
+          </Grid>
+          <Grid item xs={12}>
+            <Button
+              variant="contained"
+              disabled={
+                !editShortDescription ||
+                !editCategory ||
+                (priorityChanged && !editPriorityChangeReason)
+              }
+              onClick={submitEdit}
+            >
+              Save changes
+            </Button>
+          </Grid>
+        </Grid>
+      </Paper>
+
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 2, mb: 3 }}>
             <Typography variant="h6" gutterBottom>
               Change status
             </Typography>
-            <Stack spacing={2}>
-              <TextField
-                select
-                label="New status"
-                size="small"
-                value={toStatus}
-                onChange={(e) => setToStatus(e.target.value)}
-              >
-                {INCIDENT_STATUSES.map((s) => (
-                  <MenuItem key={s} value={s}>
-                    {s}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                label="Reason"
-                size="small"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-              <TextField
-                label="Resolution category (RESOLVED only)"
-                size="small"
-                value={resolutionCategory}
-                onChange={(e) => setResolutionCategory(e.target.value)}
-              />
-              <TextField
-                label="Root cause summary (RESOLVED only)"
-                size="small"
-                multiline
-                value={rootCauseSummary}
-                onChange={(e) => setRootCauseSummary(e.target.value)}
-              />
-              <TextField
-                label="Owner user ID (UUID)"
-                size="small"
-                value={ownerUserId}
-                onChange={(e) => setOwnerUserId(e.target.value)}
-              />
-              <TextField
-                label="Owner group ID (UUID)"
-                size="small"
-                value={ownerGroupId}
-                onChange={(e) => setOwnerGroupId(e.target.value)}
-              />
-              <Button variant="contained" disabled={!toStatus} onClick={submitTransition}>
-                Submit transition
-              </Button>
-            </Stack>
+            {availableTransitions.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No status changes are available to you for this ticket right now — either its
+                current status ({incident.status}) has no further moves, or none of them are your
+                role's to make.
+              </Typography>
+            ) : (
+              <Stack spacing={2}>
+                <TextField
+                  select
+                  label="New status"
+                  size="small"
+                  value={toStatus}
+                  onChange={(e) => setToStatus(e.target.value)}
+                  helperText={
+                    selectedTransition && !selectedTransition.allowed
+                      ? selectedTransition.blockedReason
+                      : undefined
+                  }
+                  error={selectedTransition ? !selectedTransition.allowed : false}
+                >
+                  {availableTransitions.map((t) => (
+                    <MenuItem key={t.toStatus} value={t.toStatus} disabled={!t.allowed}>
+                      {t.toStatus}
+                      {!t.allowed && " (blocked)"}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                {selectedTransition?.hint && (
+                  <Alert severity="info">{selectedTransition.hint}</Alert>
+                )}
+                <TextField
+                  label="Reason"
+                  size="small"
+                  required={requiredFields.includes("reason")}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                />
+                <TextField
+                  label="Resolution category"
+                  size="small"
+                  required={requiredFields.includes("resolutionCategory")}
+                  value={resolutionCategory}
+                  onChange={(e) => setResolutionCategory(e.target.value)}
+                />
+                <TextField
+                  label="Root cause summary"
+                  size="small"
+                  multiline
+                  required={requiredFields.includes("rootCauseSummary")}
+                  value={rootCauseSummary}
+                  onChange={(e) => setRootCauseSummary(e.target.value)}
+                />
+                <EngineerPicker
+                  siteId={incident.siteId}
+                  value={transitionOwnerUser}
+                  onChange={setTransitionOwnerUser}
+                  label="Assign to engineer"
+                />
+                <GroupPicker
+                  options={supportGroups}
+                  value={transitionOwnerGroup}
+                  onChange={setTransitionOwnerGroup}
+                  label="Assign to group"
+                />
+                <Button
+                  variant="contained"
+                  disabled={
+                    !toStatus ||
+                    selectedTransition?.allowed === false ||
+                    requiredFields.some((f) =>
+                      f === "reason"
+                        ? !reason
+                        : f === "resolutionCategory"
+                          ? !resolutionCategory
+                          : !rootCauseSummary,
+                    )
+                  }
+                  onClick={submitTransition}
+                >
+                  Submit transition
+                </Button>
+              </Stack>
+            )}
           </Paper>
 
           <Paper sx={{ p: 2, mb: 3 }}>
@@ -454,6 +858,9 @@ export function IncidentDetailPage() {
                   <Button size="small" onClick={() => downloadAttachment(a.id)}>
                     Download
                   </Button>
+                  <Button size="small" color="error" onClick={() => removeAttachment(a.id)}>
+                    Remove
+                  </Button>
                 </Stack>
               ))}
               {attachments.length === 0 && (
@@ -474,6 +881,45 @@ export function IncidentDetailPage() {
                 }}
               />
             </Button>
+          </Paper>
+
+          <Paper sx={{ p: 2, mt: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Vendor cases
+            </Typography>
+            <Stack spacing={1}>
+              {vendorCases.map((vc) => (
+                <Stack
+                  key={vc.id}
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  divider={<Divider orientation="vertical" flexItem />}
+                >
+                  <Link component={RouterLink} to={`/vendor-cases/${vc.id}`}>
+                    {vc.vendorCaseNo}
+                  </Link>
+                  <Typography variant="body2" color="text.secondary">
+                    {vc.dispatchStatus ?? "no dispatch yet"}
+                  </Typography>
+                  {vc.rmaRequired && <Chip size="small" label="RMA" />}
+                  <Chip
+                    size="small"
+                    label={vc.closedAt ? "closed" : "open"}
+                    color={vc.closedAt ? "default" : "warning"}
+                  />
+                </Stack>
+              ))}
+              {vendorCases.length === 0 && (
+                <Typography variant="body2" color="text.secondary">
+                  No vendor cases linked to this ticket. Open one from the{" "}
+                  <Link component={RouterLink} to="/vendors">
+                    Vendors
+                  </Link>{" "}
+                  page and link this incident's ID.
+                </Typography>
+              )}
+            </Stack>
           </Paper>
         </Grid>
 

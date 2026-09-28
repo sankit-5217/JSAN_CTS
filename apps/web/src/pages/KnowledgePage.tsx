@@ -22,6 +22,18 @@ import { apiGet, apiPost } from "../api/client";
 
 const APPROVAL_STATES = ["DRAFT", "APPROVED"];
 const KNOWLEDGE_VIEWS = ["authoritative", "review-overdue"];
+// Mirrors the CiType enum in apps/api/prisma/schema.prisma.
+const CI_TYPES = [
+  "SERVER",
+  "FIREWALL",
+  "SWITCH",
+  "UPS",
+  "PDU",
+  "STORAGE",
+  "SERVICE",
+  "CIRCUIT",
+  "VM",
+];
 
 interface Article {
   id: string;
@@ -29,6 +41,9 @@ interface Article {
   version: number;
   approvalState: string;
   ownerId: string | null;
+  siteId: string | null;
+  incidentCategory: string | null;
+  ciType: string | null;
   reviewDueAt: string | null;
   authoritative: boolean;
   reviewOverdue: boolean;
@@ -48,6 +63,8 @@ export function KnowledgePage() {
   const approvalState = searchParams.get("approvalState") ?? "";
   const view = searchParams.get("view") ?? "";
   const q = searchParams.get("q") ?? "";
+  const ciType = searchParams.get("ciType") ?? "";
+  const siteId = searchParams.get("siteId") ?? "";
   const setFilter = (k: string, v: string) => {
     const next = new URLSearchParams(searchParams);
     if (v) next.set(k, v);
@@ -61,13 +78,22 @@ export function KnowledgePage() {
     if (approvalState) params.set("approvalState", approvalState);
     if (view) params.set("view", view);
     if (q) params.set("q", q);
+    if (ciType) params.set("ciType", ciType);
+    if (siteId) params.set("siteId", siteId);
     apiGet<Article[]>(`/knowledge?${params.toString()}`)
       .then(setArticles)
       .catch((err: Error) => setError(err.message));
   };
-  useEffect(load, [approvalState, view, q]);
+  useEffect(load, [approvalState, view, q, ciType, siteId]);
 
-  const [form, setForm] = useState({ title: "", body: "", ownerId: "" });
+  const [form, setForm] = useState({
+    title: "",
+    body: "",
+    ownerId: "",
+    siteId: "",
+    incidentCategory: "",
+    ciType: "",
+  });
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
@@ -78,8 +104,11 @@ export function KnowledgePage() {
         title: form.title,
         body: form.body,
         ownerId: form.ownerId || undefined,
+        siteId: form.siteId || undefined,
+        incidentCategory: form.incidentCategory || undefined,
+        ciType: form.ciType || undefined,
       });
-      setForm({ title: "", body: "", ownerId: "" });
+      setForm({ title: "", body: "", ownerId: "", siteId: "", incidentCategory: "", ciType: "" });
       load();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -130,6 +159,32 @@ export function KnowledgePage() {
                 value={form.ownerId}
                 onChange={(e) => set("ownerId", e.target.value)}
               />
+              <TextField
+                size="small"
+                label="Site id (optional — blank = global runbook)"
+                value={form.siteId}
+                onChange={(e) => set("siteId", e.target.value)}
+              />
+              <TextField
+                size="small"
+                label="Incident category (optional)"
+                value={form.incidentCategory}
+                onChange={(e) => set("incidentCategory", e.target.value)}
+              />
+              <TextField
+                select
+                size="small"
+                label="CI type (optional)"
+                value={form.ciType}
+                onChange={(e) => set("ciType", e.target.value)}
+              >
+                <MenuItem value="">Any / none</MenuItem>
+                {CI_TYPES.map((t) => (
+                  <MenuItem key={t} value={t}>
+                    {t}
+                  </MenuItem>
+                ))}
+              </TextField>
               <Button
                 variant="contained"
                 disabled={form.title.length < 3 || form.body.length < 3}
@@ -174,6 +229,28 @@ export function KnowledgePage() {
               ))}
             </TextField>
             <TextField
+              select
+              size="small"
+              label="CI type"
+              value={ciType}
+              onChange={(e) => setFilter("ciType", e.target.value)}
+              sx={{ minWidth: 140 }}
+            >
+              <MenuItem value="">Any</MenuItem>
+              {CI_TYPES.map((t) => (
+                <MenuItem key={t} value={t}>
+                  {t}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              size="small"
+              label="Site id"
+              value={siteId}
+              onChange={(e) => setFilter("siteId", e.target.value)}
+              sx={{ minWidth: 140 }}
+            />
+            <TextField
               size="small"
               label="Search title / body"
               value={q}
@@ -187,6 +264,7 @@ export function KnowledgePage() {
               <TableHead>
                 <TableRow>
                   <TableCell>Title</TableCell>
+                  <TableCell>Applies to</TableCell>
                   <TableCell>Version</TableCell>
                   <TableCell>State</TableCell>
                   <TableCell>Review due</TableCell>
@@ -199,6 +277,19 @@ export function KnowledgePage() {
                       <Link component={RouterLink} to={`/knowledge/${a.id}`}>
                         {a.title}
                       </Link>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={0.5}>
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label={a.siteId ? "site-specific" : "global"}
+                        />
+                        {a.ciType && <Chip size="small" variant="outlined" label={a.ciType} />}
+                        {a.incidentCategory && (
+                          <Chip size="small" variant="outlined" label={a.incidentCategory} />
+                        )}
+                      </Stack>
                     </TableCell>
                     <TableCell>v{a.version}</TableCell>
                     <TableCell>
@@ -220,7 +311,7 @@ export function KnowledgePage() {
                 ))}
                 {articles.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={4}>
+                    <TableCell colSpan={5}>
                       <Typography variant="body2" color="text.secondary">
                         No articles match these filters.
                       </Typography>

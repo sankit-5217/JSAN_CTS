@@ -126,6 +126,28 @@ async function main() {
     },
   });
 
+  // Client viewer: the customer's own read-only account (CTS_MANAGER_VIEWER
+  // isn't in AuthzService's ALL_SITES_ROLES, so it needs a UserSiteAccess row
+  // just like the scoped internal roles below). Scoped to SITE01 so logging
+  // in as this user actually shows something — the seeded incident lives
+  // there.
+  const ctsViewer = await prisma.user.upsert({
+    where: { email: "ctsviewer@example.com" },
+    update: {},
+    create: {
+      idpSubject: "seed-cts-viewer",
+      email: "ctsviewer@example.com",
+      displayName: "Seed CTS Manager Viewer",
+      role: UserRole.CTS_MANAGER_VIEWER,
+    },
+  });
+
+  await prisma.userSiteAccess.upsert({
+    where: { userId_siteId: { userId: ctsViewer.id, siteId: site1.id } },
+    update: {},
+    create: { userId: ctsViewer.id, siteId: site1.id },
+  });
+
   await prisma.userSiteAccess.upsert({
     where: { userId_siteId: { userId: serviceDesk.id, siteId: site1.id } },
     update: {},
@@ -419,6 +441,7 @@ async function main() {
       `${serviceDesk.email} (SERVICE_DESK_NOC, ${site1.code} only), ` +
       `${siteEngineer.email} (SITE_ENGINEER, ${site2.code} only), ` +
       `${siteEngineer1.email} (SITE_ENGINEER, ${site1.code} only), ` +
+      `${ctsViewer.email} (CTS_MANAGER_VIEWER, ${site1.code} only), ` +
       `1 rack and 3 CIs (1 CI-to-CI relation, 3 health snapshots), ` +
       `4 SLA policies (P1-P4) and 1 support calendar per site, ` +
       `1 incident (INC-SEED-001, IN_PROGRESS, 5 timeline events, 1 comment, 1 worklog, 1 SLA instance).`,

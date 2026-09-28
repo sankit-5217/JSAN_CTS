@@ -9,6 +9,8 @@ import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 import { RolesGuard } from "./guards/roles.guard";
 import { SiteScopeGuard } from "./guards/site-scope.guard";
 import { JwtStrategy } from "./strategies/jwt.strategy";
+import { UsersController } from "./users.controller";
+import { UsersService } from "./users.service";
 
 /**
  * Owner: Dev A (Platform & Ticketing Core).
@@ -36,8 +38,16 @@ import { JwtStrategy } from "./strategies/jwt.strategy";
       }),
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, AuthzService, JwtStrategy, JwtAuthGuard, RolesGuard, SiteScopeGuard],
+  controllers: [AuthController, UsersController],
+  providers: [
+    AuthService,
+    AuthzService,
+    UsersService,
+    JwtStrategy,
+    JwtAuthGuard,
+    RolesGuard,
+    SiteScopeGuard,
+  ],
   exports: [AuthService, AuthzService, JwtAuthGuard, RolesGuard, SiteScopeGuard],
 })
 export class AuthModule {}

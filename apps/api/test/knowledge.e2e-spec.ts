@@ -102,4 +102,45 @@ describe("Knowledge API (e2e)", () => {
       .send({ approverId: fx.users.superAdmin.id, reviewDueAt: "2000-01-01T00:00:00.000Z" })
       .expect(400);
   });
+
+  it("stores site scope + CI/category links and filters the list by them (spec §10.14)", async () => {
+    const scoped = await t
+      .http()
+      .post("/api/v1/knowledge")
+      .set(bearer())
+      .send({
+        title: "PDU failover at E2E01",
+        body: "Site-specific power runbook",
+        siteId: fx.site.id,
+        incidentCategory: "POWER",
+        ciType: "PDU",
+      })
+      .expect(201);
+    expect(scoped.body.siteId).toBe(fx.site.id);
+    expect(scoped.body.incidentCategory).toBe("POWER");
+    expect(scoped.body.ciType).toBe("PDU");
+
+    const bySite = await t
+      .http()
+      .get(`/api/v1/knowledge?siteId=${fx.site.id}&ciType=PDU`)
+      .set(bearer())
+      .expect(200);
+    expect(bySite.body.some((a: { id: string }) => a.id === scoped.body.id)).toBe(true);
+
+    const otherType = await t
+      .http()
+      .get("/api/v1/knowledge?ciType=SWITCH")
+      .set(bearer())
+      .expect(200);
+    expect(otherType.body.some((a: { id: string }) => a.id === scoped.body.id)).toBe(false);
+  });
+
+  it("rejects an unknown ciType (400)", async () => {
+    await t
+      .http()
+      .post("/api/v1/knowledge")
+      .set(bearer())
+      .send({ title: "bad type", body: "body text here", ciType: "TOASTER" })
+      .expect(400);
+  });
 });

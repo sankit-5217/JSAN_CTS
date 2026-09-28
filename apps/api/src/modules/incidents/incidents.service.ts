@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { createHash, randomUUID } from "crypto";
@@ -12,8 +13,11 @@ import {
   IncidentEvent,
   IncidentStatus,
   Prisma,
+  Priority,
   UserRole,
 } from "@prisma/client";
+import type { Party } from "@cts-dc-opsdesk/email-adapter";
+import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { StorageService } from "../../common/storage/storage.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { Paginated } from "../../common/types/paginated.type";
@@ -26,12 +30,38 @@ import {
   ALLOWED_ATTACHMENT_CONTENT_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
 } from "./attachment.constants";
+import { CreateIncidentAsCustomerDto } from "./dto/create-incident-as-customer.dto";
 import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
 import { TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
-import { findTransitionRule, isOwnerOrElevated, OPEN_STATUSES } from "./incident-transitions";
+import {
+  findTransitionRule,
+  isOwnerOrElevated,
+  OPEN_STATUSES,
+  TRANSITION_RULES,
+} from "./incident-transitions";
+import type { TransitionDto } from "./incident-transitions";
+
+export interface AvailableTransition {
+  toStatus: IncidentStatus;
+  /** Fields the transition endpoint will require in the request body. */
+  requiredFields: (keyof TransitionDto)[];
+  /** False when the role check passed but the owner-or-elevated gate didn't. */
+  allowed: boolean;
+  /** Human explanation for why `allowed` is false — undefined when true. */
+  blockedReason?: string;
+  /**
+   * What `rule.validate()` would currently say if this transition were
+   * submitted with no extra fields filled in — e.g. NEW -> ASSIGNED needs
+   * an owner resolved, but that's a custom validate() check (either
+   * ownerGroupId or ownerUserId), not a simple "field present" entry in
+   * requiredFields. Undefined when the rule has no validate(), or the
+   * incident already satisfies it as-is.
+   */
+  hint?: string;
+}
 
 /** Minimal shape of what NestJS's FileInterceptor hands us (multer.File). */
 export interface UploadedAttachmentFile {
@@ -53,12 +83,15 @@ export interface UploadedAttachmentFile {
  */
 @Injectable()
 export class IncidentsService {
+  private readonly logger = new Logger(IncidentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly authzService: AuthzService,
     private readonly storageService: StorageService,
     private readonly slaService: SlaService,
+    private readonly notifications: NotificationsPublisher,
   ) {}
 
   async assertSiteAccess(user: AuthenticatedUser, siteId: string): Promise<void> {
@@ -70,7 +103,8 @@ export class IncidentsService {
 
   async findAll(
     query: ListIncidentsQueryDto,
-    accessibleSiteIds?: string[] | null,
+    accessibleSiteIds: string[] | null | undefined,
+    user: AuthenticatedUser,
   ): Promise<Paginated<Incident>> {
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;
@@ -87,6 +121,11 @@ export class IncidentsService {
 
     const where: Prisma.IncidentWhereInput = {
       siteId: siteFilter ? { in: siteFilter } : undefined,
+      // Same reasoning as findOneScoped: site access is a staff-shaped
+      // grant, not "this is my ticket." Forced, never client-settable —
+      // there's no ?reportedByUserId= query param a customer could spoof
+      // even if they tried; this branches on the caller's own role only.
+      reportedByUserId: user.role === UserRole.CTS_MANAGER_VIEWER ? user.id : undefined,
       // An explicit ?status= wins; slaAtRisk alone still implies "open"
       // (a resolved incident's stale fired-milestone history isn't
       // actionable risk) — matches ReportsService's own queue definition.
@@ -130,6 +169,15 @@ export class IncidentsService {
   async findOneScoped(id: string, user: AuthenticatedUser): Promise<Incident> {
     const incident = await this.findOne(id);
     await this.assertSiteAccess(user, incident.siteId);
+    // Site access alone is staff-shaped scoping — every internal role at a
+    // site can see every incident there. A CTS_MANAGER_VIEWER isn't staff:
+    // the client portal's entire promise is "track your own ticket," not
+    // "see every ticket your site has ever raised" (which would leak other
+    // reporters' incidents, including ones with no connection to this
+    // caller at all — see reportedByUserId, added for exactly this reason).
+    if (user.role === UserRole.CTS_MANAGER_VIEWER && incident.reportedByUserId !== user.id) {
+      throw new ForbiddenException("You do not have access to this incident");
+    }
     return incident;
   }
 
@@ -143,7 +191,10 @@ export class IncidentsService {
     return `INC-${nextval.toString().padStart(6, "0")}`;
   }
 
-  create(dto: CreateIncidentDto, actor: ActorContext) {
+  // `reportedByUserId` is never client-settable — only createFromCustomer()
+  // passes it, straight from the authenticated caller's own id, never from
+  // request body input.
+  create(dto: CreateIncidentDto, actor: ActorContext, reportedByUserId?: string) {
     return this.prisma.$transaction(async (tx) => {
       const incidentNo = await this.nextIncidentNo(tx);
       const incident = await tx.incident.create({
@@ -156,6 +207,7 @@ export class IncidentsService {
           urgency: dto.urgency,
           priority: dto.priority,
           shortDescription: dto.shortDescription,
+          reportedByUserId,
         },
       });
       await tx.incidentEvent.create({
@@ -189,6 +241,41 @@ export class IncidentsService {
     });
   }
 
+  /**
+   * Self-service intake for a site POC (CTS_MANAGER_VIEWER). Deliberately
+   * thin over `create()`: a customer never sets priority/impact/urgency or
+   * picks a CI — those are triage decisions Service Desk makes afterward
+   * via the normal PATCH /incidents/:id path (which already re-fires the
+   * SLA clock on a priority change, so a P3 default here is a real starting
+   * point, not a placeholder that needs special-casing later).
+   */
+  async createFromCustomer(
+    dto: CreateIncidentAsCustomerDto,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ): Promise<Incident> {
+    await this.assertSiteAccess(user, dto.siteId);
+
+    const incident = await this.create(
+      {
+        siteId: dto.siteId,
+        category: dto.category,
+        impact: "MEDIUM",
+        urgency: "MEDIUM",
+        priority: Priority.P3,
+        shortDescription: dto.shortDescription,
+      },
+      actor,
+      user.id,
+    );
+
+    if (dto.details) {
+      await this.createComment(incident.id, { body: dto.details, isInternal: false }, actor, user);
+    }
+
+    return incident;
+  }
+
   async update(id: string, dto: UpdateIncidentDto, user: AuthenticatedUser, actor: ActorContext) {
     const before = await this.findOneScoped(id, user);
     const ownerChanged =
@@ -196,7 +283,7 @@ export class IncidentsService {
       (dto.ownerUserId !== undefined && dto.ownerUserId !== before.ownerUserId);
     const priorityChanged = dto.priority !== undefined && dto.priority !== before.priority;
 
-    return this.prisma.$transaction(async (tx) => {
+    const after = await this.prisma.$transaction(async (tx) => {
       const after = await tx.incident.update({
         where: { id },
         data: {
@@ -251,6 +338,12 @@ export class IncidentsService {
 
       return after;
     });
+
+    if (ownerChanged && after.ownerUserId) {
+      await this.notifyAssignment(after, after.ownerUserId);
+    }
+
+    return after;
   }
 
   // --- Status transitions (spec §15) ----------------------------------
@@ -297,7 +390,7 @@ export class IncidentsService {
       throw new BadRequestException(validationError);
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const after = await this.prisma.$transaction(async (tx) => {
       const data: Prisma.IncidentUncheckedUpdateInput = { status: dto.toStatus };
       if (dto.ownerGroupId !== undefined) {
         data.ownerGroupId = dto.ownerGroupId;
@@ -367,6 +460,46 @@ export class IncidentsService {
       }
 
       return after;
+    });
+
+    await this.notifyStatusChange(incident, after, dto.reason);
+    if (dto.ownerUserId !== undefined && dto.ownerUserId !== incident.ownerUserId) {
+      await this.notifyAssignment(after, dto.ownerUserId);
+    }
+
+    return after;
+  }
+
+  /**
+   * What the caller could actually submit to `createTransition` right now,
+   * computed from the same TRANSITION_RULES table that endpoint enforces —
+   * not a second copy of the rules (the frontend deliberately doesn't mirror
+   * them, see IncidentDetailPage.tsx's own comment). A rule the caller's
+   * role can never perform is omitted entirely; one blocked only by the
+   * owner-or-elevated gate is still returned (allowed: false) so the UI can
+   * show *why*, e.g. a NOC agent seeing the ticket is theirs to resume once
+   * the assigned engineer isn't around.
+   */
+  async getAvailableTransitions(
+    id: string,
+    user: AuthenticatedUser,
+  ): Promise<AvailableTransition[]> {
+    const incident = await this.findOneScoped(id, user);
+
+    return TRANSITION_RULES.filter(
+      (rule) => rule.from.includes(incident.status) && rule.allowedRoles.includes(user.role),
+    ).map((rule) => {
+      const allowed =
+        !rule.requiresOwnerOrElevated || isOwnerOrElevated(user.id, user.role, incident);
+      return {
+        toStatus: rule.to,
+        requiredFields: rule.requiredFields ?? [],
+        allowed,
+        blockedReason: allowed
+          ? undefined
+          : "Only the assigned owner or an elevated role can perform this transition",
+        hint: rule.validate?.(incident, { toStatus: rule.to }),
+      };
     });
   }
 
@@ -473,15 +606,19 @@ export class IncidentsService {
     actor: ActorContext,
     user: AuthenticatedUser,
   ): Promise<IncidentComment> {
-    await this.findOneScoped(incidentId, user);
+    const incident = await this.findOneScoped(incidentId, user);
+    // A customer can never post an internal note, regardless of what the
+    // request body says — the frontend doesn't offer the toggle, but the
+    // backend is the actual guarantee (CLAUDE.md: never trust the client).
+    const isInternal = user.role === UserRole.CTS_MANAGER_VIEWER ? false : (dto.isInternal ?? true);
 
-    return this.prisma.$transaction(async (tx) => {
+    const comment = await this.prisma.$transaction(async (tx) => {
       const comment = await tx.incidentComment.create({
         data: {
           incidentId,
           authorId: actor.actorId,
           body: dto.body,
-          isInternal: dto.isInternal ?? true,
+          isInternal,
         },
       });
 
@@ -511,6 +648,9 @@ export class IncidentsService {
 
       return comment;
     });
+
+    await this.notifyComment(incident, comment, user);
+    return comment;
   }
 
   /**
@@ -624,7 +764,7 @@ export class IncidentsService {
   async listAttachments(incidentId: string, user: AuthenticatedUser): Promise<Attachment[]> {
     await this.findOneScoped(incidentId, user);
     return this.prisma.attachment.findMany({
-      where: { entityType: "INCIDENT", entityId: incidentId },
+      where: { entityType: "INCIDENT", entityId: incidentId, deletedAt: null },
       orderBy: { createdAt: "asc" },
     });
   }
@@ -636,11 +776,200 @@ export class IncidentsService {
     user: AuthenticatedUser,
   ): Promise<{ url: string }> {
     await this.findOneScoped(incidentId, user);
-    const attachment = await this.prisma.attachment.findUnique({ where: { id: attachmentId } });
-    if (!attachment || attachment.entityType !== "INCIDENT" || attachment.entityId !== incidentId) {
-      throw new NotFoundException(`Attachment ${attachmentId} not found on this incident`);
-    }
+    const attachment = await this.findLiveAttachment(incidentId, attachmentId);
     const url = await this.storageService.getSignedDownloadUrl(attachment.objectKey);
     return { url };
+  }
+
+  private async findLiveAttachment(incidentId: string, attachmentId: string): Promise<Attachment> {
+    const attachment = await this.prisma.attachment.findUnique({ where: { id: attachmentId } });
+    if (
+      !attachment ||
+      attachment.entityType !== "INCIDENT" ||
+      attachment.entityId !== incidentId ||
+      attachment.deletedAt !== null
+    ) {
+      throw new NotFoundException(`Attachment ${attachmentId} not found on this incident`);
+    }
+    return attachment;
+  }
+
+  /**
+   * Soft delete only -- the row and the S3 object both stay (spec's
+   * audit-everything rule: a removed attachment must still be
+   * reconstructable, not gone without a trace). Just stops appearing in
+   * listAttachments and becomes undownloadable.
+   */
+  async deleteAttachment(
+    incidentId: string,
+    attachmentId: string,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ): Promise<void> {
+    await this.findOneScoped(incidentId, user);
+    const before = await this.findLiveAttachment(incidentId, attachmentId);
+
+    await this.prisma.$transaction(async (tx) => {
+      const after = await tx.attachment.update({
+        where: { id: attachmentId },
+        data: { deletedAt: new Date(), deletedById: actor.actorId },
+      });
+
+      await tx.incidentEvent.create({
+        data: {
+          incidentId,
+          eventType: "ATTACHMENT_REMOVED",
+          actorId: actor.actorId,
+          payload: {
+            attachmentId,
+            contentType: before.contentType,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Attachment",
+          entityId: attachmentId,
+          action: "DELETE",
+          before,
+          after,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+    });
+  }
+
+  // --- Stakeholder notifications (best-effort) --------------------------
+  //
+  // Same shape as VendorsService.notifyLinkedIncidentOwner: resolve
+  // recipient email(s) after the mutation has already committed and been
+  // audited, enqueue via NotificationsPublisher, swallow any failure. A
+  // missing/unreachable notifications queue must never fail the request
+  // that triggered it — the domain write already succeeded.
+
+  private toEntityRef(incident: Pick<Incident, "incidentNo" | "shortDescription" | "priority">) {
+    return {
+      key: incident.incidentNo,
+      title: incident.shortDescription,
+      priority: incident.priority,
+    };
+  }
+
+  private partyFor(
+    users: { id: string; email: string; displayName: string }[],
+    id: string | null,
+  ): Party | undefined {
+    const match = id ? users.find((u) => u.id === id) : undefined;
+    return match?.email ? { name: match.displayName, email: match.email } : undefined;
+  }
+
+  /** Tell the (re)assigned owner. Called from createTransition (assigning as
+   *  part of a status move) and update() (a plain reassignment via PATCH). */
+  private async notifyAssignment(incident: Incident, ownerUserId: string): Promise<void> {
+    try {
+      const assignee = await this.prisma.user.findUnique({ where: { id: ownerUserId } });
+      if (!assignee?.email) {
+        return;
+      }
+      const party: Party = { name: assignee.displayName, email: assignee.email };
+      await this.notifications.enqueue(
+        {
+          event: { kind: "INCIDENT_ASSIGNED", entity: this.toEntityRef(incident), assignee: party },
+          recipients: { to: [party] },
+        },
+        `INCIDENT_ASSIGNED:${incident.id}:${ownerUserId}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `assignment notification skipped for incident ${incident.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Tell the owner (to) and, when this ticket came in through customer
+   * self-service, cc the reporting customer on every status move — the
+   * "keep the client updated, cc'd on the ticket" loop. No-ops if neither
+   * has an email on file (still unassigned and not customer-reported).
+   */
+  private async notifyStatusChange(
+    before: Incident,
+    after: Incident,
+    reason?: string,
+  ): Promise<void> {
+    try {
+      const ids = [after.ownerUserId, after.reportedByUserId].filter((v): v is string =>
+        Boolean(v),
+      );
+      if (ids.length === 0) {
+        return;
+      }
+      const users = await this.prisma.user.findMany({ where: { id: { in: ids } } });
+      const owner = this.partyFor(users, after.ownerUserId);
+      const customer = this.partyFor(users, after.reportedByUserId);
+      const to = owner ? [owner] : customer ? [customer] : [];
+      if (to.length === 0) {
+        return;
+      }
+      await this.notifications.enqueue({
+        event: {
+          kind: "INCIDENT_STATUS_CHANGED",
+          entity: this.toEntityRef(after),
+          from: before.status,
+          to: after.status,
+          comment: reason,
+        },
+        recipients: { to, cc: owner && customer ? [customer] : undefined },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `status-change notification skipped for incident ${after.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Only notifies the *other side* of the conversation: the customer
+   * commenting tells the assigned engineer; an internal reply explicitly
+   * marked customer-visible tells the reporting customer back. An
+   * internal-only note between staff notifies no one — they already share
+   * the same incident page.
+   */
+  private async notifyComment(
+    incident: Incident,
+    comment: IncidentComment,
+    author: AuthenticatedUser,
+  ): Promise<void> {
+    try {
+      const recipientId =
+        author.role === UserRole.CTS_MANAGER_VIEWER
+          ? incident.ownerUserId
+          : comment.isInternal
+            ? null
+            : incident.reportedByUserId;
+      if (!recipientId) {
+        return;
+      }
+      const recipient = await this.prisma.user.findUnique({ where: { id: recipientId } });
+      if (!recipient?.email) {
+        return;
+      }
+      await this.notifications.enqueue({
+        event: {
+          kind: "INCIDENT_COMMENT_ADDED",
+          entity: this.toEntityRef(incident),
+          author: { email: author.email },
+          body: comment.body,
+        },
+        recipients: { to: [{ name: recipient.displayName, email: recipient.email }] },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `comment notification skipped for incident ${incident.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 }

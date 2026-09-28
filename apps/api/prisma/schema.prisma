@@ -156,11 +156,13 @@ model User {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  incidentsOwned  Incident[]      @relation("IncidentOwner")
-  worklogs        Worklog[]
-  auditEvents     AuditEvent[]
-  siteAccess      UserSiteAccess[]
-  attachments     Attachment[]
+  incidentsOwned     Incident[]      @relation("IncidentOwner")
+  incidentsReported  Incident[]      @relation("IncidentReportedBy")
+  worklogs           Worklog[]
+  auditEvents        AuditEvent[]
+  siteAccess         UserSiteAccess[]
+  attachments        Attachment[]
+  deletedAttachments Attachment[]    @relation("AttachmentDeletedBy")
 
   @@map("users")
 }
@@ -364,6 +366,10 @@ model Incident {
   shortDescription String     @map("short_description")
   ownerGroupId String?        @map("owner_group_id")
   ownerUserId  String?        @map("owner_user_id")
+  // Set only when this incident came in via POST /incidents/customer-report —
+  // null for internally-created incidents (spec §10.3: who to notify back on
+  // status/comment updates for a self-service ticket).
+  reportedByUserId String?    @map("reported_by_user_id")
   acknowledgedAt DateTime?    @map("acknowledged_at")
   resolutionCategory String?  @map("resolution_category")
   rootCauseSummary   String?  @map("root_cause_summary")
@@ -376,6 +382,7 @@ model Incident {
   ci         ConfigurationItem? @relation(fields: [ciId], references: [id])
   owner      User?              @relation("IncidentOwner", fields: [ownerUserId], references: [id])
   ownerGroup SupportGroup?      @relation(fields: [ownerGroupId], references: [id])
+  reportedBy User?              @relation("IncidentReportedBy", fields: [reportedByUserId], references: [id])
 
   events    IncidentEvent[]
   comments  IncidentComment[]
@@ -392,7 +399,7 @@ model Incident {
 model IncidentEvent {
   id         String   @id @default(uuid())
   incidentId String   @map("incident_id")
-  eventType  String   @map("event_type") // STATUS_CHANGE / OWNER_CHANGE / SLA_EVENT / COMMENT / WORKLOG / VENDOR_UPDATE / ATTACHMENT
+  eventType  String   @map("event_type") // STATUS_CHANGE / OWNER_CHANGE / SLA_EVENT / COMMENT / WORKLOG / VENDOR_UPDATE / ATTACHMENT / ATTACHMENT_REMOVED
   actorId    String?  @map("actor_id")
   payload    Json
   createdAt  DateTime @default(now()) @map("created_at")
@@ -672,6 +679,7 @@ model Change {
   changeType       ChangeType @map("change_type")
   reason           String
   implementationPlan String   @map("implementation_plan")
+  validationPlan   String     @map("validation_plan")
   rollbackPlan     String     @map("rollback_plan")
   risk             String
   windowStart      DateTime   @map("window_start")
@@ -693,11 +701,18 @@ model KnowledgeArticle {
   body         String
   version      Int      @default(1)
   ownerId      String?  @map("owner_id")
+  // Scope & linkage (spec §10.14). siteId null = global runbook; set = a
+  // site-specific SOP. incidentCategory / ciType tie the article to the kind
+  // of incident and hardware it applies to.
+  siteId       String?  @map("site_id")
+  incidentCategory String? @map("incident_category")
+  ciType       CiType?  @map("ci_type")
   approvalState String  @default("DRAFT") @map("approval_state") // DRAFT / APPROVED
   reviewDueAt  DateTime? @map("review_due_at")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  @@index([siteId])
   @@map("knowledge_articles")
 }
 
@@ -709,6 +724,7 @@ model Risk {
   impact      Int
   score       Int
   mitigation  String?
+  evidence    String?
   ownerId     String?  @map("owner_id")
   dueDate     DateTime? @map("due_date")
   status      String   @default("OPEN")
@@ -769,17 +785,24 @@ model AuditEvent {
 }
 
 model Attachment {
-  id          String   @id @default(uuid())
-  entityType  String   @map("entity_type") // INCIDENT / VENDOR_CASE / CHANGE / ...
-  entityId    String   @map("entity_id")
-  objectKey   String   @map("object_key") // S3/MinIO key
-  contentType String   @map("content_type")
-  sizeBytes   Int      @map("size_bytes")
-  sha256      String
-  uploadedById String? @map("uploaded_by_id")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id           String    @id @default(uuid())
+  entityType   String    @map("entity_type") // INCIDENT / VENDOR_CASE / CHANGE / ...
+  entityId     String    @map("entity_id")
+  objectKey    String    @map("object_key") // S3/MinIO key
+  contentType  String    @map("content_type")
+  sizeBytes    Int       @map("size_bytes")
+  sha256       String
+  uploadedById String?   @map("uploaded_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  // Soft delete only (spec's audit-everything rule) -- the row and the S3
+  // object both stay; a removed attachment just stops appearing in the list
+  // and can no longer be downloaded, same as this codebase's other
+  // append-only records (worklogs correct, they don't get edited in place).
+  deletedAt    DateTime? @map("deleted_at")
+  deletedById  String?   @map("deleted_by_id")
 
   uploadedBy User? @relation(fields: [uploadedById], references: [id])
+  deletedBy  User? @relation("AttachmentDeletedBy", fields: [deletedById], references: [id])
 
   @@index([entityType, entityId])
   @@map("attachments")

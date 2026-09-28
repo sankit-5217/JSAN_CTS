@@ -43,6 +43,7 @@ export type NotificationEvent =
       actor?: Party;
       comment?: string;
     }
+  | { kind: "INCIDENT_COMMENT_ADDED"; entity: EntityRef; author: Party; body: string }
   | {
       kind: "SLA_WARNING";
       entity: EntityRef;

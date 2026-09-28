@@ -1,6 +1,17 @@
+import { CiType } from "@prisma/client";
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
-import { IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from "class-validator";
+import {
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Max,
+  Min,
+} from "class-validator";
 import { APPROVAL_STATES, KNOWLEDGE_VIEWS } from "../knowledge.constants";
 import type { ApprovalState, KnowledgeView } from "../knowledge.constants";
 
@@ -15,6 +26,22 @@ export class QueryArticlesDto {
   @IsOptional()
   @IsUUID()
   ownerId?: string;
+
+  @ApiPropertyOptional({ format: "uuid", description: "Articles scoped to this site." })
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
+  @ApiPropertyOptional({ description: "Articles linked to this incident category." })
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  incidentCategory?: string;
+
+  @ApiPropertyOptional({ enum: CiType, description: "Articles linked to this CI type." })
+  @IsOptional()
+  @IsEnum(CiType)
+  ciType?: CiType;
 
   @ApiPropertyOptional({ description: "Case-insensitive substring match on title or body." })
   @IsOptional()

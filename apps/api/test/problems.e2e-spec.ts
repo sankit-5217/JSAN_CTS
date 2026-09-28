@@ -56,6 +56,7 @@ describe("Problems API (e2e)", () => {
         changeType: "NORMAL",
         reason: "Rebalance PDU circuits",
         implementationPlan: "Move loads to circuit B",
+        validationPlan: "Confirm PDU load draw balanced within 10% across circuits",
         rollbackPlan: "Move back",
         risk: "Low",
         windowStart: new Date(Date.now() + 86_400_000).toISOString(),

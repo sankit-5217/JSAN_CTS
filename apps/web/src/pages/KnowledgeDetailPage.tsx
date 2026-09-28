@@ -9,12 +9,26 @@ import {
   Chip,
   Grid,
   Link,
+  MenuItem,
   Paper,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
 import { apiGet, apiPatch, apiPost } from "../api/client";
+
+// Mirrors the CiType enum in apps/api/prisma/schema.prisma.
+const CI_TYPES = [
+  "SERVER",
+  "FIREWALL",
+  "SWITCH",
+  "UPS",
+  "PDU",
+  "STORAGE",
+  "SERVICE",
+  "CIRCUIT",
+  "VM",
+];
 
 interface Article {
   id: string;
@@ -23,6 +37,9 @@ interface Article {
   version: number;
   approvalState: string;
   ownerId: string | null;
+  siteId: string | null;
+  incidentCategory: string | null;
+  ciType: string | null;
   reviewDueAt: string | null;
   authoritative: boolean;
   reviewOverdue: boolean;
@@ -77,6 +94,9 @@ export function KnowledgeDetailPage() {
       title: article.title,
       body: article.body,
       ownerId: article.ownerId ?? "",
+      siteId: article.siteId ?? "",
+      incidentCategory: article.incidentCategory ?? "",
+      ciType: article.ciType ?? "",
     });
 
   return (
@@ -97,10 +117,27 @@ export function KnowledgeDetailPage() {
             {article.reviewOverdue && <Chip color="warning" label="review overdue" />}
             {article.authoritative && <Chip color="info" label="authoritative" />}
           </Stack>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             Owner: {article.ownerId ?? "—"} · Review due:{" "}
             {article.reviewDueAt ? new Date(article.reviewDueAt).toLocaleDateString() : "—"}
           </Typography>
+          <Stack direction="row" spacing={0.5} sx={{ mb: 2 }}>
+            <Chip
+              size="small"
+              variant="outlined"
+              label={article.siteId ? `site: ${article.siteId}` : "global runbook"}
+            />
+            {article.ciType && (
+              <Chip size="small" variant="outlined" label={`CI: ${article.ciType}`} />
+            )}
+            {article.incidentCategory && (
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`category: ${article.incidentCategory}`}
+              />
+            )}
+          </Stack>
           <Typography
             variant="body2"
             component="pre"
@@ -154,6 +191,32 @@ export function KnowledgeDetailPage() {
                   value={edit.ownerId}
                   onChange={(e) => setEdit({ ...edit, ownerId: e.target.value })}
                 />
+                <TextField
+                  size="small"
+                  label="Site id (blank = global runbook)"
+                  value={edit.siteId}
+                  onChange={(e) => setEdit({ ...edit, siteId: e.target.value })}
+                />
+                <TextField
+                  size="small"
+                  label="Incident category"
+                  value={edit.incidentCategory}
+                  onChange={(e) => setEdit({ ...edit, incidentCategory: e.target.value })}
+                />
+                <TextField
+                  select
+                  size="small"
+                  label="CI type"
+                  value={edit.ciType}
+                  onChange={(e) => setEdit({ ...edit, ciType: e.target.value })}
+                >
+                  <MenuItem value="">Any / none</MenuItem>
+                  {CI_TYPES.map((t) => (
+                    <MenuItem key={t} value={t}>
+                      {t}
+                    </MenuItem>
+                  ))}
+                </TextField>
                 <Stack direction="row" spacing={1}>
                   <Button
                     variant="contained"
@@ -164,6 +227,9 @@ export function KnowledgeDetailPage() {
                             title: edit.title,
                             body: edit.body,
                             ownerId: edit.ownerId || undefined,
+                            siteId: edit.siteId || null,
+                            incidentCategory: edit.incidentCategory || null,
+                            ciType: edit.ciType || null,
                           }),
                         () => setEdit(null),
                       )
