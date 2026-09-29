@@ -129,7 +129,7 @@ const CONTACT_ROWS = [
   {
     icon: <MailOutlineIcon fontSize="small" />,
     label: "General enquiries",
-    value: "ops@jsan.example",
+    value: "sankit@jsanconsulting.com",
   },
   {
     icon: <GroupOutlinedIcon fontSize="small" />,
