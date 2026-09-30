@@ -41,6 +41,7 @@ import { SoundControl } from "./notifications/SoundControl";
 import { getStoredToken, signOut } from "./api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "./api/jwt";
 import { theme } from "./theme/theme";
+import { ClientHomePage } from "./pages/client/ClientHomePage";
 import { ClientLayout } from "./pages/client/ClientLayout";
 import { MyTicketsPage } from "./pages/client/MyTicketsPage";
 import { ReportIssuePage } from "./pages/client/ReportIssuePage";
@@ -388,7 +389,7 @@ function AuthenticatedLayout() {
   // The client role gets a purpose-built portal (ClientLayout), not the
   // internal ops console — none of the fourteen modules below are theirs.
   if (getCurrentUserRole() === "CLIENT_MANAGER_VIEWER") {
-    return <Navigate to="/client/report" replace />;
+    return <Navigate to="/client/home" replace />;
   }
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
@@ -410,6 +411,8 @@ export function App() {
       <Route path="/auth/callback" element={<SocialCallbackPage />} />
       <Route path="/auth/set-password" element={<SetPasswordPage />} />
       <Route element={<ClientLayout />}>
+        <Route path="/client" element={<Navigate to="/client/home" replace />} />
+        <Route path="/client/home" element={<ClientHomePage />} />
         <Route path="/client/report" element={<ReportIssuePage />} />
         <Route path="/client/tickets" element={<MyTicketsPage />} />
         <Route path="/client/tickets/:id" element={<TicketDetailPage />} />

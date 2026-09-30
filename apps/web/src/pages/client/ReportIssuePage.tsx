@@ -6,12 +6,14 @@ import {
   Button,
   Card,
   CardContent,
+  Chip,
   MenuItem,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
-import { apiGet, apiPost } from "../../api/client";
+import AttachFileOutlinedIcon from "@mui/icons-material/AttachFileOutlined";
+import { apiGet, apiPost, apiUpload } from "../../api/client";
 
 interface Site {
   id: string;
@@ -37,6 +39,16 @@ const ISSUE_CATEGORIES = [
   { value: "OTHER", label: "Something else" },
 ];
 
+// What the customer is seeing, in their words. Folded into the first
+// comment as context, never mapped to impact/urgency: that's triage.
+const EFFECTS = [
+  "Nothing is down yet, but something looks wrong",
+  "Some things are slow or degraded",
+  "A service or system is down",
+];
+
+const DETAILS_MAX = 4000;
+
 /**
  * The client portal's one write: a site POC describing a problem in their
  * own words. No priority/impact/urgency picker on purpose — that's a
@@ -51,6 +63,9 @@ export function ReportIssuePage() {
   const [category, setCategory] = useState(ISSUE_CATEGORIES[0].value);
   const [shortDescription, setShortDescription] = useState("");
   const [details, setDetails] = useState("");
+  const [startedWhen, setStartedWhen] = useState("");
+  const [effect, setEffect] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -68,21 +83,41 @@ export function ReportIssuePage() {
 
   const canSubmit = siteId && category && shortDescription.trim().length >= 2 && !submitting;
 
+  const composedDetails = [
+    details.trim(),
+    startedWhen.trim() && `Started: ${startedWhen.trim()}`,
+    effect && `Effect: ${effect}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
   const handleSubmit = async () => {
     setError(null);
     setSubmitting(true);
+    let incident: CreatedIncident;
     try {
-      const incident = await apiPost<CreatedIncident>("/incidents/customer-report", {
+      incident = await apiPost<CreatedIncident>("/incidents/customer-report", {
         siteId,
         category,
         shortDescription: shortDescription.trim(),
-        details: details.trim() || undefined,
+        details: composedDetails.slice(0, DETAILS_MAX) || undefined,
       });
-      navigate(`/client/tickets/${incident.id}`, { state: { justCreated: true } });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
+      return;
     }
+    // The ticket exists now; a failed upload shouldn't lose it. The ticket
+    // page lets them attach again.
+    const failedUploads: string[] = [];
+    for (const file of files) {
+      try {
+        await apiUpload(`/incidents/${incident.id}/attachments`, file);
+      } catch {
+        failedUploads.push(file.name);
+      }
+    }
+    navigate(`/client/tickets/${incident.id}`, { state: { justCreated: true, failedUploads } });
   };
 
   return (
@@ -91,8 +126,8 @@ export function ReportIssuePage() {
         Report an issue
       </Typography>
       <Typography color="text.secondary" sx={{ mb: 3 }}>
-        Tell us what's happening — our Service Desk will pick it up, classify it, and keep you
-        updated here.
+        Tell us what's happening. The service desk will set the priority, assign an engineer and
+        keep you updated on the ticket.
       </Typography>
 
       <Card elevation={0} sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
@@ -149,13 +184,78 @@ export function ReportIssuePage() {
 
             <TextField
               label="More detail (optional)"
-              placeholder="Anything else that might help — when it started, what you've already tried, etc."
+              placeholder="Which rack or device, what you can see (lights, alarms, error messages), what you've already tried"
               value={details}
               onChange={(e) => setDetails(e.target.value)}
               multiline
               minRows={4}
               fullWidth
             />
+
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                label="When did it start? (optional)"
+                placeholder="e.g. around 2pm today"
+                value={startedWhen}
+                onChange={(e) => setStartedWhen(e.target.value)}
+                fullWidth
+              />
+              <TextField
+                select
+                label="How is it affecting you? (optional)"
+                value={effect}
+                onChange={(e) => setEffect(e.target.value)}
+                fullWidth
+              >
+                <MenuItem value="">
+                  <em>Not sure</em>
+                </MenuItem>
+                {EFFECTS.map((e) => (
+                  <MenuItem key={e} value={e}>
+                    {e}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Stack>
+
+            <Box>
+              <Button
+                component="label"
+                variant="outlined"
+                startIcon={<AttachFileOutlinedIcon />}
+                sx={{ textTransform: "none" }}
+              >
+                Add photos or files
+                <input
+                  type="file"
+                  hidden
+                  multiple
+                  onChange={(e) => {
+                    const picked = Array.from(e.target.files ?? []);
+                    setFiles((prev) => [...prev, ...picked]);
+                    e.target.value = "";
+                  }}
+                />
+              </Button>
+              {files.length > 0 && (
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
+                  {files.map((f, i) => (
+                    <Chip
+                      key={`${f.name}-${i}`}
+                      label={f.name}
+                      onDelete={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+                    />
+                  ))}
+                </Stack>
+              )}
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: "block", mt: 0.5 }}
+              >
+                A photo of fault lights or a device label often saves a round trip.
+              </Typography>
+            </Box>
 
             <Button
               variant="contained"
@@ -164,7 +264,11 @@ export function ReportIssuePage() {
               onClick={handleSubmit}
               sx={{ alignSelf: "flex-start", textTransform: "none", fontWeight: 600, px: 4 }}
             >
-              {submitting ? "Submitting..." : "Submit"}
+              {submitting
+                ? files.length > 0
+                  ? "Submitting and uploading..."
+                  : "Submitting..."
+                : "Submit"}
             </Button>
           </Stack>
         </CardContent>

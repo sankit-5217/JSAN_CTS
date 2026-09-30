@@ -14,7 +14,7 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { ApiBearerAuth, ApiConsumes, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { AuthzService } from "../auth/authz.service";
@@ -26,9 +26,11 @@ import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { CreateIncidentAsCustomerDto } from "./dto/create-incident-as-customer.dto";
 import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
+import { CustomerFeedbackDto } from "./dto/customer-feedback.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
 import { TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
+import { CUSTOMER_FEEDBACK_ROLES, IncidentCustomerService } from "./incident-customer.service";
 import { IncidentsService, UploadedAttachmentFile } from "./incidents.service";
 
 // Wider than CMDB's write set by exactly SERVICE_DESK_NOC — spec §4 gives
@@ -65,6 +67,7 @@ export class IncidentsController {
   constructor(
     private readonly incidentsService: IncidentsService,
     private readonly authzService: AuthzService,
+    private readonly customerService: IncidentCustomerService,
   ) {}
 
   @Get()
@@ -149,6 +152,27 @@ export class IncidentsController {
   @Get(":id/events")
   listEvents(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.incidentsService.listEvents(id, user);
+  }
+
+  @Get(":id/progress")
+  @ApiOperation({
+    summary:
+      "Plain progress summary: who's handling it, status history, waiting-on-you, fix feedback",
+  })
+  getProgress(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.customerService.getProgress(id, user);
+  }
+
+  @Post(":id/customer-feedback")
+  @Roles(...CUSTOMER_FEEDBACK_ROLES)
+  @ApiOperation({ summary: "Reporter confirms a resolved ticket is fixed, or says it isn't" })
+  submitCustomerFeedback(
+    @Param("id") id: string,
+    @Body() dto: CustomerFeedbackDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.customerService.submitFeedback(id, dto, { actorId: user.id, correlationId }, user);
   }
 
   @Get(":id/sla")

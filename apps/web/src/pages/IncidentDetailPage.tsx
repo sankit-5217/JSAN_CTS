@@ -23,6 +23,8 @@ import {
   Paper,
   Stack,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -92,7 +94,15 @@ interface Incident {
   rootCauseSummary: string | null;
   restoredAt: string | null;
   closedAt: string | null;
+  reportedByUserId: string | null;
   createdAt: string;
+}
+
+/** GET /incidents/:id/progress: the customer side of the ticket. */
+interface CustomerProgress {
+  waitingOnCustomerSince: string | null;
+  customerRepliedWhileWaiting: boolean;
+  feedback: { outcome: "FIXED" | "NOT_FIXED"; at: string } | null;
 }
 
 interface SlaState {
@@ -845,6 +855,7 @@ export function IncidentDetailPage() {
   const [availableTransitions, setAvailableTransitions] = useState<AvailableTransition[]>([]);
   const [vendorCases, setVendorCases] = useState<VendorCase[]>([]);
   const [linkedAlerts, setLinkedAlerts] = useState<LinkedAlert[]>([]);
+  const [customerProgress, setCustomerProgress] = useState<CustomerProgress | null>(null);
   const [supportGroups, setSupportGroups] = useState<GroupOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -877,8 +888,9 @@ export function IncidentDetailPage() {
         apiGet<AvailableTransition[]>(`/incidents/${id}/transitions`),
         apiGet<VendorCase[]>(`/vendor-cases?linkedIncidentId=${id}`),
         apiGet<LinkedAlert[]>(`/alerts?correlatedIncidentId=${id}`),
+        apiGet<CustomerProgress>(`/incidents/${id}/progress`),
       ])
-        .then(([inc, slaState, evts, cmts, wls, atts, transitions, vCases, aAlerts]) => {
+        .then(([inc, slaState, evts, cmts, wls, atts, transitions, vCases, aAlerts, progress]) => {
           setIncident(inc);
           setSla(slaState);
           setEvents(evts);
@@ -888,6 +900,7 @@ export function IncidentDetailPage() {
           setAvailableTransitions(transitions);
           setVendorCases(vCases);
           setLinkedAlerts(aAlerts);
+          setCustomerProgress(progress);
           setLastUpdatedAt(new Date());
         })
         .catch((err: Error) => {
@@ -1163,6 +1176,7 @@ export function IncidentDetailPage() {
 
   return (
     <Box>
+      <CustomerStatusBanner incident={incident} progress={customerProgress} />
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Stack
@@ -1496,8 +1510,21 @@ export function IncidentDetailPage() {
             <Stack spacing={1} sx={{ mb: 2 }}>
               {comments.map((c) => (
                 <Box key={c.id}>
-                  <Typography variant="body2" component="div">
-                    {c.body} {c.isInternal && <Chip size="small" label="internal" />}
+                  <Typography variant="body2" component="div" sx={{ whiteSpace: "pre-wrap" }}>
+                    {c.authorId === incident.reportedByUserId ? (
+                      <Chip size="small" color="warning" label="Customer" sx={{ mr: 1 }} />
+                    ) : c.isInternal ? (
+                      <Chip size="small" label="Internal" sx={{ mr: 1 }} />
+                    ) : (
+                      <Chip
+                        size="small"
+                        color="info"
+                        variant="outlined"
+                        label="To customer"
+                        sx={{ mr: 1 }}
+                      />
+                    )}
+                    {c.body}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {c.authorId} · {new Date(c.createdAt).toLocaleString()}
@@ -1511,26 +1538,55 @@ export function IncidentDetailPage() {
                 </Typography>
               )}
             </Stack>
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={commentInternal ? "internal" : "customer"}
+              onChange={(_, v: "internal" | "customer" | null) =>
+                v && setCommentInternal(v === "internal")
+              }
+              sx={{ mb: 1 }}
+            >
+              <ToggleButton value="internal" sx={{ textTransform: "none", px: 2 }}>
+                Internal note
+              </ToggleButton>
+              <ToggleButton value="customer" sx={{ textTransform: "none", px: 2 }}>
+                Reply to customer
+              </ToggleButton>
+            </ToggleButtonGroup>
             <TextField
               fullWidth
               multiline
+              minRows={2}
               size="small"
-              label="Add comment"
+              label={commentInternal ? "Internal note (staff only)" : "Reply to the customer"}
+              helperText={
+                commentInternal
+                  ? "Only staff see this."
+                  : incident.reportedByUserId
+                    ? "The customer sees this on their ticket and is notified. Write in plain language."
+                    : "Visible to customers, but no customer reported this ticket, so nobody is notified."
+              }
               value={commentBody}
               onChange={(e) => setCommentBody(e.target.value)}
-              sx={{ mb: 1 }}
+              sx={{
+                mb: 1,
+                ...(commentInternal
+                  ? {}
+                  : {
+                      "& .MuiOutlinedInput-root": {
+                        bgcolor: (t) => alpha(t.palette.info.main, 0.04),
+                      },
+                    }),
+              }}
             />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={commentInternal}
-                  onChange={(e) => setCommentInternal(e.target.checked)}
-                />
-              }
-              label="Internal (not customer-visible)"
-            />
-            <Button variant="contained" disabled={!commentBody} onClick={submitComment}>
-              Post comment
+            <Button
+              variant="contained"
+              color={commentInternal ? "primary" : "info"}
+              disabled={!commentBody}
+              onClick={submitComment}
+            >
+              {commentInternal ? "Add internal note" : "Send to customer"}
             </Button>
           </Paper>
 
@@ -1781,4 +1837,60 @@ export function IncidentDetailPage() {
       </Grid>
     </Box>
   );
+}
+
+/**
+ * What the customer has said or is owed, above everything else on the
+ * page: a confirmed fix to close, a "not fixed" to reopen, or a reply to a
+ * PENDING_CUSTOMER question. Status still only moves through the
+ * transition form; this just makes sure nobody misses it.
+ */
+function CustomerStatusBanner({
+  incident,
+  progress,
+}: {
+  incident: Incident;
+  progress: CustomerProgress | null;
+}) {
+  if (!progress) return null;
+  const when = (iso: string) => new Date(iso).toLocaleString();
+  if (incident.status === "RESOLVED" && progress.feedback?.outcome === "FIXED") {
+    return (
+      <Alert severity="success" sx={{ mb: 2 }}>
+        The customer confirmed the fix ({when(progress.feedback.at)}). Close the ticket when
+        you&apos;re ready.
+      </Alert>
+    );
+  }
+  if (incident.status === "RESOLVED" && progress.feedback?.outcome === "NOT_FIXED") {
+    return (
+      <Alert severity="warning" sx={{ mb: 2 }}>
+        The customer says this isn&apos;t fixed ({when(progress.feedback.at)}). See their comment
+        and reopen the ticket.
+      </Alert>
+    );
+  }
+  if (incident.status === "RESOLVED" && incident.reportedByUserId) {
+    return (
+      <Alert severity="info" sx={{ mb: 2 }}>
+        Waiting for the customer to confirm the fix.
+      </Alert>
+    );
+  }
+  if (progress.waitingOnCustomerSince && progress.customerRepliedWhileWaiting) {
+    return (
+      <Alert severity="warning" sx={{ mb: 2 }}>
+        The customer has replied. Read their comment and move the ticket back to In progress.
+      </Alert>
+    );
+  }
+  if (progress.waitingOnCustomerSince) {
+    return (
+      <Alert severity="info" sx={{ mb: 2 }}>
+        Waiting on the customer since {when(progress.waitingOnCustomerSince)}. The SLA clock is
+        paused.
+      </Alert>
+    );
+  }
+  return null;
 }

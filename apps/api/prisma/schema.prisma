@@ -544,6 +544,7 @@ enum InAppNotificationKind {
   INCIDENT_OFFER_UNACCEPTED
   ALERT_RECOVERED
   ALERT_RAISED
+  CUSTOMER_RESPONDED
 }
 
 /// How loudly the ops console announces a notification when it arrives.
@@ -755,7 +756,7 @@ model Incident {
 model IncidentEvent {
   id         String   @id @default(uuid())
   incidentId String   @map("incident_id")
-  eventType  String   @map("event_type") // STATUS_CHANGE / OWNER_CHANGE / SLA_EVENT / COMMENT / WORKLOG / VENDOR_UPDATE / ATTACHMENT / ATTACHMENT_REMOVED
+  eventType  String   @map("event_type") // STATUS_CHANGE / OWNER_CHANGE / SLA_EVENT / COMMENT / WORKLOG / VENDOR_UPDATE / ATTACHMENT / ATTACHMENT_REMOVED / ROUTING / CUSTOMER_FEEDBACK
   actorId    String?  @map("actor_id")
   payload    Json
   createdAt  DateTime @default(now()) @map("created_at")
