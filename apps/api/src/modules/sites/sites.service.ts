@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { Site } from "@prisma/client";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { Site, UserRole } from "@prisma/client";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { Paginated } from "../../common/types/paginated.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { AddSupportGroupMemberDto } from "./dto/add-support-group-member.dto";
 import { CreateSiteContactDto } from "./dto/create-site-contact.dto";
 import { CreateSiteDto } from "./dto/create-site.dto";
 import { CreateSupportCalendarDto } from "./dto/create-support-calendar.dto";
@@ -168,6 +169,138 @@ export class SitesService {
         tx,
       );
       return group;
+    });
+  }
+
+  private async getSupportGroup(id: string) {
+    const group = await this.prisma.supportGroup.findUnique({ where: { id } });
+    if (!group) {
+      throw new NotFoundException(`Support group ${id} not found`);
+    }
+    return group;
+  }
+
+  async deleteSupportGroup(id: string, actor: ActorContext) {
+    const group = await this.getSupportGroup(id);
+    // Incident.ownerGroupId is a real FK (Restrict by default) — a group
+    // still holding tickets can't just vanish out from under them, so this
+    // is a deliberate business rule, not just letting the DB constraint
+    // surface as a raw 500.
+    const assignedIncident = await this.prisma.incident.findFirst({
+      where: { ownerGroupId: id },
+      select: { id: true },
+    });
+    if (assignedIncident) {
+      throw new BadRequestException(
+        "Cannot delete a support group that still has incidents assigned to it",
+      );
+    }
+    await this.prisma.$transaction(async (tx) => {
+      // SupportGroupMember rows FK into the group too — clear the roster
+      // first so the group delete itself doesn't hit that constraint.
+      await tx.supportGroupMember.deleteMany({ where: { groupId: id } });
+      await tx.supportGroup.delete({ where: { id } });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportGroup",
+          entityId: id,
+          action: "DELETE",
+          before: group,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+    });
+  }
+
+  /** A group's name and the ids of its active members, or null when the
+   *  group doesn't exist. For the routing module's team filter. */
+  async findGroupRoster(
+    groupId: string,
+  ): Promise<{ id: string; name: string; memberIds: string[] } | null> {
+    const group = await this.prisma.supportGroup.findUnique({
+      where: { id: groupId },
+      include: { members: { where: { user: { isActive: true } }, select: { userId: true } } },
+    });
+    return group
+      ? { id: group.id, name: group.name, memberIds: group.members.map((m) => m.userId) }
+      : null;
+  }
+
+  /** Who's actually on a group's roster — this is what
+   * IncidentsService.notifyGroupAssignment reads to know who to tell when a
+   * ticket lands in this group unassigned. */
+  async listGroupMembers(groupId: string) {
+    await this.getSupportGroup(groupId);
+    const members = await this.prisma.supportGroupMember.findMany({
+      where: { groupId },
+      include: { user: { select: { id: true, displayName: true, email: true, role: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+    return members.map((m) => ({ membershipId: m.id, ...m.user }));
+  }
+
+  async addGroupMember(groupId: string, dto: AddSupportGroupMemberDto, actor: ActorContext) {
+    await this.getSupportGroup(groupId);
+    const user = await this.prisma.user.findUnique({
+      where: { id: dto.userId },
+      select: { id: true, displayName: true, email: true, role: true },
+    });
+    if (!user) {
+      throw new NotFoundException(`User ${dto.userId} not found`);
+    }
+    // A support group's roster is who gets paged for a ticket queue — a
+    // customer was never a candidate, and this rejects it server-side
+    // rather than just hiding the option in the picker (spec §4: a
+    // customer's only writes are their own ticket's comments/attachments).
+    if (user.role === UserRole.CLIENT_MANAGER_VIEWER) {
+      throw new BadRequestException("Customers cannot be added to a support group");
+    }
+    return this.prisma.$transaction(async (tx) => {
+      // Idempotent by design — clicking "add" twice on the same person is a
+      // no-op, not an error the UI has to swallow.
+      const membership = await tx.supportGroupMember.upsert({
+        where: { groupId_userId: { groupId, userId: dto.userId } },
+        create: { groupId, userId: dto.userId },
+        update: {},
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportGroup",
+          entityId: groupId,
+          action: "ADD_MEMBER",
+          after: { userId: dto.userId, displayName: user.displayName },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return { membershipId: membership.id, ...user };
+    });
+  }
+
+  async removeGroupMember(groupId: string, userId: string, actor: ActorContext) {
+    await this.getSupportGroup(groupId);
+    const membership = await this.prisma.supportGroupMember.findUnique({
+      where: { groupId_userId: { groupId, userId } },
+    });
+    if (!membership) {
+      throw new NotFoundException(`User ${userId} is not a member of group ${groupId}`);
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.supportGroupMember.delete({ where: { id: membership.id } });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportGroup",
+          entityId: groupId,
+          action: "REMOVE_MEMBER",
+          before: { userId },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
     });
   }
 }

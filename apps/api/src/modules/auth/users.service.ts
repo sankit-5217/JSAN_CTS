@@ -12,7 +12,7 @@ export interface UserSummary {
 
 /**
  * Backs the "who can I assign this to" pickers (incident owner, etc.) —
- * deliberately the only user-facing read this module exposes: no idpSubject,
+ * deliberately the only user-facing read this module exposes: no password or identity data,
  * no timestamps, nothing beyond what a picker needs to show a name and let
  * the caller submit an id (spec §12: auth owns identity mapping, not a
  * general user-admin surface).

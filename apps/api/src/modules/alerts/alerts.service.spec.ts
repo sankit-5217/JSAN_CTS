@@ -3,6 +3,7 @@ import { NotificationsPublisher } from "../../common/notifications/notifications
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { ChangesService } from "../changes/changes.service";
+import { InboxService } from "../inbox/inbox.service";
 import { IncidentsService } from "../incidents/incidents.service";
 import { AlertRulesService } from "./alert-rules.service";
 import { DEFAULT_ALERT_RULE } from "./alerts.constants";
@@ -66,9 +67,15 @@ describe("AlertsService", () => {
   let prisma: PrismaMock;
   let audit: { record: jest.Mock };
   let notifications: { enqueue: jest.Mock };
-  let incidents: { findOpenByCi: jest.Mock; linkAlert: jest.Mock };
+  let incidents: {
+    findOpenByCi: jest.Mock;
+    linkAlert: jest.Mock;
+    notifyAlertRecovered: jest.Mock;
+    createFromAlert: jest.Mock;
+  };
   let alertRules: { resolveRule: jest.Mock };
   let changes: { getActiveMaintenanceWindows: jest.Mock };
+  let inbox: { notifyUsers: jest.Mock };
   let service: AlertsService;
 
   beforeEach(() => {
@@ -78,9 +85,15 @@ describe("AlertsService", () => {
     incidents = {
       findOpenByCi: jest.fn().mockResolvedValue(null),
       linkAlert: jest.fn().mockResolvedValue({ linked: true }),
+      notifyAlertRecovered: jest.fn().mockResolvedValue({ notified: false }),
+      createFromAlert: jest.fn().mockResolvedValue({
+        incident: { id: "inc-new", incidentNo: "INC-000900" },
+        created: true,
+      }),
     };
     alertRules = { resolveRule: jest.fn().mockResolvedValue({ ...DEFAULT_ALERT_RULE }) };
     changes = { getActiveMaintenanceWindows: jest.fn().mockResolvedValue([]) };
+    inbox = { notifyUsers: jest.fn().mockResolvedValue(undefined) };
     service = new AlertsService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
@@ -88,6 +101,7 @@ describe("AlertsService", () => {
       incidents as unknown as IncidentsService,
       alertRules as unknown as AlertRulesService,
       changes as unknown as ChangesService,
+      inbox as unknown as InboxService,
     );
     prisma.site.findUnique.mockResolvedValue({ id: "site-1", code: "SITE01" });
     prisma.configurationItem.findUnique.mockResolvedValue({
@@ -413,6 +427,204 @@ describe("AlertsService", () => {
     });
   });
 
+  describe("alert-recovered-after-resolve notify", () => {
+    it("tells IncidentsService when a correlated alert recovers", async () => {
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-c",
+        state: "OPEN",
+        siteId: "site-1",
+        ciId: "ci-1",
+        correlatedIncidentId: "inc-3",
+        lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+      });
+      prisma.alert.update.mockResolvedValue({
+        id: "alert-c",
+        state: "RECOVERED",
+        correlatedIncidentId: "inc-3",
+      });
+
+      await service.ingest(baseDto({ state: "RECOVERED" }), ACTOR);
+
+      expect(incidents.notifyAlertRecovered).toHaveBeenCalledWith(
+        "inc-3",
+        expect.objectContaining({
+          id: "alert-c",
+          alertType: "disk.predictive_failure",
+          severity: "HIGH",
+          source: "ZABBIX",
+        }),
+        ACTOR,
+      );
+    });
+
+    it("does not call it when the alert was never correlated to an incident", async () => {
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-c",
+        state: "OPEN",
+        siteId: "site-1",
+        ciId: "ci-1",
+        correlatedIncidentId: null,
+        lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+      });
+      prisma.alert.update.mockResolvedValue({ id: "alert-c", state: "RECOVERED" });
+
+      await service.ingest(baseDto({ state: "RECOVERED" }), ACTOR);
+
+      expect(incidents.notifyAlertRecovered).not.toHaveBeenCalled();
+    });
+
+    it("does not call it on a repeat RECOVERED delivery that changes nothing", async () => {
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-c",
+        state: "RECOVERED",
+        siteId: "site-1",
+        ciId: "ci-1",
+        correlatedIncidentId: "inc-3",
+        lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+      });
+      prisma.alert.update.mockResolvedValue({
+        id: "alert-c",
+        state: "RECOVERED",
+        correlatedIncidentId: "inc-3",
+      });
+
+      await service.ingest(baseDto({ state: "RECOVERED" }), ACTOR);
+
+      expect(incidents.notifyAlertRecovered).not.toHaveBeenCalled();
+    });
+
+    it("never fails ingestion when notifyAlertRecovered throws", async () => {
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-c",
+        state: "OPEN",
+        siteId: "site-1",
+        ciId: "ci-1",
+        correlatedIncidentId: "inc-3",
+        lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+      });
+      prisma.alert.update.mockResolvedValue({
+        id: "alert-c",
+        state: "RECOVERED",
+        correlatedIncidentId: "inc-3",
+      });
+      incidents.notifyAlertRecovered.mockRejectedValue(new Error("incidents service down"));
+
+      const result = await service.ingest(baseDto({ state: "RECOVERED" }), ACTOR);
+
+      expect(result.alertId).toBe("alert-c");
+      expect(result.stateChanged).toBe(true);
+    });
+  });
+
+  describe("auto-creating an incident", () => {
+    beforeEach(() => {
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-1", state: "OPEN" });
+      prisma.user.findMany.mockResolvedValue([]);
+    });
+
+    it("opens an incident for a new CRITICAL alert when the CI has none open", async () => {
+      const result = await service.ingest(baseDto({ severity: "CRITICAL" }), ACTOR);
+
+      expect(incidents.createFromAlert).toHaveBeenCalledWith(
+        {
+          siteId: "site-1",
+          ciId: "ci-1",
+          category: "OTHER",
+          priority: "P1",
+          shortDescription:
+            "[SITE01-R01-SRV-038] Predictive failure on physical disk 2:1 (disk.predictive_failure)",
+          alert: expect.objectContaining({ id: "alert-1", severity: "CRITICAL", source: "ZABBIX" }),
+        },
+        ACTOR,
+      );
+      expect(prisma.alert.update).toHaveBeenCalledWith({
+        where: { id: "alert-1" },
+        data: { correlatedIncidentId: "inc-new" },
+      });
+      expect(result).toMatchObject({ incidentCreated: true, correlatedIncidentId: "inc-new" });
+    });
+
+    it("uses the rule's category and priority when set", async () => {
+      alertRules.resolveRule.mockResolvedValue({
+        ...DEFAULT_ALERT_RULE,
+        autoCreateSeverities: ["CRITICAL", "HIGH"],
+        incidentCategory: "STORAGE_FAILURE",
+        incidentPriority: "P2",
+      });
+      await service.ingest(baseDto({ severity: "HIGH" }), ACTOR);
+      expect(incidents.createFromAlert).toHaveBeenCalledWith(
+        expect.objectContaining({ category: "STORAGE_FAILURE", priority: "P2" }),
+        ACTOR,
+      );
+    });
+
+    it("derives priority from severity when the rule sets none", async () => {
+      alertRules.resolveRule.mockResolvedValue({
+        ...DEFAULT_ALERT_RULE,
+        autoCreateSeverities: ["HIGH"],
+      });
+      await service.ingest(baseDto({ severity: "HIGH" }), ACTOR);
+      expect(incidents.createFromAlert).toHaveBeenCalledWith(
+        expect.objectContaining({ priority: "P2" }),
+        ACTOR,
+      );
+    });
+
+    it("leaves a HIGH alert alone under the default rule (CRITICAL only)", async () => {
+      const result = await service.ingest(baseDto({ severity: "HIGH" }), ACTOR);
+      expect(incidents.createFromAlert).not.toHaveBeenCalled();
+      expect(result.incidentCreated).toBe(false);
+    });
+
+    it("links to the open incident instead of creating one", async () => {
+      incidents.findOpenByCi.mockResolvedValue({ id: "inc-open", incidentNo: "INC-000001" });
+      const result = await service.ingest(baseDto({ severity: "CRITICAL" }), ACTOR);
+      expect(incidents.createFromAlert).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ incidentCreated: false, correlatedIncidentId: "inc-open" });
+    });
+
+    it("never creates for a RECOVERED alert, an unknown CI, or when auto-create is off", async () => {
+      await service.ingest(baseDto({ severity: "CRITICAL", state: "RECOVERED" }), ACTOR);
+
+      prisma.configurationItem.findUnique.mockResolvedValue(null);
+      await service.ingest(baseDto({ severity: "CRITICAL", eventId: "e2" }), ACTOR);
+
+      prisma.configurationItem.findUnique.mockResolvedValue({ id: "ci-1", siteId: "site-1" });
+      alertRules.resolveRule.mockResolvedValue({ ...DEFAULT_ALERT_RULE, autoCreateSeverities: [] });
+      await service.ingest(baseDto({ severity: "CRITICAL", eventId: "e3" }), ACTOR);
+
+      expect(incidents.createFromAlert).not.toHaveBeenCalled();
+    });
+
+    it("doesn't create while maintenance suppresses auto-ticketing", async () => {
+      prisma.configurationItem.findUnique.mockResolvedValue({
+        id: "ci-1",
+        siteId: "site-1",
+        lifecycleStatus: "MAINTENANCE",
+      });
+      const result = await service.ingest(baseDto({ severity: "CRITICAL" }), ACTOR);
+      expect(result.autoTicketSuppressed).toBe(true);
+      expect(incidents.createFromAlert).not.toHaveBeenCalled();
+    });
+
+    it("doesn't create where the rule turns auto-correlation off", async () => {
+      alertRules.resolveRule.mockResolvedValue({
+        ...DEFAULT_ALERT_RULE,
+        autoCorrelateIncidents: false,
+      });
+      await service.ingest(baseDto({ severity: "CRITICAL" }), ACTOR);
+      expect(incidents.createFromAlert).not.toHaveBeenCalled();
+    });
+
+    it("never fails ingestion when creating the incident throws", async () => {
+      incidents.createFromAlert.mockRejectedValue(new Error("db down"));
+      const result = await service.ingest(baseDto({ severity: "CRITICAL" }), ACTOR);
+      expect(result).toMatchObject({ alertId: "alert-1", incidentCreated: false });
+      expect(result.correlatedIncidentId).toBeNull();
+    });
+  });
+
   describe("alert rules drive ingest behaviour", () => {
     it("uses the rule's flapping threshold, not a constant", async () => {
       alertRules.resolveRule.mockResolvedValue({ ...DEFAULT_ALERT_RULE, flappingThreshold: 10 });
@@ -462,10 +674,21 @@ describe("AlertsService", () => {
     prisma.alert.findUnique.mockResolvedValue(null);
     prisma.alert.create.mockResolvedValue({ id: "alert-crit", state: "OPEN" });
     prisma.user.findMany.mockResolvedValue([
-      { email: "noc@corp.example", displayName: "NOC Desk" },
+      { id: "noc-1", email: "noc@corp.example", displayName: "NOC Desk" },
     ]);
 
     await service.ingest(baseDto({ severity: "CRITICAL" }), ACTOR);
+
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userIds: ["noc-1"],
+        kind: "ALERT_RAISED",
+        entityType: "ALERT",
+        entityId: "alert-crit",
+        level: 1,
+        dedupeKey: "alert-raised:alert-crit",
+      }),
+    );
 
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -475,7 +698,7 @@ describe("AlertsService", () => {
         }),
         recipients: { to: [{ name: "NOC Desk", email: "noc@corp.example" }] },
       }),
-      "ALERT_RAISED:alert-crit",
+      "ALERT_RAISED:alert-crit:paged",
     );
   });
 
@@ -497,6 +720,7 @@ describe("AlertsService", () => {
 
     expect(notifications.enqueue).not.toHaveBeenCalled();
     expect(prisma.user.findMany).not.toHaveBeenCalled();
+    expect(inbox.notifyUsers).not.toHaveBeenCalled();
   });
 
   it("throws NotFoundException for an unknown alert id", async () => {

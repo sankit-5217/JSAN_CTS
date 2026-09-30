@@ -1,17 +1,17 @@
-# JSAN CTS Data Center OpsDesk — Project Overview & Task Division
+# JSAN Data Center OpsDesk — Project Overview & Task Division
 
 Source of truth: `docs/JSAN_CTS_DC_OpsDesk_Developer_Build_Architecture_v1.0.pdf`. This document summarizes it and assigns ownership between the two developers building it.
 
 ## What we're building
 
-A centralized data-center infrastructure operations and service-management platform: site/asset visibility, CMDB, incidents and requests, SLA governance, engineer worklogs, Dell/HPE hardware lifecycle tracking, monitoring alerts, vendor/RMA coordination, SOPs, risk/BCP records, and management reporting. **Not** a ServiceNow clone — build only what CTS/JSAN data-center operations need, and reuse mature monitoring/logging tools instead of rebuilding them.
+A centralized data-center infrastructure operations and service-management platform: site/asset visibility, CMDB, incidents and requests, SLA governance, engineer worklogs, Dell/HPE hardware lifecycle tracking, monitoring alerts, vendor/RMA coordination, SOPs, risk/BCP records, and management reporting. **Not** a ServiceNow clone — build only what JSAN data-center operations need, and reuse mature monitoring/logging tools instead of rebuilding them.
 
 **Operating chain:** Site → Rack → Asset/CI → Health/Alert → Incident → Engineer Action → Vendor Case/RMA → Restoration → RCA → SLA/Management Report.
 
 ## Architecture guardrails (non-negotiable)
 
 - **Modular monolith**, not microservices: one NestJS API, strict module boundaries, background jobs as a separate worker process from the same codebase.
-- **Stack**: React+TS+Vite+MUI frontend, NestJS+TS backend, PostgreSQL via Prisma, Redis+BullMQ, S3/MinIO for attachments, OIDC/Keycloak for auth.
+- **Stack**: React+TS+Vite+MUI frontend, NestJS+TS backend, PostgreSQL via Prisma, Redis+BullMQ, S3/MinIO for attachments; sign-in by email + password or Google / Microsoft / GitHub, with admin-issued API tokens for machines.
 - **Don't rebuild monitoring/logging** — integrate Zabbix/Prometheus/Grafana and Loki/OpenSearch.
 - **Site Collector pattern**: a local agent talks to iDRAC/iLO/SNMP and pushes outbound over TLS; never expose management ports to the internet.
 - **CMDB-first, audit-everything, config-over-hardcode**: SLA times, priorities, calendars are DB-driven; every mutation is append-only audited.
@@ -39,7 +39,7 @@ tests/
   integration/, e2e/
 ```
 
-This scaffold implements **Sprint 1 (Foundation)**: repo, Docker Compose, NestJS/React skeletons, Prisma schema and migrations setup, CI pipeline, coding standards. See `CLAUDE.md` for the guardrails AI/human contributors should follow, and `README.md` for local dev setup.
+**Current status**: all 16 backend modules (`apps/api/src/modules/*`) are implemented with tests (465+ passing), the frontend covers every module with a working page, and Sprint 12 (Hardening/UAT) work — rate limiting, CI dependency/secret/container scanning, DB and object-storage backup/restore drills (`docs/runbooks/`) — is done. Sign-in is email + password (emailed invites and resets, lockout) plus optional Google / Microsoft / GitHub for existing users, and admin-issued API tokens for machines; the old email-only `dev-login` is gone (`docs/runbooks/README.md`, "Sign-in"). See `CLAUDE.md` for the guardrails AI/human contributors should follow, and `README.md` for local dev setup.
 
 ## Two-developer task split
 
@@ -51,7 +51,7 @@ The system-of-record backbone. Everything else depends on this being solid first
 
 | Module      | Responsibility                                                                   |
 | ----------- | -------------------------------------------------------------------------------- |
-| `auth`      | Identity (OIDC/Keycloak), RBAC, site-scoped permissions                          |
+| `auth`      | Sign-in (password, Google/Microsoft/GitHub, API tokens), RBAC, site scope        |
 | `sites`     | Site master, contacts, support calendars _(scaffolded as the reference pattern)_ |
 | `cmdb`      | Configuration Items, racks, relationships, lifecycle, bulk import                |
 | `incidents` | State machine, assignment, comments, transitions                                 |
@@ -82,8 +82,8 @@ Everything that talks to the outside world, plus operational governance.
 
 ### Shared / collaborative
 
-- **Sprint 1 (Foundation)** — done in this scaffold; both devs should read it end-to-end before extending it.
-- **Sprint 12 (Hardening/UAT)** — security review, resilience testing, backup/restore drill: joint effort.
+- **Sprint 1 (Foundation)** — done; both devs should read it end-to-end before extending it.
+- **Sprint 12 (Hardening/UAT)** — done: rate limiting, CI dependency/secret/container scanning, `SiteScopeGuard` test coverage, and DB + object-storage backup/restore drills (`docs/runbooks/`). Sign-in has since been rebuilt: passwords, Google/Microsoft/GitHub and API tokens replace `dev-login`.
 - `cmdb` is a shared dependency: Dev A builds it first since `incidents` needs it (target: stable by end of Sprint 3), but Dev B's hardware/alert work all links back to CIs — sync when the CMDB schema stabilizes.
 - Both developers independently satisfy the **Definition of Done** (spec §24) on every story: backend authorization, audit events, tests, no hardcoded values, OpenAPI docs, UI error/empty/loading states, peer review. This isn't divisible — it's the bar both clear on every PR.
 
@@ -91,6 +91,6 @@ Everything that talks to the outside world, plus operational governance.
 
 Follow the **Recommended First Development Demo** (spec §31) as the integration checkpoint after Sprints 1–4: admin creates a site/rack/CIs → service desk creates an incident → SLA starts → engineer acknowledges and clocks time → a simulated alert lands on the same incident timeline → a vendor case/RMA is recorded → recovery is observed → incident resolves → manager sees updated dashboards → auditor reconstructs the full timeline. If this vertical slice works, the core architecture (identity → CMDB → ticket → SLA → worklog → telemetry → vendor → audit → reporting) is proven.
 
-## Reference implementation in this scaffold
+## Reference implementation
 
-The `sites` module (`apps/api/src/modules/sites/`) is fully wired end-to-end — Prisma-backed service, controller, validated DTO — as the pattern to copy for `cmdb`, `incidents`, and the rest. The `SitesPage` in `apps/web/src/pages/` shows the matching frontend pattern (fetch from API, typed response, MUI table). Every other module is stubbed with a `TODO` comment naming its owner, its spec section, and its target sprint (see `apps/api/src/modules/*/*.module.ts`).
+The `sites` module (`apps/api/src/modules/sites/`) was the original pattern to copy — Prisma-backed service, controller, validated DTO — and the `SitesPage` in `apps/web/src/pages/` the matching frontend pattern (fetch from API, typed response, MUI table). Every other module now follows the same shape: `alerts`, `audit`, `auth`, `changes`, `cmdb`, `health`, `incidents`, `knowledge`, `monitoring`, `problems`, `reports`, `risks`, `sla`, `vendors`, `worklogs` are all implemented, not stubbed — each with its own `*.service.spec.ts` (and e2e coverage in `apps/api/test/` for the ones that need it) rather than a `TODO` comment.

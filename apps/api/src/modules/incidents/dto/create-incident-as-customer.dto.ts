@@ -16,7 +16,7 @@ export const CUSTOMER_ISSUE_CATEGORIES = [
 export type CustomerIssueCategory = (typeof CUSTOMER_ISSUE_CATEGORIES)[number];
 
 /**
- * What a site POC (CTS_MANAGER_VIEWER) submits to self-report an issue.
+ * What a site POC (CLIENT_MANAGER_VIEWER) submits to self-report an issue.
  * Deliberately excludes priority/impact/urgency/ciId — those are triage
  * calls the internal team makes, not something a customer sets (see
  * IncidentsService.createFromCustomer, which fills in a safe default and

@@ -15,6 +15,11 @@ const ALL_SITES_ROLES: ReadonlySet<UserRole> = new Set([
   UserRole.AUDITOR_READ_ONLY,
 ]);
 
+/** True for roles that see every site regardless of UserSiteAccess grants. */
+export function isAllSitesRole(role: UserRole): boolean {
+  return ALL_SITES_ROLES.has(role);
+}
+
 @Injectable()
 export class AuthzService {
   constructor(private readonly prisma: PrismaService) {}

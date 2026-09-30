@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
 import { ChangesModule } from "../changes/changes.module";
+import { InboxModule } from "../inbox/inbox.module";
 import { IncidentsModule } from "../incidents/incidents.module";
 import { AlertRulesController } from "./alert-rules.controller";
 import { AlertRulesService } from "./alert-rules.service";
@@ -40,7 +41,7 @@ import { AlertsService } from "./alerts.service";
  * until a row is seeded (spec §10.10, "config over hard-code").
  */
 @Module({
-  imports: [AuthModule, IncidentsModule, ChangesModule],
+  imports: [AuthModule, IncidentsModule, ChangesModule, InboxModule],
   controllers: [AlertsController, AlertRulesController],
   providers: [AlertsService, AlertRulesService],
   exports: [AlertsService, AlertRulesService],

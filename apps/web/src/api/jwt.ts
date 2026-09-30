@@ -36,3 +36,8 @@ export function getCurrentUserRole(): string | null {
   const token = getStoredToken();
   return token ? (decodeJwtPayload(token)?.role ?? null) : null;
 }
+
+/** Where a freshly signed-in user lands — clients get their own portal. */
+export function landingPathFor(accessToken: string): string {
+  return decodeJwtPayload(accessToken)?.role === "CLIENT_MANAGER_VIEWER" ? "/client/report" : "/";
+}

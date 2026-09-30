@@ -54,12 +54,12 @@ describe("SiteScopeGuard", () => {
     expect(authzService.canAccessSite).toHaveBeenCalledWith(user, "site-1");
   });
 
-  it("rejects via the :siteId param when canAccessSite resolves false (a CTS viewer can't see another restricted site)", async () => {
+  it("rejects via the :siteId param when canAccessSite resolves false (a client viewer can't see another restricted site)", async () => {
     const authzService = {
       canAccessSite: jest.fn().mockResolvedValue(false),
     } as unknown as AuthzService;
     const guard = new SiteScopeGuard(authzService);
-    const user = { id: "user-1", role: "CTS_MANAGER_VIEWER" };
+    const user = { id: "user-1", role: "CLIENT_MANAGER_VIEWER" };
     await expect(guard.canActivate(makeContext(user, { siteId: "site-2" }))).rejects.toBeInstanceOf(
       ForbiddenException,
     );

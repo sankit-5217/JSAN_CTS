@@ -5,6 +5,8 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: UserRole;
+  /** The user's sessionVersion when issued; a mismatch means "signed out". */
+  sv: number;
 }
 
 /** Shape attached to `req.user` after JwtStrategy.validate() re-loads the user. */

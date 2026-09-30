@@ -5,15 +5,22 @@ import {
   AlertNormalizationError as ZabbixNormalizationError,
   normalizeZabbixEvent,
 } from "@cts-dc-opsdesk/zabbix-adapter";
-import { UserRole } from "@prisma/client";
+import { InAppNotificationKind, UserRole } from "@prisma/client";
 import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import { ChangesService } from "../changes/changes.service";
+import { InboxService } from "../inbox/inbox.service";
+import { levelForAlertSeverity } from "../inbox/notification-sound-rules.service";
 import { IncidentsService } from "../incidents/incidents.service";
 import { AlertRulesService } from "./alert-rules.service";
-import type { AlertState } from "./alerts.constants";
+import {
+  DEFAULT_AUTO_INCIDENT_CATEGORY,
+  SEVERITY_TO_INCIDENT_PRIORITY,
+  type AlertState,
+  type EffectiveAlertRule,
+} from "./alerts.constants";
 import { computeAlertFingerprint } from "./alerts.fingerprint";
 import { AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
 import { IngestAlertDto } from "./dto/ingest-alert.dto";
@@ -51,9 +58,13 @@ export interface AlertIngestResult {
    * Id of a still-open incident on the same CI that this alert was attached to
    * (spec §10.10), or the id it was already linked to on an earlier ingest.
    * null when the CI is unknown, has no open incident, the alert has RECOVERED,
-   * or auto-ticketing was suppressed. Link-only — never opens or mutates a ticket.
+   * or auto-ticketing was suppressed. When `incidentCreated` is true it is
+   * the incident this alert just opened.
    */
   correlatedIncidentId: string | null;
+  /** true when this ingest opened a new incident (the alert rule's
+   *  auto-create severities matched and the CI had no open incident). */
+  incidentCreated: boolean;
 }
 
 /** One alert rejected during source-specific normalization. */
@@ -73,7 +84,9 @@ export interface SourceIngestResult {
  * Owns: normalized alerts, fingerprints, dedup, flapping signal (spec §10.9-10.10).
  * Must not own: raw time-series storage (that stays in Zabbix/Prometheus), and
  * must not mutate incident/SLA tables directly — correlation calls
- * IncidentsService (read `findOpenByCi`, write `linkAlert`), never the tables.
+ * IncidentsService (read `findOpenByCi`, write `linkAlert` / `createFromAlert`),
+ * never the tables. A matching rule's auto-create severities open a new
+ * incident when the CI has none open.
  *
  * Ingestion tunables (flapping threshold + window, NOC-paging severities,
  * auto-correlate + maintenance-suppression toggles) come from the `alert_rules`
@@ -92,6 +105,7 @@ export class AlertsService {
     private readonly incidents: IncidentsService,
     private readonly alertRules: AlertRulesService,
     private readonly changes: ChangesService,
+    private readonly inbox: InboxService,
   ) {}
 
   async ingest(dto: IngestAlertDto, actor: ActorContext): Promise<AlertIngestResult> {
@@ -260,6 +274,45 @@ export class AlertsService {
       );
     }
 
+    // Nothing open to attach to: when this alert's rule auto-creates at this
+    // severity, open the incident (skill-based routing then offers it). Only
+    // alongside auto-correlation, only for a live alert on a known site + CI,
+    // and never while maintenance suppresses auto-ticketing.
+    let incidentCreated = false;
+    const siteId = site?.id ?? existing?.siteId ?? null;
+    if (
+      !correlatedIncidentId &&
+      rule.autoCorrelateIncidents &&
+      !autoTicketSuppressed &&
+      ciId &&
+      siteId &&
+      finalState !== "RECOVERED" &&
+      rule.autoCreateSeverities.includes(dto.severity)
+    ) {
+      const opened = await this.openIncidentForAlert(
+        alertId,
+        { siteId, ciId, fingerprint },
+        dto,
+        rule,
+        actor,
+      );
+      if (opened) {
+        correlatedIncidentId = opened.incidentId;
+        incidentCreated = opened.created;
+      }
+    }
+
+    // The alert genuinely cleared. If it's still linked to an incident that
+    // was already RESOLVED/CLOSED — most notably via the open-alert override
+    // in IncidentsService.createTransition() — that's the loop closing: tell
+    // the owner the real problem is now actually fixed. IncidentsService
+    // itself no-ops when the incident is still open, so this fires on every
+    // recovery of a correlated alert without needing to know the incident's
+    // status here.
+    if (finalState === "RECOVERED" && stateChanged && correlatedIncidentId) {
+      await this.notifyAlertRecoveredIfAlreadyClosed(correlatedIncidentId, alertId, dto, actor);
+    }
+
     return {
       alertId,
       fingerprint,
@@ -272,7 +325,58 @@ export class AlertsService {
       suppressedByMaintenance,
       autoTicketSuppressed,
       correlatedIncidentId,
+      incidentCreated,
     };
+  }
+
+  /**
+   * Opens (or, if one appeared meanwhile, links to) the incident for this
+   * alert through IncidentsService.createFromAlert(). Best-effort like
+   * correlation: a failure is logged and the next ingest of the alert retries.
+   */
+  private async openIncidentForAlert(
+    alertId: string,
+    ctx: { siteId: string; ciId: string; fingerprint: string },
+    dto: IngestAlertDto,
+    rule: EffectiveAlertRule,
+    actor: ActorContext,
+  ): Promise<{ incidentId: string; created: boolean } | null> {
+    try {
+      const { incident, created } = await this.incidents.createFromAlert(
+        {
+          siteId: ctx.siteId,
+          ciId: ctx.ciId,
+          category: rule.incidentCategory ?? DEFAULT_AUTO_INCIDENT_CATEGORY,
+          priority: rule.incidentPriority ?? SEVERITY_TO_INCIDENT_PRIORITY[dto.severity],
+          shortDescription: `[${dto.ciCode}] ${dto.summary} (${dto.alertType})`,
+          alert: {
+            id: alertId,
+            alertType: dto.alertType,
+            severity: dto.severity,
+            source: dto.source,
+            fingerprint: ctx.fingerprint,
+          },
+        },
+        actor,
+      );
+      await this.prisma.alert.update({
+        where: { id: alertId },
+        data: { correlatedIncidentId: incident.id },
+      });
+      this.logger.log(
+        created
+          ? `alert ${alertId} opened incident ${incident.incidentNo}`
+          : `alert ${alertId} correlated to open incident ${incident.incidentNo}`,
+      );
+      return { incidentId: incident.id, created };
+    } catch (err) {
+      this.logger.warn(
+        `alert ${alertId} incident auto-create skipped: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
   }
 
   /**
@@ -331,7 +435,34 @@ export class AlertsService {
   }
 
   /**
-   * Best-effort: a brand-new CRITICAL alert pages the NOC roster. Only on first
+   * Best-effort — a failure notifying that a recovered alert's incident was
+   * already closed must never fail ingestion (same posture as
+   * correlateToOpenIncident above).
+   */
+  private async notifyAlertRecoveredIfAlreadyClosed(
+    correlatedIncidentId: string,
+    alertId: string,
+    dto: IngestAlertDto,
+    actor: ActorContext,
+  ): Promise<void> {
+    try {
+      await this.incidents.notifyAlertRecovered(
+        correlatedIncidentId,
+        { id: alertId, alertType: dto.alertType, severity: dto.severity, source: dto.source },
+        actor,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `alert ${alertId} recovered-after-resolve notify skipped: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Best-effort: a brand-new CRITICAL alert pages the NOC roster, in their bell
+   * (with the sound tier for its severity) and by email. Only on first
    * sighting (not dedup) so a re-fired trap doesn't re-page. Fully swallowed —
    * ingestion never blocks or fails on the notification.
    */
@@ -342,11 +473,21 @@ export class AlertsService {
           isActive: true,
           role: { in: [UserRole.SERVICE_DESK_NOC, UserRole.INFRASTRUCTURE_LEAD] },
         },
-        select: { email: true, displayName: true },
+        select: { id: true, email: true, displayName: true },
       });
       if (roster.length === 0) {
         return;
       }
+      await this.inbox.notifyUsers({
+        userIds: roster.map((u) => u.id),
+        kind: InAppNotificationKind.ALERT_RAISED,
+        title: `${dto.severity} alert on ${dto.siteCode}: ${dto.alertType}`,
+        body: dto.summary || undefined,
+        entityType: "ALERT",
+        entityId: alertId,
+        level: levelForAlertSeverity(dto.severity),
+        dedupeKey: `alert-raised:${alertId}`,
+      });
       await this.notifications.enqueue(
         {
           event: {
@@ -362,7 +503,13 @@ export class AlertsService {
           },
           recipients: { to: roster.map((u) => ({ name: u.displayName, email: u.email })) },
         },
-        `ALERT_RAISED:${alertId}`,
+        // BullMQ rejects a custom jobId containing any colon unless it splits
+        // into exactly 3 parts (job.js's legacy repeatable-job compat check) —
+        // `ALERT_RAISED:${alertId}` has only 1 colon (2 parts) and was
+        // silently failing to enqueue every NOC page this session (see the
+        // "failed to enqueue ALERT_RAISED: Custom Id cannot contain :"
+        // warnings). A trailing literal segment restores the required shape.
+        `ALERT_RAISED:${alertId}:paged`,
       );
     } catch (err) {
       this.logger.warn(
@@ -475,6 +622,7 @@ export class AlertsService {
         ...(query.severity ? { severity: query.severity } : {}),
         ...(query.fingerprint ? { fingerprint: query.fingerprint } : {}),
         ...(ciId ? { ciId } : {}),
+        ...(query.correlatedIncidentId ? { correlatedIncidentId: query.correlatedIncidentId } : {}),
       },
       orderBy: { lastSeenAt: "desc" },
       take: query.limit ?? 50,

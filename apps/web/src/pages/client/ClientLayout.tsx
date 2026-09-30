@@ -1,7 +1,9 @@
 import { Navigate, Outlet, Link, useLocation } from "react-router-dom";
-import { AppBar, Box, Button, Chip, Stack, Toolbar, Typography } from "@mui/material";
+import { AppBar, Box, Button, Stack, Toolbar, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
-import { clearStoredToken, getStoredToken } from "../../api/client";
+import { AccountMenu, roleMeta } from "../../components/AccountMenu";
+import { NotificationBell } from "../../components/NotificationBell";
+import { getStoredToken, signOut } from "../../api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "../../api/jwt";
 import { theme } from "../../theme/theme";
 
@@ -22,7 +24,7 @@ const NAV_ITEMS = [
 ];
 
 /**
- * The client/end-user shell (CTS_MANAGER_VIEWER) — deliberately not the
+ * The client/end-user shell (CLIENT_MANAGER_VIEWER) — deliberately not the
  * internal Sidebar/TopBar from App.tsx. A site POC doesn't need CMDB, SLA
  * policy config, alert rules or any of the other fourteen internal modules;
  * giving them the same nav as staff (even with writes blocked server-side)
@@ -37,7 +39,7 @@ export function ClientLayout() {
   // A staff member who wanders onto a /client/* URL gets sent back to the
   // internal console rather than seeing a portal built for someone else's
   // role — symmetric with AuthenticatedLayout's own redirect the other way.
-  if (getCurrentUserRole() !== "CTS_MANAGER_VIEWER") {
+  if (getCurrentUserRole() !== "CLIENT_MANAGER_VIEWER") {
     return <Navigate to="/" replace />;
   }
 
@@ -63,7 +65,7 @@ export function ClientLayout() {
                 letterSpacing: "0.07em",
               }}
             >
-              CTS &middot; SUPPORT PORTAL
+              JSAN &middot; SUPPORT PORTAL
             </Typography>
           </Stack>
 
@@ -91,25 +93,21 @@ export function ClientLayout() {
 
           <Box sx={{ flex: 1 }} />
 
-          {user && <Chip size="small" label="Client" variant="outlined" />}
           {user && (
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ display: { xs: "none", sm: "block" } }}
-            >
-              {user.email}
-            </Typography>
+            <NotificationBell
+              linkFor={(n) =>
+                n.entityType === "INCIDENT" ? `/client/tickets/${n.entityId}` : null
+              }
+            />
           )}
-          <Button
-            size="small"
-            onClick={() => {
-              clearStoredToken();
-              window.location.assign("/login");
-            }}
-          >
-            Log out
-          </Button>
+          {user && (
+            <AccountMenu
+              email={user.email}
+              roleLabel="Client"
+              roleColor={roleMeta("CLIENT_MANAGER_VIEWER").color}
+              onLogout={signOut}
+            />
+          )}
         </Toolbar>
       </AppBar>
 

@@ -1,13 +1,16 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { IncidentStatus, Priority, UserRole } from "@prisma/client";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { StorageService } from "../../common/storage/storage.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { InboxService } from "../inbox/inbox.service";
 import { SlaService } from "../sla/sla.service";
 import { IncidentsService } from "./incidents.service";
+import { OPEN_STATUSES } from "./incident-transitions";
 
 const engineer: AuthenticatedUser = {
   id: "engineer-1",
@@ -30,10 +33,10 @@ const serviceDesk: AuthenticatedUser = {
   isActive: true,
 };
 
-const ctsViewer: AuthenticatedUser = {
+const clientViewer: AuthenticatedUser = {
   id: "viewer-1",
   email: "viewer@example.com",
-  role: UserRole.CTS_MANAGER_VIEWER,
+  role: UserRole.CLIENT_MANAGER_VIEWER,
   isActive: true,
 };
 
@@ -80,6 +83,10 @@ function makeService(
     getAccessibleSiteIds?: jest.Mock;
     userFindUnique?: jest.Mock;
     userFindMany?: jest.Mock;
+    supportGroupFindUnique?: jest.Mock;
+    alertFindMany?: jest.Mock;
+    incidentGroupBy?: jest.Mock;
+    txUpdateMany?: jest.Mock;
   } = {},
 ) {
   const txIncident = {
@@ -89,6 +96,12 @@ function makeService(
     update: jest
       .fn()
       .mockImplementation(({ data }) => Promise.resolve({ ...baseIncident(), ...data })),
+    updateMany: overrides.txUpdateMany ?? jest.fn().mockResolvedValue({ count: 1 }),
+    findUniqueOrThrow: jest.fn().mockResolvedValue({
+      ...baseIncident(),
+      status: IncidentStatus.ASSIGNED,
+      ownerUserId: "eng-1",
+    }),
     ...overrides.txIncident,
   };
   const tx = {
@@ -121,11 +134,13 @@ function makeService(
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
+      groupBy: overrides.incidentGroupBy ?? jest.fn().mockResolvedValue([]),
     },
     incidentComment: { findMany: jest.fn().mockResolvedValue([]) },
     incidentEvent: {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn().mockResolvedValue({ id: "event-1" }),
     },
     attachment: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -134,6 +149,12 @@ function makeService(
     user: {
       findUnique: overrides.userFindUnique ?? jest.fn().mockResolvedValue(null),
       findMany: overrides.userFindMany ?? jest.fn().mockResolvedValue([]),
+    },
+    supportGroup: {
+      findUnique: overrides.supportGroupFindUnique ?? jest.fn().mockResolvedValue(null),
+    },
+    alert: {
+      findMany: overrides.alertFindMany ?? jest.fn().mockResolvedValue([]),
     },
   } as unknown as PrismaService;
 
@@ -166,6 +187,12 @@ function makeService(
     enqueue: jest.fn().mockResolvedValue(undefined),
   } as unknown as NotificationsPublisher;
 
+  const events = { emit: jest.fn() } as unknown as EventEmitter2;
+
+  const inbox = {
+    notifyUsers: jest.fn().mockResolvedValue(undefined),
+  } as unknown as InboxService;
+
   return {
     service: new IncidentsService(
       prisma,
@@ -174,6 +201,8 @@ function makeService(
       storageService,
       slaService,
       notifications,
+      events,
+      inbox,
     ),
     prisma,
     auditService,
@@ -181,6 +210,8 @@ function makeService(
     storageService,
     slaService,
     notifications,
+    events,
+    inbox,
     tx,
   };
 }
@@ -202,6 +233,56 @@ describe("IncidentsService.create", () => {
       expect.objectContaining({ entityType: "Incident", action: "CREATE" }),
       tx,
     );
+  });
+
+  it("notifies the service desk/NOC roster when a new ticket is raised", async () => {
+    const { service, notifications } = makeService({
+      userFindMany: jest
+        .fn()
+        .mockResolvedValue([{ email: "desk@corp.example", displayName: "Service Desk" }]),
+    });
+
+    const result = await service.create(baseCreateDto, { actorId: "user-1" });
+
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ kind: "INCIDENT_CREATED" }),
+        recipients: { to: [{ name: "Service Desk", email: "desk@corp.example" }] },
+      }),
+      `INCIDENT_CREATED:${result.id}:new`,
+    );
+  });
+
+  it("includes the reporting customer on the new-ticket notification when self-reported", async () => {
+    const { service, notifications } = makeService({
+      userFindMany: jest
+        .fn()
+        .mockResolvedValue([{ email: "desk@corp.example", displayName: "Service Desk" }]),
+      userFindUnique: jest
+        .fn()
+        .mockResolvedValue({ id: "customer-1", email: "jane@client.example", displayName: "Jane" }),
+    });
+
+    await service.create(baseCreateDto, { actorId: "user-1" }, "customer-1");
+
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "INCIDENT_CREATED",
+          reporter: { name: "Jane", email: "jane@client.example" },
+        }),
+      }),
+      expect.any(String),
+    );
+  });
+
+  it("skips the new-ticket notification (not the ticket itself) when no service desk user is on file", async () => {
+    const { service, notifications } = makeService({
+      userFindMany: jest.fn().mockResolvedValue([]),
+    });
+    const result = await service.create(baseCreateDto, { actorId: "user-1" });
+    expect(result).toMatchObject({ incidentNo: "INC-000001" });
+    expect(notifications.enqueue).not.toHaveBeenCalled();
   });
 
   it("starts the SLA clock in the same transaction as the incident row", async () => {
@@ -227,8 +308,8 @@ describe("IncidentsService.createFromCustomer", () => {
     const { service, tx } = makeService();
     const result = await service.createFromCustomer(
       customerDto,
-      { actorId: ctsViewer.id },
-      ctsViewer,
+      { actorId: clientViewer.id },
+      clientViewer,
     );
 
     expect(result).toMatchObject({ impact: "MEDIUM", urgency: "MEDIUM", priority: Priority.P3 });
@@ -246,7 +327,7 @@ describe("IncidentsService.createFromCustomer", () => {
   it("rejects a site the caller can't access before ever creating anything", async () => {
     const { service, tx } = makeService({ canAccessSite: jest.fn().mockResolvedValue(false) });
     await expect(
-      service.createFromCustomer(customerDto, { actorId: ctsViewer.id }, ctsViewer),
+      service.createFromCustomer(customerDto, { actorId: clientViewer.id }, clientViewer),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(tx.incident.create).not.toHaveBeenCalled();
   });
@@ -261,12 +342,12 @@ describe("IncidentsService.createFromCustomer", () => {
     const { service, tx } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
     });
     await service.createFromCustomer(
       { ...customerDto, details: "Started around 2pm." },
-      { actorId: ctsViewer.id },
-      ctsViewer,
+      { actorId: clientViewer.id },
+      clientViewer,
     );
     expect(tx.incidentComment.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -277,7 +358,7 @@ describe("IncidentsService.createFromCustomer", () => {
 
   it("creates no comment when `details` is omitted", async () => {
     const { service, tx } = makeService();
-    await service.createFromCustomer(customerDto, { actorId: ctsViewer.id }, ctsViewer);
+    await service.createFromCustomer(customerDto, { actorId: clientViewer.id }, clientViewer);
     expect(tx.incidentComment.create).not.toHaveBeenCalled();
   });
 });
@@ -289,14 +370,14 @@ describe("IncidentsService.update", () => {
         .fn()
         .mockResolvedValue(baseIncident({ siteId: "site-a", priority: Priority.P3 })),
     });
-    await service.update("incident-1", { priority: Priority.P1 }, engineer, {
-      actorId: engineer.id,
+    await service.update("incident-1", { priority: Priority.P1 }, serviceDesk, {
+      actorId: serviceDesk.id,
     });
     expect(slaService.onPriorityChanged).toHaveBeenCalledWith(
       tx,
       { id: "incident-1", siteId: "site-a" },
       Priority.P1,
-      { actorId: engineer.id },
+      { actorId: serviceDesk.id },
     );
   });
 
@@ -319,8 +400,8 @@ describe("IncidentsService.update", () => {
         displayName: "Otis Engineer",
       }),
     });
-    await service.update("incident-1", { ownerUserId: "engineer-2" }, engineer, {
-      actorId: engineer.id,
+    await service.update("incident-1", { ownerUserId: "engineer-2" }, serviceDesk, {
+      actorId: serviceDesk.id,
     });
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -331,6 +412,77 @@ describe("IncidentsService.update", () => {
     );
   });
 
+  it("notifies every member of the group when a PATCH assigns it with no individual owner", async () => {
+    const { service, notifications } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ ownerGroupId: null, ownerUserId: null })),
+      supportGroupFindUnique: jest.fn().mockResolvedValue({
+        id: "group-1",
+        name: "Networking",
+        members: [
+          {
+            user: {
+              isActive: true,
+              email: "eng1@example.com",
+              displayName: "Eng One",
+            },
+          },
+          {
+            user: {
+              isActive: true,
+              email: "eng2@example.com",
+              displayName: "Eng Two",
+            },
+          },
+          // inactive members never get paged
+          {
+            user: { isActive: false, email: "gone@example.com", displayName: "Gone" },
+          },
+        ],
+      }),
+    });
+    await service.update("incident-1", { ownerGroupId: "group-1" }, serviceDesk, {
+      actorId: serviceDesk.id,
+    });
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "INCIDENT_GROUP_ASSIGNED",
+          group: { name: "Networking" },
+        }),
+        recipients: {
+          to: [
+            { name: "Eng One", email: "eng1@example.com" },
+            { name: "Eng Two", email: "eng2@example.com" },
+          ],
+        },
+      }),
+      "INCIDENT_GROUP_ASSIGNED:incident-1:group-1",
+    );
+  });
+
+  it("notifies the individual owner, not the group, when both are set in the same PATCH", async () => {
+    const { service, notifications } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ ownerGroupId: null, ownerUserId: null })),
+      userFindUnique: jest.fn().mockResolvedValue({
+        id: "engineer-2",
+        email: "engineer2@example.com",
+        displayName: "Otis Engineer",
+      }),
+    });
+    await service.update(
+      "incident-1",
+      { ownerGroupId: "group-1", ownerUserId: "engineer-2" },
+      serviceDesk,
+      { actorId: serviceDesk.id },
+    );
+    const kinds = (notifications.enqueue as jest.Mock).mock.calls.map(([job]) => job.event.kind);
+    expect(kinds).toEqual(["INCIDENT_ASSIGNED"]);
+  });
+
   it("does not notify when ownerUserId is left unchanged", async () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerUserId: "engineer-1" })),
@@ -339,6 +491,94 @@ describe("IncidentsService.update", () => {
       actorId: engineer.id,
     });
     expect(notifications.enqueue).not.toHaveBeenCalled();
+  });
+
+  // Routing (ownership) and priority overrides are a Service Desk/elevated
+  // call, not Site Engineer's (spec §4: Site Engineer's access is "limited
+  // admin" scoped to diagnosis/restoration) — see INCIDENT_ROUTING_ROLES.
+  it("forbids a Site Engineer from reassigning ownerUserId via PATCH", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+    });
+    await expect(
+      service.update("incident-1", { ownerUserId: "engineer-2" }, engineer, {
+        actorId: engineer.id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.incident.update).not.toHaveBeenCalled();
+  });
+
+  it("forbids a Site Engineer from reassigning ownerGroupId via PATCH", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+    });
+    await expect(
+      service.update("incident-1", { ownerGroupId: "group-1" }, engineer, {
+        actorId: engineer.id,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.incident.update).not.toHaveBeenCalled();
+  });
+
+  it("forbids a Site Engineer from overriding priority via PATCH when it actually changes", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ priority: Priority.P3 })),
+    });
+    await expect(
+      service.update(
+        "incident-1",
+        { priority: Priority.P1, priorityChangeReason: "escalating" },
+        engineer,
+        { actorId: engineer.id },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.incident.update).not.toHaveBeenCalled();
+  });
+
+  it("still allows a Site Engineer to edit non-routing fields (diagnosis/description/CI)", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+    });
+    await service.update(
+      "incident-1",
+      { shortDescription: "Confirmed PDU B fault", impact: "MEDIUM", ciId: "ci-1" },
+      engineer,
+      { actorId: engineer.id },
+    );
+    expect(tx.incident.update).toHaveBeenCalled();
+  });
+
+  it("does not forbid a Site Engineer whose PATCH round-trips the ticket's current owner/priority unchanged", async () => {
+    // The edit form always resubmits the ticket's current owner/group/
+    // priority in the body — this must stay a no-op for Site Engineer, not
+    // a 403, or they couldn't edit anything else on a ticket they own.
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ ownerUserId: engineer.id, ownerGroupId: null, priority: Priority.P2 }),
+        ),
+    });
+    await service.update(
+      "incident-1",
+      { shortDescription: "Still working it", ownerUserId: engineer.id, priority: Priority.P2 },
+      engineer,
+      { actorId: engineer.id },
+    );
+    expect(tx.incident.update).toHaveBeenCalled();
+  });
+
+  it("allows Service Desk/NOC to reassign ownership and override priority via PATCH", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ priority: Priority.P3 })),
+    });
+    await service.update(
+      "incident-1",
+      { ownerUserId: "engineer-2", priority: Priority.P1, priorityChangeReason: "re-triaged" },
+      serviceDesk,
+      { actorId: serviceDesk.id },
+    );
+    expect(tx.incident.update).toHaveBeenCalled();
   });
 });
 
@@ -359,31 +599,31 @@ describe("IncidentsService site-scope enforcement", () => {
     await expect(service.findOneScoped("incident-1", engineer)).resolves.toBeDefined();
   });
 
-  it("findOneScoped allows a CTS_MANAGER_VIEWER to see an incident they reported", async () => {
+  it("findOneScoped allows a CLIENT_MANAGER_VIEWER to see an incident they reported", async () => {
     const { service } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
     });
-    await expect(service.findOneScoped("incident-1", ctsViewer)).resolves.toBeDefined();
+    await expect(service.findOneScoped("incident-1", clientViewer)).resolves.toBeDefined();
   });
 
-  it("findOneScoped throws for a CTS_MANAGER_VIEWER on an incident reported by someone else at the same site", async () => {
+  it("findOneScoped throws for a CLIENT_MANAGER_VIEWER on an incident reported by someone else at the same site", async () => {
     const { service } = makeService({
       incidentFindUnique: jest
         .fn()
         .mockResolvedValue(baseIncident({ reportedByUserId: "someone-else" })),
     });
-    await expect(service.findOneScoped("incident-1", ctsViewer)).rejects.toBeInstanceOf(
+    await expect(service.findOneScoped("incident-1", clientViewer)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
   });
 
-  it("findOneScoped throws for a CTS_MANAGER_VIEWER on an incident nobody reported (staff-created)", async () => {
+  it("findOneScoped throws for a CLIENT_MANAGER_VIEWER on an incident nobody reported (staff-created)", async () => {
     const { service } = makeService({
       incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ reportedByUserId: null })),
     });
-    await expect(service.findOneScoped("incident-1", ctsViewer)).rejects.toBeInstanceOf(
+    await expect(service.findOneScoped("incident-1", clientViewer)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
   });
@@ -451,12 +691,12 @@ describe("IncidentsService.findAll", () => {
     );
   });
 
-  it("forces reportedByUserId to the caller's own id for CTS_MANAGER_VIEWER, ignoring site scope alone", async () => {
+  it("forces reportedByUserId to the caller's own id for CLIENT_MANAGER_VIEWER, ignoring site scope alone", async () => {
     const { service, prisma } = makeService();
-    await service.findAll({ limit: 50, offset: 0 }, ["site-a"], ctsViewer);
+    await service.findAll({ limit: 50, offset: 0 }, ["site-a"], clientViewer);
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ reportedByUserId: ctsViewer.id }),
+        where: expect.objectContaining({ reportedByUserId: clientViewer.id }),
       }),
     );
   });
@@ -469,6 +709,33 @@ describe("IncidentsService.findAll", () => {
         where: expect.objectContaining({ reportedByUserId: undefined }),
       }),
     );
+  });
+});
+
+describe("IncidentsService.countOpenOwnedByPriority", () => {
+  it("counts only open incidents for the given owners, split by priority", async () => {
+    const incidentGroupBy = jest.fn().mockResolvedValue([
+      { ownerUserId: "eng-1", priority: Priority.P1, _count: { _all: 1 } },
+      { ownerUserId: "eng-1", priority: Priority.P4, _count: { _all: 2 } },
+    ]);
+    const { service } = makeService({ incidentGroupBy });
+    const counts = await service.countOpenOwnedByPriority(["eng-1", "eng-2"]);
+
+    expect(counts.get("eng-1")).toEqual({ P1: 1, P4: 2 });
+    expect(counts.has("eng-2")).toBe(false);
+    expect(incidentGroupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: ["ownerUserId", "priority"],
+        where: { ownerUserId: { in: ["eng-1", "eng-2"] }, status: { in: OPEN_STATUSES } },
+      }),
+    );
+  });
+
+  it("skips the query entirely for an empty list", async () => {
+    const incidentGroupBy = jest.fn();
+    const { service } = makeService({ incidentGroupBy });
+    expect((await service.countOpenOwnedByPriority([])).size).toBe(0);
+    expect(incidentGroupBy).not.toHaveBeenCalled();
   });
 });
 
@@ -509,13 +776,13 @@ describe("IncidentsService.createTransition", () => {
           baseIncident({ status: IncidentStatus.ASSIGNED, ownerUserId: engineer.id }),
         ),
     });
-    // CTS_MANAGER_VIEWER isn't in ASSIGNED -> ACKNOWLEDGED's allowedRoles.
+    // CLIENT_MANAGER_VIEWER isn't in ASSIGNED -> ACKNOWLEDGED's allowedRoles.
     await expect(
       service.createTransition(
         "incident-1",
         { toStatus: IncidentStatus.ACKNOWLEDGED },
         { actorId: "user-1" },
-        ctsViewer,
+        clientViewer,
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
@@ -628,6 +895,100 @@ describe("IncidentsService.createTransition", () => {
     });
   });
 
+  it("blocks RESOLVED when a linked alert is still OPEN and no reason is given", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
+        ),
+      alertFindMany: jest.fn().mockResolvedValue([
+        {
+          id: "alert-1",
+          alertType: "hardware.health_degraded",
+          severity: "CRITICAL",
+          state: "OPEN",
+        },
+      ]),
+    });
+    await expect(
+      service.createTransition(
+        "incident-1",
+        {
+          toStatus: IncidentStatus.RESOLVED,
+          resolutionCategory: "HARDWARE_REPLACED",
+          rootCauseSummary: "Faulty PSU replaced",
+        },
+        { actorId: engineer.id },
+        engineer,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("allows RESOLVED with an open linked alert when a reason overrides it, and records the override on the timeline", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
+        ),
+      alertFindMany: jest.fn().mockResolvedValue([
+        {
+          id: "alert-1",
+          alertType: "hardware.health_degraded",
+          severity: "CRITICAL",
+          state: "OPEN",
+        },
+      ]),
+    });
+    const result = await service.createTransition(
+      "incident-1",
+      {
+        toStatus: IncidentStatus.RESOLVED,
+        resolutionCategory: "HARDWARE_REPLACED",
+        rootCauseSummary: "Faulty PSU replaced",
+        reason: "Redundant PSU covers load; vendor RMA already in flight",
+      },
+      { actorId: engineer.id },
+      engineer,
+    );
+    expect(result).toMatchObject({ status: IncidentStatus.RESOLVED });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "STATUS_CHANGE",
+          payload: expect.objectContaining({
+            resolvedWithOpenAlerts: [
+              expect.objectContaining({ id: "alert-1", severity: "CRITICAL", state: "OPEN" }),
+            ],
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("allows RESOLVED without a reason when no linked alert is still open", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
+        ),
+      alertFindMany: jest.fn().mockResolvedValue([]),
+    });
+    const result = await service.createTransition(
+      "incident-1",
+      {
+        toStatus: IncidentStatus.RESOLVED,
+        resolutionCategory: "HARDWARE_REPLACED",
+        rootCauseSummary: "Faulty PSU replaced",
+      },
+      { actorId: engineer.id },
+      engineer,
+    );
+    expect(result).toMatchObject({ status: IncidentStatus.RESOLVED });
+  });
+
   it("calls SlaService.onPaused when transitioning to PENDING_VENDOR", async () => {
     const { service, tx, slaService } = makeService({
       incidentFindUnique: jest
@@ -721,6 +1082,30 @@ describe("IncidentsService.createTransition", () => {
     );
   });
 
+  it("notifies the group when NEW -> ASSIGNED resolves one with no individual owner", async () => {
+    const { service, notifications } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+      supportGroupFindUnique: jest.fn().mockResolvedValue({
+        id: "group-1",
+        name: "Networking",
+        members: [{ user: { isActive: true, email: "eng1@example.com", displayName: "Eng One" } }],
+      }),
+    });
+    await service.createTransition(
+      "incident-1",
+      { toStatus: IncidentStatus.ASSIGNED, ownerGroupId: "group-1" },
+      { actorId: serviceDesk.id },
+      serviceDesk,
+    );
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ kind: "INCIDENT_GROUP_ASSIGNED" }),
+        recipients: { to: [{ name: "Eng One", email: "eng1@example.com" }] },
+      }),
+      "INCIDENT_GROUP_ASSIGNED:incident-1:group-1",
+    );
+  });
+
   it("notifies owner (to) and cc's the reporting customer on every status change", async () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest.fn().mockResolvedValue(
@@ -804,11 +1189,11 @@ describe("IncidentsService.getAvailableTransitions", () => {
       incidentFindUnique: jest
         .fn()
         .mockResolvedValue(
-          baseIncident({ status: IncidentStatus.NEW, reportedByUserId: ctsViewer.id }),
+          baseIncident({ status: IncidentStatus.NEW, reportedByUserId: clientViewer.id }),
         ),
     });
-    // NEW -> ASSIGNED's allowedRoles doesn't include CTS_MANAGER_VIEWER.
-    const result = await service.getAvailableTransitions("incident-1", ctsViewer);
+    // NEW -> ASSIGNED's allowedRoles doesn't include CLIENT_MANAGER_VIEWER.
+    const result = await service.getAvailableTransitions("incident-1", clientViewer);
     expect(result).toEqual([]);
   });
 
@@ -888,6 +1273,29 @@ describe("IncidentsService.getAvailableTransitions", () => {
     ]);
   });
 
+  it("hints that a RESOLVED move needs a reason while a linked alert is still OPEN", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id }),
+        ),
+      alertFindMany: jest.fn().mockResolvedValue([
+        {
+          id: "alert-1",
+          alertType: "hardware.health_degraded",
+          severity: "CRITICAL",
+          state: "OPEN",
+        },
+      ]),
+    });
+    const result = await service.getAvailableTransitions("incident-1", engineer);
+    const resolved = result.find((r) => r.toStatus === IncidentStatus.RESOLVED);
+    expect(resolved?.allowed).toBe(true);
+    expect(resolved?.hint).toMatch(/still OPEN/);
+    expect(resolved?.hint).toMatch(/hardware.health_degraded/);
+  });
+
   it("lists every candidate when multiple rules share the same (from, role)", async () => {
     const { service } = makeService({
       incidentFindUnique: jest
@@ -903,7 +1311,7 @@ describe("IncidentsService.getAvailableTransitions", () => {
 });
 
 describe("IncidentsService comment visibility", () => {
-  it("excludes internal comments for CTS_MANAGER_VIEWER", async () => {
+  it("excludes internal comments for CLIENT_MANAGER_VIEWER", async () => {
     const comments = [
       { id: "c1", incidentId: "incident-1", isInternal: true, body: "internal note" },
       { id: "c2", incidentId: "incident-1", isInternal: false, body: "customer-visible" },
@@ -911,11 +1319,11 @@ describe("IncidentsService comment visibility", () => {
     const { service, prisma } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
     });
     (prisma.incidentComment.findMany as jest.Mock).mockResolvedValue(comments);
 
-    const result = await service.listComments("incident-1", ctsViewer);
+    const result = await service.listComments("incident-1", clientViewer);
     expect(result).toEqual([comments[1]]);
   });
 
@@ -933,17 +1341,17 @@ describe("IncidentsService comment visibility", () => {
 });
 
 describe("IncidentsService.createComment isInternal enforcement", () => {
-  it("forces isInternal false for CTS_MANAGER_VIEWER even if the request asked for true", async () => {
+  it("forces isInternal false for CLIENT_MANAGER_VIEWER even if the request asked for true", async () => {
     const { service, tx } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: ctsViewer.id })),
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
     });
     await service.createComment(
       "incident-1",
       { body: "Any update?", isInternal: true },
-      { actorId: ctsViewer.id },
-      ctsViewer,
+      { actorId: clientViewer.id },
+      clientViewer,
     );
     expect(tx.incidentComment.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ isInternal: false }) }),
@@ -965,7 +1373,7 @@ describe("IncidentsService.createComment notifications", () => {
       incidentFindUnique: jest
         .fn()
         .mockResolvedValue(
-          baseIncident({ ownerUserId: engineer.id, reportedByUserId: ctsViewer.id }),
+          baseIncident({ ownerUserId: engineer.id, reportedByUserId: clientViewer.id }),
         ),
       userFindUnique: jest.fn().mockResolvedValue({
         id: engineer.id,
@@ -976,8 +1384,8 @@ describe("IncidentsService.createComment notifications", () => {
     await service.createComment(
       "incident-1",
       { body: "Any update?" },
-      { actorId: ctsViewer.id },
-      ctsViewer,
+      { actorId: clientViewer.id },
+      clientViewer,
     );
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -991,13 +1399,13 @@ describe("IncidentsService.createComment notifications", () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ ownerUserId: null, reportedByUserId: ctsViewer.id })),
+        .mockResolvedValue(baseIncident({ ownerUserId: null, reportedByUserId: clientViewer.id })),
     });
     await service.createComment(
       "incident-1",
       { body: "Any update?" },
-      { actorId: ctsViewer.id },
-      ctsViewer,
+      { actorId: clientViewer.id },
+      clientViewer,
     );
     expect(notifications.enqueue).not.toHaveBeenCalled();
   });
@@ -1268,5 +1676,537 @@ describe("IncidentsService alert correlation", () => {
     await expect(
       service.linkAlert("missing", alertRef, { actorId: "collector-svc" }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe("IncidentsService.notifyAlertRecovered", () => {
+  const recoveredAlert = {
+    id: "alert-9",
+    alertType: "hardware.health_degraded",
+    severity: "CRITICAL",
+    source: "REDFISH",
+  };
+
+  it("notes a recovery on a still-open ticket and tells its owner in-app, without closing it", async () => {
+    const { service, tx, auditService, notifications, inbox } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: "engineer-1" }),
+        ),
+    });
+
+    const result = await service.notifyAlertRecovered("incident-1", recoveredAlert, {
+      actorId: "collector-svc",
+    });
+
+    expect(result).toEqual({ notified: true });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ eventType: "ALERT_RECOVERED" }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ALERT_RECOVERED" }),
+      tx,
+    );
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "ALERT_RECOVERED", userIds: ["engineer-1"] }),
+    );
+    // The closed-ticket email is only for tickets already resolved or closed.
+    expect(notifications.enqueue).not.toHaveBeenCalled();
+    expect(tx.incident.update).not.toHaveBeenCalled();
+  });
+
+  it("tells the service desk about a recovery on an open ticket nobody owns", async () => {
+    const { service, inbox } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+      userFindMany: jest.fn().mockResolvedValue([{ id: "desk-1" }]),
+    });
+
+    await service.notifyAlertRecovered("incident-1", recoveredAlert, { actorId: "collector-svc" });
+
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "ALERT_RECOVERED", userIds: ["desk-1"] }),
+    );
+  });
+
+  it("ignores a recovery on a cancelled ticket", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.CANCELLED })),
+    });
+    await expect(
+      service.notifyAlertRecovered("incident-1", recoveredAlert, { actorId: "collector-svc" }),
+    ).resolves.toEqual({ notified: false });
+    expect(tx.incidentEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("no-ops when the incident is unknown", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(null),
+    });
+    const result = await service.notifyAlertRecovered("missing", recoveredAlert, {
+      actorId: "collector-svc",
+    });
+    expect(result).toEqual({ notified: false });
+    expect(tx.incidentEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("writes the timeline event + audit record and emails the owner when RESOLVED", async () => {
+    const { service, tx, auditService, notifications } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ status: IncidentStatus.RESOLVED, ownerUserId: engineer.id }),
+        ),
+      userFindUnique: jest.fn().mockResolvedValue({
+        id: engineer.id,
+        email: "engineer@example.com",
+        displayName: "Engineer One",
+      }),
+    });
+
+    const result = await service.notifyAlertRecovered("incident-1", recoveredAlert, {
+      actorId: "collector-svc",
+    });
+
+    expect(result).toEqual({ notified: true });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          incidentId: "incident-1",
+          eventType: "ALERT_RECOVERED_AFTER_RESOLVE",
+          payload: expect.objectContaining({
+            alertId: "alert-9",
+            severity: "CRITICAL",
+            incidentStatusAtRecovery: IncidentStatus.RESOLVED,
+          }),
+        }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "Incident", action: "ALERT_RECOVERED_AFTER_RESOLVE" }),
+      tx,
+    );
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE",
+          alertType: "hardware.health_degraded",
+        }),
+        recipients: { to: [{ name: "Engineer One", email: "engineer@example.com" }] },
+      }),
+      expect.any(String),
+    );
+  });
+
+  it("also notifies when the incident is CLOSED, not just RESOLVED", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.CLOSED })),
+    });
+    const result = await service.notifyAlertRecovered("incident-1", recoveredAlert, {
+      actorId: "collector-svc",
+    });
+    expect(result).toEqual({ notified: true });
+    expect(tx.incidentEvent.create).toHaveBeenCalled();
+  });
+
+  it("still writes the timeline/audit record when the ticket has no owner to email", async () => {
+    const { service, tx, notifications } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.RESOLVED, ownerUserId: null })),
+    });
+    const result = await service.notifyAlertRecovered("incident-1", recoveredAlert, {
+      actorId: "collector-svc",
+    });
+    expect(result).toEqual({ notified: true });
+    expect(tx.incidentEvent.create).toHaveBeenCalled();
+    expect(notifications.enqueue).not.toHaveBeenCalled();
+  });
+});
+
+describe("IncidentsService incident.created event", () => {
+  it("emits incident.created after the create commits", async () => {
+    const { service, events } = makeService();
+    const result = await service.create(baseCreateDto, {
+      actorId: "user-1",
+      correlationId: "corr-1",
+    });
+
+    expect(events.emit).toHaveBeenCalledWith("incident.created", {
+      incidentId: result.id,
+      siteId: result.siteId,
+      correlationId: "corr-1",
+    });
+  });
+});
+
+describe("IncidentsService.autoAssign", () => {
+  it("moves a NEW unowned incident to ASSIGNED as a system action", async () => {
+    const { service, tx, auditService, notifications } = makeService({
+      userFindUnique: jest
+        .fn()
+        .mockResolvedValue({ id: "eng-1", displayName: "Eng", email: "eng@corp.example" }),
+    });
+    const result = await service.autoAssign("incident-1", "eng-1", "corr-1");
+
+    expect(result).toMatchObject({ status: IncidentStatus.ASSIGNED, ownerUserId: "eng-1" });
+    expect(tx.incident.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "incident-1",
+        status: IncidentStatus.NEW,
+        ownerUserId: null,
+        ownerGroupId: null,
+      },
+      data: { status: IncidentStatus.ASSIGNED, ownerUserId: "eng-1" },
+    });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "STATUS_CHANGE",
+          actorId: null,
+          payload: expect.objectContaining({ source: "SKILL_ROUTING", to: "ASSIGNED" }),
+        }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "TRANSITION", actorId: null, correlationId: "corr-1" }),
+      tx,
+    );
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ kind: "INCIDENT_ASSIGNED" }),
+      }),
+      "INCIDENT_ASSIGNED:incident-1:eng-1",
+    );
+  });
+
+  it("does nothing when the incident is no longer NEW", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.ASSIGNED })),
+    });
+    await expect(service.autoAssign("incident-1", "eng-1")).resolves.toBeNull();
+    expect(tx.incident.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when someone already owns it", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerGroupId: "group-1" })),
+    });
+    await expect(service.autoAssign("incident-1", "eng-1")).resolves.toBeNull();
+    expect(tx.incident.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("backs off without side effects when the desk assigned it concurrently", async () => {
+    const { service, tx, auditService } = makeService({
+      txUpdateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    });
+    await expect(service.autoAssign("incident-1", "eng-1")).resolves.toBeNull();
+    expect(tx.incidentEvent.create).not.toHaveBeenCalled();
+    expect(auditService.record).not.toHaveBeenCalled();
+  });
+});
+
+describe("IncidentsService in-app notifications", () => {
+  it("puts a new ticket in every service desk user's bell, except whoever raised it", async () => {
+    const { service, inbox } = makeService({
+      userFindMany: jest.fn().mockResolvedValue([
+        { id: "desk-1", email: "desk1@corp.example", displayName: "Desk One" },
+        { id: "desk-2", email: "desk2@corp.example", displayName: "Desk Two" },
+      ]),
+    });
+
+    const result = await service.create(baseCreateDto, { actorId: "desk-1" });
+
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "INCIDENT_CREATED",
+        userIds: ["desk-1", "desk-2"],
+        actorUserId: "desk-1",
+        entityType: "INCIDENT",
+        entityId: result.id,
+        dedupeKey: `created:${result.id}`,
+      }),
+    );
+  });
+
+  it("tells the new owner in-app when a PATCH reassigns the ticket", async () => {
+    const { service, inbox } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerUserId: null })),
+      userFindUnique: jest.fn().mockResolvedValue({
+        id: "engineer-2",
+        email: "engineer2@example.com",
+        displayName: "Otis Engineer",
+      }),
+    });
+
+    await service.update("incident-1", { ownerUserId: "engineer-2" }, serviceDesk, {
+      actorId: serviceDesk.id,
+    });
+
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "INCIDENT_ASSIGNED",
+        userIds: ["engineer-2"],
+        actorUserId: serviceDesk.id,
+        title: "INC-000001 assigned to you",
+      }),
+    );
+  });
+
+  it("tells the owner in-app when the customer comments, never the author", async () => {
+    const { service, inbox } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(
+          baseIncident({ ownerUserId: engineer.id, reportedByUserId: clientViewer.id }),
+        ),
+      userFindUnique: jest.fn().mockResolvedValue({
+        id: engineer.id,
+        email: "engineer@example.com",
+        displayName: "Engineer One",
+      }),
+    });
+
+    await service.createComment(
+      "incident-1",
+      { body: "Any update?" },
+      { actorId: clientViewer.id },
+      clientViewer,
+    );
+
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "INCIDENT_COMMENT_ADDED",
+        userIds: [engineer.id],
+        actorUserId: clientViewer.id,
+        body: "Any update?",
+        dedupeKey: expect.stringMatching(/^comment:/),
+      }),
+    );
+  });
+
+  it("writes nothing in-app for an internal-only staff note", async () => {
+    const { service, inbox } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: "customer-1" })),
+    });
+
+    await service.createComment(
+      "incident-1",
+      { body: "Checking the vendor portal.", isInternal: true },
+      { actorId: engineer.id },
+      engineer,
+    );
+
+    expect(inbox.notifyUsers).not.toHaveBeenCalled();
+  });
+
+  it("auto-assign sends the assignment and status change in-app with no human actor", async () => {
+    const { service, inbox } = makeService();
+
+    await service.autoAssign("incident-1", "eng-1");
+
+    const calls = (inbox.notifyUsers as jest.Mock).mock.calls.map(([input]) => input);
+    expect(calls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "INCIDENT_STATUS_CHANGED",
+          userIds: ["eng-1"],
+          actorUserId: undefined,
+          title: "INC-000001: NEW → ASSIGNED",
+        }),
+        expect.objectContaining({
+          kind: "INCIDENT_ASSIGNED",
+          userIds: ["eng-1"],
+          actorUserId: undefined,
+        }),
+      ]),
+    );
+  });
+});
+
+describe("IncidentsService routing-offer hooks", () => {
+  it("publishes incident.updated after a transition assigns the ticket", async () => {
+    const { service, events } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+    });
+    await service.createTransition(
+      "incident-1",
+      { toStatus: IncidentStatus.ASSIGNED, ownerUserId: "engineer-1" },
+      { actorId: serviceDesk.id, correlationId: "corr-1" },
+      serviceDesk,
+    );
+    expect(events.emit).toHaveBeenCalledWith(
+      "incident.updated",
+      expect.objectContaining({
+        incidentId: "incident-1",
+        actorId: serviceDesk.id,
+        correlationId: "corr-1",
+      }),
+    );
+  });
+
+  it("publishes incident.updated after a PATCH", async () => {
+    const { service, events } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerUserId: null })),
+    });
+    await service.update("incident-1", { ownerUserId: "engineer-2" }, serviceDesk, {
+      actorId: serviceDesk.id,
+    });
+    expect(events.emit).toHaveBeenCalledWith(
+      "incident.updated",
+      expect.objectContaining({ incidentId: "incident-1", actorId: serviceDesk.id }),
+    );
+  });
+
+  it("records the owning team alongside the engineer when one is given", async () => {
+    const { service, tx } = makeService();
+
+    await service.autoAssign("incident-1", "eng-1", "corr-1", "eng-1", "grp-storage");
+
+    expect(tx.incident.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          status: IncidentStatus.ASSIGNED,
+          ownerUserId: "eng-1",
+          ownerGroupId: "grp-storage",
+        },
+      }),
+    );
+  });
+
+  it("records the accepting engineer as the actor when an offer is accepted", async () => {
+    const { service, tx, auditService, inbox } = makeService();
+
+    await service.autoAssign("incident-1", "eng-1", "corr-1", "eng-1");
+
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "STATUS_CHANGE",
+          actorId: "eng-1",
+          payload: expect.objectContaining({ source: "ROUTING_OFFER" }),
+        }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "TRANSITION", actorId: "eng-1" }),
+      tx,
+    );
+    // They accepted it themselves, so no "assigned to you" in their own bell.
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "INCIDENT_ASSIGNED", actorUserId: "eng-1" }),
+    );
+  });
+
+  it("writes routing timeline entries as ROUTING events", async () => {
+    const { service, prisma } = makeService();
+    await service.recordRoutingEvent("incident-1", null, { action: "OFFERED", userId: "eng-1" });
+    expect(prisma.incidentEvent.create).toHaveBeenCalledWith({
+      data: {
+        incidentId: "incident-1",
+        eventType: "ROUTING",
+        actorId: null,
+        payload: { action: "OFFERED", userId: "eng-1" },
+      },
+    });
+  });
+});
+
+describe("IncidentsService.createFromAlert", () => {
+  const alert = {
+    id: "alert-1",
+    alertType: "hardware.health_degraded",
+    severity: "CRITICAL",
+    source: "REDFISH",
+    fingerprint: "f".repeat(64),
+  };
+  const input = {
+    siteId: "site-a",
+    ciId: "ci-1",
+    category: "HARDWARE_FAILURE",
+    priority: Priority.P1,
+    shortDescription: "[SITE01-SRV-001] PSU 2 failed (hardware.health_degraded)",
+    alert,
+  };
+
+  it("locks the CI, opens a P1 incident from the alert, links it, and hands it to routing", async () => {
+    const { service, tx, events, inbox } = makeService({
+      txIncident: { findFirst: jest.fn().mockResolvedValue(null) },
+      userFindMany: jest
+        .fn()
+        .mockResolvedValue([{ id: "desk-1", email: "desk@example.com", displayName: "Desk" }]),
+    });
+
+    const result = await service.createFromAlert(input, { actorId: "collector-svc" });
+
+    expect(result.created).toBe(true);
+    const [lockSql] = (tx.$queryRaw as jest.Mock).mock.calls[0];
+    expect((lockSql as string[]).join("?")).toContain("pg_advisory_xact_lock");
+    expect(tx.incident.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        siteId: "site-a",
+        ciId: "ci-1",
+        category: "HARDWARE_FAILURE",
+        priority: Priority.P1,
+        impact: "HIGH",
+        urgency: "HIGH",
+      }),
+    });
+    const eventTypes = (tx.incidentEvent.create as jest.Mock).mock.calls.map(
+      ([arg]) => arg.data.eventType,
+    );
+    expect(eventTypes).toEqual(["CREATED", "ALERT_LINKED"]);
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventType: "CREATED",
+        payload: expect.objectContaining({ source: "ALERT", alertId: "alert-1" }),
+      }),
+    });
+    expect(events.emit).toHaveBeenCalledWith(
+      "incident.created",
+      expect.objectContaining({ incidentId: result.incident.id }),
+    );
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "INCIDENT_CREATED", userIds: ["desk-1"] }),
+    );
+  });
+
+  it("links to the incident another alert just opened instead of creating a second", async () => {
+    const open = baseIncident({ id: "incident-open", status: IncidentStatus.NEW, ciId: "ci-1" });
+    const { service, tx, events } = makeService({
+      txIncident: { findFirst: jest.fn().mockResolvedValue(open) },
+    });
+
+    const result = await service.createFromAlert(input, { actorId: "collector-svc" });
+
+    expect(result).toEqual({ incident: open, created: false });
+    expect(tx.incident.create).not.toHaveBeenCalled();
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ incidentId: "incident-open", eventType: "ALERT_LINKED" }),
+    });
+    expect(events.emit).not.toHaveBeenCalled();
+  });
+
+  it("maps a P3 to medium impact and urgency", async () => {
+    const { service, tx } = makeService({
+      txIncident: { findFirst: jest.fn().mockResolvedValue(null) },
+    });
+    await service.createFromAlert(
+      { ...input, priority: Priority.P3 },
+      { actorId: "collector-svc" },
+    );
+    expect(tx.incident.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ impact: "MEDIUM", urgency: "MEDIUM" }),
+    });
   });
 });

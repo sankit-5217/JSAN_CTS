@@ -12,7 +12,7 @@ import { UsersService } from "./users.service";
 
 // Every internal staff role — everyone who might need to look up a
 // colleague to assign/route something to. The one role intentionally left
-// out is CTS_MANAGER_VIEWER: a customer has no reason to see staff names
+// out is CLIENT_MANAGER_VIEWER: a customer has no reason to see staff names
 // tied to internal user ids.
 export const STAFF_ROLES = [
   UserRole.SUPER_ADMIN,

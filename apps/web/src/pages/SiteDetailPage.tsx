@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   Alert,
@@ -13,10 +13,13 @@ import {
   Grid,
   Paper,
   Stack,
+  Switch,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
-import { apiGet, apiPost } from "../api/client";
+import AltRouteOutlinedIcon from "@mui/icons-material/AltRouteOutlined";
+import { apiGet, apiPatch, apiPost } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
 
 // Mirrors SitesController's SITE_MASTER_WRITE_ROLES — UI-only gate (plan
@@ -51,6 +54,250 @@ interface SupportCalendar {
   workdays: number[];
   holidays: string[];
   is247: boolean;
+}
+
+const PRIORITIES = ["P1", "P2", "P3", "P4"] as const;
+type PriorityKey = (typeof PRIORITIES)[number];
+type SettingKey = `offerTimeout${PriorityKey}Minutes` | `workloadWeight${PriorityKey}`;
+
+type RoutingPolicy = {
+  siteId: string;
+  autoAssignEnabled: boolean;
+} & Record<SettingKey, number>;
+
+// Bounds mirror UpdateRoutingPolicyDto.
+const SETTING_ROWS: {
+  label: string;
+  help: string;
+  key: (p: PriorityKey) => SettingKey;
+  min: number;
+  max: number;
+}[] = [
+  {
+    label: "Time to accept (min)",
+    help: "How long each engineer has before the offer moves on",
+    key: (p) => `offerTimeout${p}Minutes`,
+    min: 1,
+    max: 120,
+  },
+  {
+    label: "Workload weight",
+    help: "How much one open ticket of this priority counts when choosing the least busy engineer",
+    key: (p) => `workloadWeight${p}`,
+    min: 0,
+    max: 20,
+  },
+];
+
+const SETTING_KEYS: SettingKey[] = SETTING_ROWS.flatMap((row) => PRIORITIES.map(row.key));
+
+function draftOf(policy: RoutingPolicy): Record<SettingKey, string> {
+  return Object.fromEntries(SETTING_KEYS.map((k) => [k, String(policy[k])])) as Record<
+    SettingKey,
+    string
+  >;
+}
+
+/**
+ * Per-site skill-based routing (GET/PATCH /routing/policies/:siteId): the
+ * auto-route switch plus the per-priority accept windows and workload
+ * weights. Loaded on its own, not in the page's Promise.all, so a failure
+ * here never blanks the rest of the site page. Write gate mirrors
+ * RoutingPoliciesController's ROUTING_POLICY_WRITE_ROLES (same set as
+ * SITE_MASTER_WRITE_ROLES) — UI-only; the backend re-checks.
+ */
+function RoutingPolicyCard({ siteId, canWrite }: { siteId: string; canWrite: boolean }) {
+  const [policy, setPolicy] = useState<RoutingPolicy | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Record<SettingKey, string> | null>(null);
+
+  useEffect(() => {
+    setLoadError(null);
+    apiGet<RoutingPolicy>(`/routing/policies/${siteId}`)
+      .then((p) => {
+        setPolicy(p);
+        setDraft(draftOf(p));
+      })
+      .catch((err: Error) => setLoadError(err.message));
+  }, [siteId]);
+
+  const save = async (changes: Partial<Omit<RoutingPolicy, "siteId">>) => {
+    if (!policy) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const next = await apiPatch<RoutingPolicy>(`/routing/policies/${siteId}`, {
+        autoAssignEnabled: policy.autoAssignEnabled,
+        ...changes,
+      });
+      setPolicy(next);
+      setDraft(draftOf(next));
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const invalid = (key: SettingKey, min: number, max: number) => {
+    const n = Number(draft?.[key]);
+    return !Number.isInteger(n) || n < min || n > max;
+  };
+  const anyInvalid = SETTING_ROWS.some((row) =>
+    PRIORITIES.some((p) => invalid(row.key(p), row.min, row.max)),
+  );
+  const changed =
+    policy !== null && draft !== null && SETTING_KEYS.some((k) => Number(draft[k]) !== policy[k]);
+
+  return (
+    <Paper sx={{ p: 2, mb: 3 }}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        spacing={2}
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        justifyContent="space-between"
+      >
+        <Stack direction="row" spacing={1.5} alignItems="flex-start">
+          <AltRouteOutlinedIcon color="primary" sx={{ mt: 0.5 }} />
+          <Box>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography variant="h6">Auto-route new incidents</Typography>
+              {policy && (
+                <Chip
+                  size="small"
+                  color={policy.autoAssignEnabled ? "success" : "default"}
+                  label={policy.autoAssignEnabled ? "On" : "Off"}
+                />
+              )}
+            </Stack>
+            <Typography variant="body2" color="text.secondary">
+              Each new incident at this site is offered to the least-busy engineer who is on shift
+              here and has every skill its category requires. It&apos;s assigned to them once they
+              accept. If they decline or don&apos;t answer in time, it&apos;s offered to the next
+              engineer. If nobody accepts, it stays NEW and the service desk is told to assign it.
+              P1s also go to on-call engineers straight away.
+            </Typography>
+          </Box>
+        </Stack>
+        {policy && (
+          <FormControlLabel
+            control={
+              <Switch
+                checked={policy.autoAssignEnabled}
+                disabled={!canWrite || saving}
+                onChange={(e) => save({ autoAssignEnabled: e.target.checked })}
+                inputProps={{ "aria-label": "Auto-route new incidents" }}
+              />
+            }
+            label={saving ? "Saving…" : ""}
+            sx={{ mr: 0, flexShrink: 0 }}
+          />
+        )}
+      </Stack>
+      {policy && draft && (
+        <Box sx={{ mt: 2, pl: { sm: 4.5 } }}>
+          <Box sx={{ overflowX: "auto" }}>
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: "minmax(150px, auto) repeat(4, minmax(72px, 96px))",
+                gap: 1,
+                alignItems: "center",
+                minWidth: 460,
+              }}
+            >
+              <Box />
+              {PRIORITIES.map((p) => (
+                <Typography key={p} variant="caption" fontWeight={700} textAlign="center">
+                  {p}
+                </Typography>
+              ))}
+              {SETTING_ROWS.map((row) => (
+                <Fragment key={row.label}>
+                  <Tooltip title={row.help} placement="top-start">
+                    <Typography variant="body2">{row.label}</Typography>
+                  </Tooltip>
+                  {PRIORITIES.map((p) => {
+                    const key = row.key(p);
+                    return (
+                      <TextField
+                        key={key}
+                        size="small"
+                        type="number"
+                        value={draft[key]}
+                        onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}
+                        disabled={!canWrite || saving}
+                        error={invalid(key, row.min, row.max)}
+                        inputProps={{
+                          min: row.min,
+                          max: row.max,
+                          step: 1,
+                          "aria-label": `${row.label} ${p}`,
+                          style: { textAlign: "center" },
+                        }}
+                      />
+                    );
+                  })}
+                </Fragment>
+              ))}
+            </Box>
+          </Box>
+          <Typography
+            variant="caption"
+            color={anyInvalid ? "error" : "text.secondary"}
+            sx={{ display: "block", mt: 1 }}
+          >
+            {anyInvalid
+              ? "Times must be whole minutes from 1 to 120; weights whole numbers from 0 to 20."
+              : "With the default weights (4, 3, 2, 1), one open P1 counts as much as four P4s."}
+          </Typography>
+          {canWrite && changed && (
+            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+              <Button
+                variant="contained"
+                size="small"
+                disabled={anyInvalid || saving}
+                onClick={() =>
+                  save(
+                    Object.fromEntries(SETTING_KEYS.map((k) => [k, Number(draft[k])])) as Partial<
+                      Omit<RoutingPolicy, "siteId">
+                    >,
+                  )
+                }
+              >
+                Save
+              </Button>
+              <Button size="small" disabled={saving} onClick={() => setDraft(draftOf(policy))}>
+                Cancel
+              </Button>
+            </Stack>
+          )}
+        </Box>
+      )}
+      {!policy && !loadError && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+          Loading...
+        </Typography>
+      )}
+      {loadError && (
+        <Alert severity="error" sx={{ mt: 1 }}>
+          Could not load the routing policy: {loadError}
+        </Alert>
+      )}
+      {saveError && (
+        <Alert severity="error" sx={{ mt: 1 }} onClose={() => setSaveError(null)}>
+          {saveError}
+        </Alert>
+      )}
+      {policy && !canWrite && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          Only Super Admin, Infrastructure Lead or Delivery/Ops Manager can change this.
+        </Typography>
+      )}
+    </Paper>
+  );
 }
 
 const emptyContactForm = { name: "", role: "", email: "", phone: "", isOnCall: false };
@@ -184,6 +431,8 @@ export function SiteDetailPage() {
           {actionError}
         </Alert>
       )}
+
+      <RoutingPolicyCard siteId={site.id} canWrite={canWrite} />
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>

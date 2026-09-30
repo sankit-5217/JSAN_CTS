@@ -60,11 +60,26 @@ interface Rendered {
 
 function renderBody(event: NotificationEvent): Rendered {
   switch (event.kind) {
+    case "INCIDENT_CREATED":
+      return {
+        phrase: "new ticket needs triage",
+        lines: [
+          `${event.entity.key} was just raised${event.reporter ? ` by ${addr(event.reporter)}` : ""} and is waiting in the queue.`,
+        ],
+      };
     case "INCIDENT_ASSIGNED":
       return {
         phrase: `assigned to ${event.assignee.name ?? event.assignee.email}`,
         lines: [
           `${event.entity.key} has been assigned to ${addr(event.assignee)}.`,
+          event.actor ? `Assigned by ${addr(event.actor)}.` : "",
+        ],
+      };
+    case "INCIDENT_GROUP_ASSIGNED":
+      return {
+        phrase: `assigned to ${event.group.name}`,
+        lines: [
+          `${event.entity.key} has been assigned to the ${event.group.name} group — no individual owner yet.`,
           event.actor ? `Assigned by ${addr(event.actor)}.` : "",
         ],
       };
@@ -99,6 +114,24 @@ function renderBody(event: NotificationEvent): Rendered {
           `The ${event.slaKind.toLowerCase()} SLA for ${event.entity.key} breached at ${event.breachedAt}.`,
         ],
       };
+    case "INCIDENT_OFFERED":
+      return {
+        phrase: `offered to you (accept within ${minutesPhrase(event.timeoutMinutes)})`,
+        urgent: true,
+        lines: [
+          `${event.entity.key} matches your skills and shift, so it has been offered to ${addr(event.offeredTo)}.`,
+          `Accept or decline it in the portal before ${event.expiresAt}. If you don't respond, it goes to the next engineer.`,
+        ],
+      };
+    case "INCIDENT_OFFER_UNACCEPTED":
+      return {
+        phrase: "no engineer accepted, needs manual assignment",
+        urgent: true,
+        lines: [
+          `No engineer accepted ${event.entity.key}. It was offered to: ${event.offeredTo.join(", ")}.`,
+          "It is still NEW and unowned. Please assign it manually.",
+        ],
+      };
     case "CHANGE_APPROVED":
       return {
         phrase: `approved by ${event.approver.name ?? event.approver.email}`,
@@ -112,6 +145,16 @@ function renderBody(event: NotificationEvent): Rendered {
         phrase: `${event.alertType} (${event.state})`,
         urgent: (event.entity.severity ?? "").toUpperCase() === "CRITICAL",
         lines: [`Alert ${event.alertType} is ${event.state} on ${event.entity.key}.`],
+      };
+    case "INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE":
+      return {
+        phrase: `${event.alertType} recovered`,
+        lines: [
+          `The ${event.alertType} (${event.severity}) alert linked to ${event.entity.key} was ` +
+            `just reported RECOVERED by monitoring, at ${event.recoveredAt}.`,
+          `This ticket was already resolved/closed before that happened — the underlying ` +
+            `condition has now genuinely cleared.`,
+        ],
       };
     case "VENDOR_CASE_UPDATE":
       return {

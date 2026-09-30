@@ -57,7 +57,7 @@ describe("UsersService", () => {
     );
   });
 
-  it("only selects picker-safe fields, never idpSubject or timestamps", async () => {
+  it("only selects picker-safe fields, never password/identity data or timestamps", async () => {
     const { service, prisma } = makeService();
     await service.findAll({} as ListUsersQueryDto);
     expect(prisma.user.findMany).toHaveBeenCalledWith(

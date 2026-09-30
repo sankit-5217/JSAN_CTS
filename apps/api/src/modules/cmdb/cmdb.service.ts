@@ -29,7 +29,7 @@ import { UpdateCiDto } from "./dto/update-ci.dto";
  * siteId, check it. List endpoints still filter via
  * AuthzService.getAccessibleSiteIds() exactly like SitesService.
  *
- * managementAddress is spec-restricted from CTS_MANAGER_VIEWER ("never
+ * managementAddress is spec-restricted from CLIENT_MANAGER_VIEWER ("never
  * expose to customer viewer", §9.1) — redacted in CisController, not
  * here, so this service keeps returning the real value for internal
  * callers (e.g. update()'s audit before/after snapshot).

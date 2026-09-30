@@ -12,7 +12,6 @@ import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import type { ChangeStatus } from "./changes.constants";
 import { deriveChangeStatus, isEditable, isPirOverdue } from "./changes.status";
-import { ApproveChangeDto } from "./dto/approve-change.dto";
 import { CreateChangeDto } from "./dto/create-change.dto";
 import { QueryChangesDto } from "./dto/query-changes.dto";
 import { UpdateChangeDto } from "./dto/update-change.dto";
@@ -74,6 +73,7 @@ export class ChangesService {
           risk: dto.risk,
           windowStart,
           windowEnd,
+          createdBy: actor.actorId,
           ...(dto.affectedCiIds !== undefined ? { affectedCiIds: dto.affectedCiIds } : {}),
         },
       });
@@ -117,7 +117,7 @@ export class ChangesService {
     return this.decorate(change);
   }
 
-  async approve(id: string, dto: ApproveChangeDto, actor: ActorContext) {
+  async approve(id: string, actor: ActorContext) {
     const change = await this.requireChange(id);
     if (change.approverId) {
       throw new ConflictException(`Change ${id} is already approved`);
@@ -125,11 +125,17 @@ export class ChangesService {
     if (Date.now() > change.windowEnd.getTime()) {
       throw new BadRequestException(`Change ${id} window has already ended`);
     }
+    // Separation of duties: the approver is always the authenticated caller
+    // (never client-suppliable — see incident report), and can't be whoever
+    // raised the change.
+    if (change.createdBy && change.createdBy === actor.actorId) {
+      throw new BadRequestException("A change cannot be approved by whoever raised it");
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const u = await tx.change.update({
         where: { id },
-        data: { approverId: dto.approverId },
+        data: { approverId: actor.actorId },
       });
       await this.audit.record(
         {
