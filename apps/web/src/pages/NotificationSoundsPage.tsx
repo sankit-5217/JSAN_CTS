@@ -51,6 +51,7 @@ const KIND_LABEL: Record<NotificationKind, string> = {
   INCIDENT_OFFER_UNACCEPTED: "Nobody accepted an offer",
   INCIDENT_STATUS_CHANGED: "Ticket status changed",
   INCIDENT_COMMENT_ADDED: "New comment",
+  CUSTOMER_RESPONDED: 'Customer replied or answered "is it fixed?"',
   SLA_WARNING: "SLA warning",
   SLA_BREACHED: "SLA breached",
   ALERT_RAISED: "Monitoring alert raised",

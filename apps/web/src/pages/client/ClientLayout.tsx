@@ -19,6 +19,7 @@ function BrandMark() {
 }
 
 const NAV_ITEMS = [
+  { label: "Home", to: "/client/home" },
   { label: "Report an issue", to: "/client/report" },
   { label: "My tickets", to: "/client/tickets" },
 ];
@@ -28,8 +29,9 @@ const NAV_ITEMS = [
  * internal Sidebar/TopBar from App.tsx. A site POC doesn't need CMDB, SLA
  * policy config, alert rules or any of the other fourteen internal modules;
  * giving them the same nav as staff (even with writes blocked server-side)
- * just reads as confusing. This is a small, purpose-built portal: report an
- * issue, track it, reply when asked.
+ * just reads as confusing. This is a small, purpose-built portal: a home
+ * page of what needs the customer, reporting an issue, and each ticket's
+ * conversation with the service desk.
  */
 export function ClientLayout() {
   const location = useLocation();

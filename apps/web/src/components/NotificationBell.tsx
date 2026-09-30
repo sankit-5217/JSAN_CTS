@@ -26,6 +26,7 @@ import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNone
 import NotificationsOutlinedIcon from "@mui/icons-material/NotificationsOutlined";
 import PanToolOutlinedIcon from "@mui/icons-material/PanToolOutlined";
 import PersonOffOutlinedIcon from "@mui/icons-material/PersonOffOutlined";
+import RecordVoiceOverOutlinedIcon from "@mui/icons-material/RecordVoiceOverOutlined";
 import SyncAltOutlinedIcon from "@mui/icons-material/SyncAltOutlined";
 import TimerOffOutlinedIcon from "@mui/icons-material/TimerOffOutlined";
 import TimerOutlinedIcon from "@mui/icons-material/TimerOutlined";
@@ -49,6 +50,10 @@ const KIND_STYLE: Record<NotificationKind, { icon: ReactNode; color: string }> =
   SLA_WARNING: { icon: <TimerOutlinedIcon fontSize="small" />, color: "#ed6c02" },
   SLA_BREACHED: { icon: <TimerOffOutlinedIcon fontSize="small" />, color: "#d32f2f" },
   INCIDENT_OFFERED: { icon: <PanToolOutlinedIcon fontSize="small" />, color: "#ed6c02" },
+  CUSTOMER_RESPONDED: {
+    icon: <RecordVoiceOverOutlinedIcon fontSize="small" />,
+    color: "#ed6c02",
+  },
   ALERT_RAISED: {
     icon: <NotificationsActiveOutlinedIcon fontSize="small" />,
     color: "#d32f2f",

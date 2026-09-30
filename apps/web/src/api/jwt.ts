@@ -39,5 +39,5 @@ export function getCurrentUserRole(): string | null {
 
 /** Where a freshly signed-in user lands — clients get their own portal. */
 export function landingPathFor(accessToken: string): string {
-  return decodeJwtPayload(accessToken)?.role === "CLIENT_MANAGER_VIEWER" ? "/client/report" : "/";
+  return decodeJwtPayload(accessToken)?.role === "CLIENT_MANAGER_VIEWER" ? "/client/home" : "/";
 }

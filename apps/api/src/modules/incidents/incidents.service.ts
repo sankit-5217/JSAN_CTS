@@ -55,6 +55,21 @@ import {
 } from "./incident-transitions";
 import type { TransitionDto } from "./incident-transitions";
 
+/** How a status change reads in the reporting customer's bell. Mirrors the
+ *  client portal's labels (apps/web/src/pages/client/clientTicket.ts). */
+const CUSTOMER_STATUS_LABEL: Record<IncidentStatus, string> = {
+  NEW: "received",
+  ASSIGNED: "assigned to an engineer",
+  ACKNOWLEDGED: "an engineer is on it",
+  IN_PROGRESS: "work in progress",
+  PENDING_VENDOR: "waiting on a vendor",
+  PENDING_CUSTOMER: "we need something from you",
+  RESOLVED: "resolved, please confirm it's fixed",
+  CLOSED: "closed",
+  REOPENED: "reopened",
+  CANCELLED: "cancelled",
+};
+
 /** Impact and urgency recorded on an incident opened from an alert, where no
  *  person assessed them; they mirror the priority the alert rule gave it. */
 const PRIORITY_IMPACT_URGENCY: Record<Priority, [string, string]> = {
@@ -1208,12 +1223,30 @@ export class IncidentsService {
     return comments;
   }
 
-  /** Powers the "Sample Incident Page" (spec §29) ordered timeline. */
+  /**
+   * Powers the "Sample Incident Page" (spec §29) ordered timeline. A
+   * customer only gets the status moves (from/to and when, not the staff
+   * reason) and their own fix feedback: worklogs, routing, SLA and internal
+   * comment events are staff-only, same as internal comments.
+   */
   async listEvents(incidentId: string, user: AuthenticatedUser): Promise<IncidentEvent[]> {
     await this.findOneScoped(incidentId, user);
-    return this.prisma.incidentEvent.findMany({
+    const events = await this.prisma.incidentEvent.findMany({
       where: { incidentId },
       orderBy: { createdAt: "asc" },
+    });
+    if (user.role !== UserRole.CLIENT_MANAGER_VIEWER) {
+      return events;
+    }
+    return events.flatMap((e): IncidentEvent[] => {
+      const payload = (e.payload ?? {}) as Prisma.JsonObject;
+      if (e.eventType === "STATUS_CHANGE") {
+        return [{ ...e, actorId: null, payload: { from: payload.from, to: payload.to } }];
+      }
+      if (e.eventType === "CUSTOMER_FEEDBACK") {
+        return [{ ...e, payload: { outcome: payload.outcome } }];
+      }
+      return [];
     });
   }
 
@@ -1577,8 +1610,9 @@ export class IncidentsService {
       if (ids.length === 0) {
         return;
       }
+      const dedupeKey = `status:${after.id}:${after.status}:${after.updatedAt.getTime()}`;
       await this.inbox.notifyUsers({
-        userIds: ids,
+        userIds: [after.ownerUserId],
         actorUserId,
         kind: InAppNotificationKind.INCIDENT_STATUS_CHANGED,
         title: `${after.incidentNo}: ${before.status} → ${after.status}`,
@@ -1586,7 +1620,21 @@ export class IncidentsService {
         entityType: "INCIDENT",
         entityId: after.id,
         level: levelForPriority(after.priority),
-        dedupeKey: `status:${after.id}:${after.status}:${after.updatedAt.getTime()}`,
+        dedupeKey,
+      });
+      // The customer's bell gets plain language and never the transition
+      // reason, which is a staff field (the timeline hides it from them
+      // too). Anything meant for them goes in a customer-visible reply.
+      await this.inbox.notifyUsers({
+        userIds: [after.reportedByUserId],
+        actorUserId,
+        kind: InAppNotificationKind.INCIDENT_STATUS_CHANGED,
+        title: `${after.incidentNo}: ${CUSTOMER_STATUS_LABEL[after.status]}`,
+        body: after.shortDescription,
+        entityType: "INCIDENT",
+        entityId: after.id,
+        level: levelForPriority(after.priority),
+        dedupeKey,
       });
       const users = await this.prisma.user.findMany({ where: { id: { in: ids } } });
       const owner = this.partyFor(users, after.ownerUserId);
@@ -1613,24 +1661,23 @@ export class IncidentsService {
   }
 
   /**
-   * Only notifies the *other side* of the conversation: the customer
-   * commenting tells the assigned engineer; an internal reply explicitly
-   * marked customer-visible tells the reporting customer back. An
-   * internal-only note between staff notifies no one — they already share
-   * the same incident page.
+   * Only notifies the *other side* of the conversation: an internal reply
+   * explicitly marked customer-visible tells the reporting customer; an
+   * internal-only note between staff notifies no one. A customer's reply
+   * goes to whoever is handling the ticket (see supportRecipientIds), so it
+   * always reaches someone, even on an unassigned ticket.
    */
   private async notifyComment(
     incident: Incident,
     comment: IncidentComment,
     author: AuthenticatedUser,
   ): Promise<void> {
+    if (author.role === UserRole.CLIENT_MANAGER_VIEWER) {
+      await this.notifyCustomerReply(incident, comment, author);
+      return;
+    }
     try {
-      const recipientId =
-        author.role === UserRole.CLIENT_MANAGER_VIEWER
-          ? incident.ownerUserId
-          : comment.isInternal
-            ? null
-            : incident.reportedByUserId;
+      const recipientId = comment.isInternal ? null : incident.reportedByUserId;
       if (!recipientId) {
         return;
       }
@@ -1638,7 +1685,7 @@ export class IncidentsService {
         userIds: [recipientId],
         actorUserId: author.id,
         kind: InAppNotificationKind.INCIDENT_COMMENT_ADDED,
-        title: `New comment on ${incident.incidentNo}`,
+        title: `New reply from the service desk on ${incident.incidentNo}`,
         body: comment.body.length > 200 ? `${comment.body.slice(0, 199)}…` : comment.body,
         entityType: "INCIDENT",
         entityId: incident.id,
@@ -1663,5 +1710,75 @@ export class IncidentsService {
         `comment notification skipped for incident ${incident.id}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  private async notifyCustomerReply(
+    incident: Incident,
+    comment: IncidentComment,
+    author: AuthenticatedUser,
+  ): Promise<void> {
+    try {
+      const waiting = incident.status === IncidentStatus.PENDING_CUSTOMER;
+      await this.inbox.notifyUsers({
+        userIds: await this.supportRecipientIds(incident),
+        actorUserId: author.id,
+        kind: InAppNotificationKind.CUSTOMER_RESPONDED,
+        title: waiting
+          ? `Customer replied on ${incident.incidentNo}: ready to resume`
+          : `Customer replied on ${incident.incidentNo}`,
+        body: comment.body.length > 200 ? `${comment.body.slice(0, 199)}…` : comment.body,
+        entityType: "INCIDENT",
+        entityId: incident.id,
+        level: levelForPriority(incident.priority),
+        dedupeKey: `comment:${comment.id}`,
+      });
+      if (!incident.ownerUserId) {
+        return;
+      }
+      const owner = await this.prisma.user.findUnique({ where: { id: incident.ownerUserId } });
+      if (!owner?.email) {
+        return;
+      }
+      await this.notifications.enqueue({
+        event: {
+          kind: "INCIDENT_COMMENT_ADDED",
+          entity: this.toEntityRef(incident),
+          author: { email: author.email },
+          body: comment.body,
+        },
+        recipients: { to: [{ name: owner.displayName, email: owner.email }] },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `customer-reply notification skipped for incident ${incident.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Who hears from the customer on this ticket: the assigned engineer, else
+   * the owning group's members, else the service desk. The service desk is
+   * added whenever `includeDesk` is set, since some follow-ups (closing a
+   * confirmed fix) are theirs whoever owns the ticket.
+   */
+  async supportRecipientIds(incident: Incident, includeDesk = false): Promise<string[]> {
+    const ids: string[] = [];
+    if (incident.ownerUserId) {
+      ids.push(incident.ownerUserId);
+    } else if (incident.ownerGroupId) {
+      const members = await this.prisma.supportGroupMember.findMany({
+        where: { groupId: incident.ownerGroupId },
+        select: { userId: true },
+      });
+      ids.push(...members.map((m) => m.userId));
+    }
+    if (includeDesk || ids.length === 0) {
+      const desk = await this.prisma.user.findMany({
+        where: { isActive: true, role: UserRole.SERVICE_DESK_NOC },
+        select: { id: true },
+      });
+      ids.push(...desk.map((u) => u.id));
+    }
+    return ids;
   }
 }

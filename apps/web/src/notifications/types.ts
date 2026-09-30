@@ -10,7 +10,8 @@ export type NotificationKind =
   | "INCIDENT_OFFERED"
   | "INCIDENT_OFFER_UNACCEPTED"
   | "ALERT_RAISED"
-  | "ALERT_RECOVERED";
+  | "ALERT_RECOVERED"
+  | "CUSTOMER_RESPONDED";
 
 /** Mirrors the API's NotificationUrgency enum, loudest first. */
 export type NotificationUrgency = "CRITICAL" | "HIGH" | "NORMAL" | "SILENT";
