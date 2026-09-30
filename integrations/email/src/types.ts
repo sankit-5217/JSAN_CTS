@@ -34,7 +34,14 @@ export type SlaKind = "RESPONSE" | "RESOLUTION";
 
 /** Outbound notification events the worker can raise. Discriminated on `kind`. */
 export type NotificationEvent =
+  | { kind: "INCIDENT_CREATED"; entity: EntityRef; reporter?: Party }
   | { kind: "INCIDENT_ASSIGNED"; entity: EntityRef; assignee: Party; actor?: Party }
+  | {
+      kind: "INCIDENT_GROUP_ASSIGNED";
+      entity: EntityRef;
+      group: { name: string };
+      actor?: Party;
+    }
   | {
       kind: "INCIDENT_STATUS_CHANGED";
       entity: EntityRef;
@@ -43,6 +50,7 @@ export type NotificationEvent =
       actor?: Party;
       comment?: string;
     }
+  | { kind: "INCIDENT_COMMENT_ADDED"; entity: EntityRef; author: Party; body: string }
   | {
       kind: "SLA_WARNING";
       entity: EntityRef;
@@ -52,6 +60,22 @@ export type NotificationEvent =
     }
   | { kind: "SLA_BREACHED"; entity: EntityRef; slaKind: SlaKind; breachedAt: string }
   | {
+      /** A new ticket is offered to one engineer, who has until expiresAt
+       *  to accept it in the portal before it moves to the next candidate. */
+      kind: "INCIDENT_OFFERED";
+      entity: EntityRef;
+      offeredTo: Party;
+      expiresAt: string;
+      timeoutMinutes: number;
+    }
+  | {
+      /** Every qualified engineer declined or let the offer expire, so the
+       *  ticket is back with the service desk. */
+      kind: "INCIDENT_OFFER_UNACCEPTED";
+      entity: EntityRef;
+      offeredTo: string[];
+    }
+  | {
       kind: "CHANGE_APPROVED";
       entity: EntityRef;
       approver: Party;
@@ -59,6 +83,13 @@ export type NotificationEvent =
       windowEnd: string;
     }
   | { kind: "ALERT_RAISED"; entity: EntityRef; alertType: string; state: string }
+  | {
+      kind: "INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE";
+      entity: EntityRef;
+      alertType: string;
+      severity: string;
+      recoveredAt: string;
+    }
   | { kind: "VENDOR_CASE_UPDATE"; entity: EntityRef; note: string; author?: Party }
   | {
       kind: "RISK_STATUS_CHANGED";

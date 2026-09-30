@@ -212,14 +212,18 @@ export function CiDetailPage() {
   const [direction, setDirection] = useState<(typeof DIRECTIONS)[number]>("CHILD");
 
   useEffect(() => {
-    if (!relatedQuery) {
-      setRelatedOptions([]);
-      return;
-    }
-    apiGet<{ items: CiOption[] }>(`/cis?q=${encodeURIComponent(relatedQuery)}`)
+    if (!ci) return;
+    // Empty query: default to this CI's own site (relations are almost
+    // always same-site — see CmdbService's class comment) so the picker
+    // shows something useful on focus instead of requiring a keystroke
+    // first. A typed query searches the whole CMDB, unscoped, same as
+    // before — cross-site relations are rare but still real (e.g. a
+    // shared ISP circuit), so typing shouldn't lose that reach.
+    const params = relatedQuery ? `q=${encodeURIComponent(relatedQuery)}` : `siteId=${ci.siteId}`;
+    apiGet<{ items: CiOption[] }>(`/cis?${params}`)
       .then((res) => setRelatedOptions(res.items.filter((c) => c.id !== id)))
       .catch(() => undefined);
-  }, [relatedQuery, id]);
+  }, [relatedQuery, id, ci]);
 
   const submitRelation = async () => {
     if (!id || !selectedRelated) return;
@@ -496,10 +500,12 @@ export function CiDetailPage() {
                   onChange={(_, value) => setSelectedRelated(value)}
                   inputValue={relatedQuery}
                   onInputChange={(_, value) => setRelatedQuery(value)}
+                  openOnFocus
+                  noOptionsText="No other CIs found"
                   renderInput={(params) => (
                     <TextField
                       {...params}
-                      label="Related CI (search by code or name)"
+                      label="Related CI (search by code or name, or click to browse)"
                       size="small"
                     />
                   )}

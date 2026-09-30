@@ -3,8 +3,6 @@ import { Navigate, Outlet, Route, Routes, Link, useLocation } from "react-router
 import {
   AppBar,
   Box,
-  Button,
-  Chip,
   Divider,
   Drawer,
   IconButton,
@@ -18,23 +16,35 @@ import {
   Typography,
 } from "@mui/material";
 import { alpha, darken } from "@mui/material/styles";
+import AccessTimeOutlinedIcon from "@mui/icons-material/AccessTimeOutlined";
 import ApartmentOutlinedIcon from "@mui/icons-material/ApartmentOutlined";
 import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
 import ChangeCircleOutlinedIcon from "@mui/icons-material/ChangeCircleOutlined";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import DnsOutlinedIcon from "@mui/icons-material/DnsOutlined";
 import GppMaybeOutlinedIcon from "@mui/icons-material/GppMaybeOutlined";
+import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
+import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
 import LocalShippingOutlinedIcon from "@mui/icons-material/LocalShippingOutlined";
 import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import PolicyOutlinedIcon from "@mui/icons-material/PolicyOutlined";
+import ManageAccountsOutlinedIcon from "@mui/icons-material/ManageAccountsOutlined";
 import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
-import { clearStoredToken, getStoredToken } from "./api/client";
-import { decodeJwtPayload } from "./api/jwt";
+import VolumeUpOutlinedIcon from "@mui/icons-material/VolumeUpOutlined";
+import { AccountMenu, roleMeta } from "./components/AccountMenu";
+import { NotificationBell } from "./components/NotificationBell";
+import { SoundControl } from "./notifications/SoundControl";
+import { getStoredToken, signOut } from "./api/client";
+import { decodeJwtPayload, getCurrentUserRole } from "./api/jwt";
 import { theme } from "./theme/theme";
+import { ClientLayout } from "./pages/client/ClientLayout";
+import { MyTicketsPage } from "./pages/client/MyTicketsPage";
+import { ReportIssuePage } from "./pages/client/ReportIssuePage";
+import { TicketDetailPage } from "./pages/client/TicketDetailPage";
 import { AlertDetailPage } from "./pages/AlertDetailPage";
 import { AlertRulesPage } from "./pages/AlertRulesPage";
 import { AlertsPage } from "./pages/AlertsPage";
@@ -47,16 +57,24 @@ import { CisPage } from "./pages/CisPage";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { IncidentDetailPage } from "./pages/IncidentDetailPage";
 import { IncidentsPage } from "./pages/IncidentsPage";
+import { InsightsPage } from "./pages/InsightsPage";
 import { KnowledgeDetailPage } from "./pages/KnowledgeDetailPage";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { LoginPage } from "./pages/LoginPage";
+import { SetPasswordPage } from "./pages/SetPasswordPage";
+import { SocialCallbackPage } from "./pages/SocialCallbackPage";
+import { UsersPage } from "./pages/UsersPage";
+import { MonitoringPage } from "./pages/MonitoringPage";
+import { NotificationSoundsPage } from "./pages/NotificationSoundsPage";
 import { ProblemDetailPage } from "./pages/ProblemDetailPage";
 import { ProblemsPage } from "./pages/ProblemsPage";
 import { RiskDetailPage } from "./pages/RiskDetailPage";
 import { RisksPage } from "./pages/RisksPage";
+import { ShiftsPage } from "./pages/ShiftsPage";
 import { SiteDetailPage } from "./pages/SiteDetailPage";
 import { SitesPage } from "./pages/SitesPage";
 import { SlaPoliciesPage } from "./pages/SlaPoliciesPage";
+import { SupportGroupsPage } from "./pages/SupportGroupsPage";
 import { VendorCaseDetailPage } from "./pages/VendorCaseDetailPage";
 import { VendorsPage } from "./pages/VendorsPage";
 
@@ -83,6 +101,8 @@ interface NavItem {
 interface NavGroup {
   label: string;
   items: NavItem[];
+  /** Only shown to these roles (display only — the API enforces access). */
+  roles?: string[];
 }
 
 // Grouped by module ownership (CLAUDE.md's Dev A/Dev B split) so a user
@@ -93,6 +113,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Ticketing core",
     items: [
       { label: "Command Center", to: "/", icon: <DashboardOutlinedIcon fontSize="small" /> },
+      { label: "Insights", to: "/insights", icon: <InsightsOutlinedIcon fontSize="small" /> },
       {
         label: "Incidents",
         to: "/incidents",
@@ -105,6 +126,21 @@ const NAV_GROUPS: NavGroup[] = [
         to: "/sla-policies",
         icon: <ScheduleOutlinedIcon fontSize="small" />,
       },
+      {
+        label: "Notification sounds",
+        to: "/notification-sounds",
+        icon: <VolumeUpOutlinedIcon fontSize="small" />,
+      },
+      {
+        label: "Support groups",
+        to: "/support-groups",
+        icon: <GroupsOutlinedIcon fontSize="small" />,
+      },
+      {
+        label: "Team & Shifts",
+        to: "/shifts",
+        icon: <AccessTimeOutlinedIcon fontSize="small" />,
+      },
     ],
   },
   {
@@ -116,6 +152,11 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <NotificationsActiveOutlinedIcon fontSize="small" />,
       },
       { label: "Alert rules", to: "/alert-rules", icon: <TuneOutlinedIcon fontSize="small" /> },
+      {
+        label: "Alert insights",
+        to: "/alert-insights",
+        icon: <InsightsOutlinedIcon fontSize="small" />,
+      },
     ],
   },
   {
@@ -129,7 +170,19 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "BCP plans", to: "/bcp-plans", icon: <PolicyOutlinedIcon fontSize="small" /> },
     ],
   },
+  {
+    label: "Administration",
+    roles: ["SUPER_ADMIN"],
+    items: [
+      { label: "Users", to: "/users", icon: <ManageAccountsOutlinedIcon fontSize="small" /> },
+    ],
+  },
 ];
+
+function visibleNavGroups(): NavGroup[] {
+  const role = getCurrentUserRole();
+  return NAV_GROUPS.filter((g) => !g.roles || (role !== null && g.roles.includes(role)));
+}
 
 /** Exact match for "/" (else every route would highlight it too); prefix match otherwise. */
 function isActive(pathname: string, to: string): boolean {
@@ -141,38 +194,29 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
   const location = useLocation();
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <Toolbar sx={{ px: 2.5, minHeight: "64px !important" }}>
-        <Stack direction="row" spacing={1.5} alignItems="center">
+      <Toolbar sx={{ px: 2.5, py: 2.5, minHeight: "76px !important" }}>
+        <Stack spacing={1}>
           <Box
+            component="img"
+            src="/jsan-logo-white.png"
+            alt="JSAN"
+            sx={{ height: 30, width: 100, display: "block" }}
+          />
+          <Typography
             sx={{
-              width: 34,
-              height: 34,
-              borderRadius: "10px",
-              bgcolor: ACCENT,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 800,
-              fontSize: 14,
-              color: darken(theme.palette.primary.main, 0.45),
-              flexShrink: 0,
+              color: SIDEBAR_TEXT_MUTED,
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
             }}
           >
-            OD
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography sx={{ color: "#fff", fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>
-              OpsDesk
-            </Typography>
-            <Typography sx={{ color: SIDEBAR_TEXT_MUTED, fontSize: 10.5, letterSpacing: "0.06em" }}>
-              DATA CENTER OPS
-            </Typography>
-          </Box>
+            JSAN &middot; DATA CENTER OPSDESK
+          </Typography>
         </Stack>
       </Toolbar>
       <Divider sx={{ borderColor: SIDEBAR_BORDER }} />
       <Box sx={{ flex: 1, overflowY: "auto", py: 1.5 }}>
-        {NAV_GROUPS.map((group, groupIndex) => (
+        {visibleNavGroups().map((group, groupIndex) => (
           <Box key={group.label}>
             {groupIndex > 0 && (
               <Divider sx={{ my: 1.5, mx: 2, borderColor: alpha("#ffffff", 0.06) }} />
@@ -183,6 +227,7 @@ function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
               subheader={
                 <ListSubheader
                   component="div"
+                  disableSticky
                   sx={{
                     bgcolor: "transparent",
                     color: SIDEBAR_TEXT_MUTED,
@@ -286,10 +331,19 @@ function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => 
   );
 }
 
-/** Slim top bar: identity + logout, plus the mobile nav toggle. */
+function opsConsoleLink(n: { entityType: string; entityId: string }): string | null {
+  if (n.entityType === "INCIDENT") return `/incidents/${n.entityId}`;
+  if (n.entityType === "ALERT") return `/alerts/${n.entityId}`;
+  return null;
+}
+
+/** Slim top bar: sound settings, the notification bell (with sounds), an
+ * interactive identity menu (avatar + role, click for account details and
+ * logout) plus the mobile nav toggle. */
 function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
   const token = getStoredToken();
   const user = token ? decodeJwtPayload(token) : null;
+  const meta = user ? roleMeta(user.role) : null;
 
   return (
     <AppBar
@@ -298,7 +352,7 @@ function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
       elevation={0}
       sx={{ borderBottom: 1, borderColor: "divider" }}
     >
-      <Toolbar sx={{ gap: 1.5 }}>
+      <Toolbar sx={{ gap: 1.5, minHeight: "76px !important" }}>
         <IconButton
           onClick={onMenuClick}
           edge="start"
@@ -308,26 +362,15 @@ function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
           <MenuOutlinedIcon />
         </IconButton>
         <Box sx={{ flex: 1 }} />
-        {user && <Chip size="small" label={user.role} variant="outlined" />}
-        {user && (
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{ display: { xs: "none", sm: "block" } }}
-          >
-            {user.email}
-          </Typography>
-        )}
-        {token && (
-          <Button
-            size="small"
-            onClick={() => {
-              clearStoredToken();
-              window.location.assign("/login");
-            }}
-          >
-            Log out
-          </Button>
+        {user && <SoundControl />}
+        {user && <NotificationBell sounds linkFor={opsConsoleLink} />}
+        {user && meta && (
+          <AccountMenu
+            email={user.email}
+            roleLabel={meta.label}
+            roleColor={meta.color}
+            onLogout={signOut}
+          />
         )}
       </Toolbar>
     </AppBar>
@@ -341,6 +384,11 @@ function AuthenticatedLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   if (!getStoredToken()) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+  // The client role gets a purpose-built portal (ClientLayout), not the
+  // internal ops console — none of the fourteen modules below are theirs.
+  if (getCurrentUserRole() === "CLIENT_MANAGER_VIEWER") {
+    return <Navigate to="/client/report" replace />;
   }
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
@@ -359,8 +407,16 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/auth/callback" element={<SocialCallbackPage />} />
+      <Route path="/auth/set-password" element={<SetPasswordPage />} />
+      <Route element={<ClientLayout />}>
+        <Route path="/client/report" element={<ReportIssuePage />} />
+        <Route path="/client/tickets" element={<MyTicketsPage />} />
+        <Route path="/client/tickets/:id" element={<TicketDetailPage />} />
+      </Route>
       <Route element={<AuthenticatedLayout />}>
         <Route path="/" element={<CommandCenterPage />} />
+        <Route path="/insights" element={<InsightsPage />} />
         <Route path="/sites" element={<SitesPage />} />
         <Route path="/sites/:id" element={<SiteDetailPage />} />
         <Route path="/cis" element={<CisPage />} />
@@ -368,9 +424,13 @@ export function App() {
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
         <Route path="/sla-policies" element={<SlaPoliciesPage />} />
+        <Route path="/notification-sounds" element={<NotificationSoundsPage />} />
+        <Route path="/support-groups" element={<SupportGroupsPage />} />
+        <Route path="/shifts" element={<ShiftsPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/alerts/:id" element={<AlertDetailPage />} />
         <Route path="/alert-rules" element={<AlertRulesPage />} />
+        <Route path="/alert-insights" element={<MonitoringPage />} />
         <Route path="/changes" element={<ChangesPage />} />
         <Route path="/changes/:id" element={<ChangeDetailPage />} />
         <Route path="/vendors" element={<VendorsPage />} />
@@ -383,6 +443,7 @@ export function App() {
         <Route path="/risks/:id" element={<RiskDetailPage />} />
         <Route path="/bcp-plans" element={<BcpPlansPage />} />
         <Route path="/bcp-plans/:id" element={<BcpPlanDetailPage />} />
+        <Route path="/users" element={<UsersPage />} />
       </Route>
     </Routes>
   );

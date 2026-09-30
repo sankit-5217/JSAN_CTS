@@ -17,6 +17,21 @@ function incident(overrides: Partial<EntityRef> = {}): EntityRef {
 const OPTS = { portalBaseUrl: "https://opsdesk.jsan.example/" };
 
 describe("renderNotification", () => {
+  it("renders a new ticket notification, with and without a reporter", () => {
+    const withReporter: NotificationEvent = {
+      kind: "INCIDENT_CREATED",
+      entity: incident(),
+      reporter: JANE,
+    };
+    const mail = renderNotification(withReporter, { to: [LEAD] });
+    expect(mail.subject).toBe("[SITE01] INC-1042 — new ticket needs triage");
+    expect(mail.text).toContain("was just raised by Jane Doe <jane@corp.example> and is waiting");
+
+    const withoutReporter: NotificationEvent = { kind: "INCIDENT_CREATED", entity: incident() };
+    const mail2 = renderNotification(withoutReporter, { to: [LEAD] });
+    expect(mail2.text).toContain("was just raised and is waiting");
+  });
+
   it("renders an assignment with threading + filter headers", () => {
     const event: NotificationEvent = {
       kind: "INCIDENT_ASSIGNED",
@@ -54,6 +69,30 @@ describe("renderNotification", () => {
 
     expect(mail.subject).toBe("‼ [SITE01] INC-1042 — RESOLUTION SLA BREACHED");
     expect(mail.headers["X-Priority"]).toBe("1");
+  });
+
+  it("renders a routing offer with its accept window", () => {
+    const mail = renderNotification(
+      {
+        kind: "INCIDENT_OFFERED",
+        entity: incident(),
+        offeredTo: LEAD,
+        expiresAt: "2026-09-03T12:05:00.000Z",
+        timeoutMinutes: 5,
+      },
+      { to: [LEAD] },
+    );
+    expect(mail.subject).toBe("‼ [SITE01] INC-1042 — offered to you (accept within 5 min)");
+    expect(mail.text).toContain("before 2026-09-03T12:05:00.000Z");
+  });
+
+  it("tells the desk when nobody accepted a routing offer", () => {
+    const mail = renderNotification(
+      { kind: "INCIDENT_OFFER_UNACCEPTED", entity: incident(), offeredTo: ["Ana", "Ben"] },
+      { to: [LEAD] },
+    );
+    expect(mail.subject).toContain("no engineer accepted");
+    expect(mail.text).toContain("It was offered to: Ana, Ben.");
   });
 
   it("phrases the SLA warning window and flags urgency under 15 min", () => {
@@ -115,6 +154,58 @@ describe("renderNotification", () => {
     expect(mail.headers["X-OpsDesk-Event"]).toBe("RISK_STATUS_CHANGED");
     expect(mail.text).toContain("moved from OPEN to ACCEPTED");
     expect(mail.text).toContain("Mitigation / rationale: Residual accepted by the infra lead");
+  });
+
+  it("renders a group-assignment notification, addressed to every member", () => {
+    const mail = renderNotification(
+      {
+        kind: "INCIDENT_GROUP_ASSIGNED",
+        entity: incident(),
+        group: { name: "Networking" },
+        actor: LEAD,
+      },
+      { to: [JANE, { name: "Pat Roe", email: "pat@corp.example" }] },
+    );
+
+    expect(mail.subject).toBe("[SITE01] INC-1042 — assigned to Networking");
+    expect(mail.to).toEqual(["Jane Doe <jane@corp.example>", "Pat Roe <pat@corp.example>"]);
+    expect(mail.headers["X-OpsDesk-Event"]).toBe("INCIDENT_GROUP_ASSIGNED");
+    expect(mail.text).toContain("assigned to the Networking group — no individual owner yet.");
+    expect(mail.text).toContain("Assigned by Sam Lead <sam@corp.example>.");
+  });
+
+  it("renders a comment-added notification with the author and body", () => {
+    const mail = renderNotification(
+      {
+        kind: "INCIDENT_COMMENT_ADDED",
+        entity: incident(),
+        author: JANE,
+        body: "Can you confirm the server's asset tag?",
+      },
+      { to: [LEAD] },
+    );
+
+    expect(mail.subject).toBe("[SITE01] INC-1042 — new comment from Jane Doe");
+    expect(mail.headers["X-OpsDesk-Event"]).toBe("INCIDENT_COMMENT_ADDED");
+    expect(mail.text).toContain("Jane Doe <jane@corp.example> commented on INC-1042:");
+    expect(mail.text).toContain("Can you confirm the server's asset tag?");
+  });
+
+  it("renders an alert recovering after the ticket was already resolved", () => {
+    const event: NotificationEvent = {
+      kind: "INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE",
+      entity: incident(),
+      alertType: "hardware.health_degraded",
+      severity: "CRITICAL",
+      recoveredAt: "2026-09-18T08:31:00.000Z",
+    };
+
+    const mail = renderNotification(event, { to: [JANE] });
+
+    expect(mail.subject).toBe("[SITE01] INC-1042 — hardware.health_degraded recovered");
+    expect(mail.headers["X-OpsDesk-Event"]).toBe("INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE");
+    expect(mail.text).toContain("was just reported RECOVERED by monitoring");
+    expect(mail.text).toContain("already resolved/closed before that happened");
   });
 
   it("throws EmailRenderError when there are no recipients or no entity key", () => {

@@ -1,4 +1,4 @@
-// JSAN CTS Data Center OpsDesk — Prisma schema
+// JSAN Data Center OpsDesk — Prisma schema
 // Baseline tables per build spec §13. UUID primary keys internally,
 // separate human-readable codes for UI. Timestamps stored in UTC.
 // This is the Sprint 1-2 baseline: core identity, sites, CMDB and audit.
@@ -26,7 +26,7 @@ enum UserRole {
   INFRASTRUCTURE_LEAD
   VENDOR_COORDINATOR
   DELIVERY_OPS_MANAGER
-  CTS_MANAGER_VIEWER
+  CLIENT_MANAGER_VIEWER
   AUDITOR_READ_ONLY
 }
 
@@ -147,23 +147,117 @@ enum ChangeType {
 // ---------------------------------------------------------------------------
 
 model User {
-  id          String   @id @default(uuid())
-  idpSubject  String   @unique @map("idp_subject")
-  email       String   @unique
-  displayName String   @map("display_name")
-  role        UserRole
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id               String    @id @default(uuid())
+  email            String    @unique
+  displayName      String    @map("display_name")
+  role             UserRole
+  isActive         Boolean   @default(true) @map("is_active")
+  // Password sign-in. NULL until the user sets one through an invite/reset
+  // link (never set by an admin). scrypt, see auth/password-hasher.ts.
+  passwordHash     String?   @map("password_hash")
+  passwordSetAt    DateTime? @map("password_set_at")
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until")
+  // Carried in every app JWT ("sv"); bumping it (password set/reset)
+  // invalidates all of the user's existing sessions at once.
+  sessionVersion   Int       @default(0) @map("session_version")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  incidentsOwned     Incident[]      @relation("IncidentOwner")
-  worklogs           Worklog[]
-  auditEvents        AuditEvent[]
-  siteAccess         UserSiteAccess[]
-  attachments        Attachment[]
-  deletedAttachments Attachment[]    @relation("AttachmentDeletedBy")
+  incidentsOwned      Incident[]           @relation("IncidentOwner")
+  incidentsReported   Incident[]           @relation("IncidentReportedBy")
+  worklogs            Worklog[]
+  auditEvents         AuditEvent[]
+  siteAccess          UserSiteAccess[]
+  attachments         Attachment[]
+  deletedAttachments  Attachment[]         @relation("AttachmentDeletedBy")
+  supportGroupMembers SupportGroupMember[]
+  engineerShifts      EngineerShift[]
+  userSkills          UserSkill[]
+  inAppNotifications  InAppNotification[]
+  routingOffers       RoutingOffer[]
+  loginHandoffCodes   LoginHandoffCode[]
+  identities          UserIdentity[]
+  passwordTokens      PasswordToken[]      @relation("PasswordTokenUser")
+  apiTokens           ApiToken[]           @relation("ApiTokenUser")
 
   @@map("users")
+}
+
+/// A social sign-in (Google / Microsoft / GitHub) linked to a user. Linked
+/// on the first sign-in whose verified email matches an existing user;
+/// afterwards only (issuer, subject) is trusted, never the email alone.
+model UserIdentity {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  provider    String // "google" | "microsoft" | "github"
+  issuer      String
+  subject     String
+  email       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  lastLoginAt DateTime? @map("last_login_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([issuer, subject])
+  @@unique([userId, provider])
+  @@map("user_identities")
+}
+
+/// Single-use invite / password-reset link token. Only its SHA-256 is stored.
+model PasswordToken {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  tokenHash   String    @unique @map("token_hash")
+  purpose     String // "INVITE" | "RESET"
+  expiresAt   DateTime  @map("expires_at")
+  usedAt      DateTime? @map("used_at")
+  createdById String?   @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation("PasswordTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_tokens")
+}
+
+/// Long-lived, revocable API token for a machine account (site collector,
+/// worker). Shown once at creation; only its SHA-256 is stored.
+model ApiToken {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  name        String
+  tokenHash   String    @unique @map("token_hash")
+  /// First characters of the token, to tell tokens apart in the UI.
+  prefix      String
+  expiresAt   DateTime? @map("expires_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdById String    @map("created_by_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation("ApiTokenUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("api_tokens")
+}
+
+/// Single-use handoff between a social sign-in callback (API origin) and the
+/// web app: the callback redirects the browser with a random code, the web
+/// app trades it for the app JWT via POST /auth/social/exchange. Only the
+/// SHA-256 of the code is stored; rows expire after ~60s and are consumed once.
+model LoginHandoffCode {
+  id         String    @id @default(uuid())
+  codeHash   String    @unique @map("code_hash")
+  userId     String    @map("user_id")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("login_handoff_codes")
 }
 
 /// Explicit site-scope grants (spec §4: most roles are "assigned sites"
@@ -197,12 +291,14 @@ model Site {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  contacts             SiteContact[]
-  supportCalendars     SupportCalendar[]
-  configurationItems   ConfigurationItem[]
-  incidents            Incident[]
-  userAccess           UserSiteAccess[]
-  racks                Rack[]
+  contacts           SiteContact[]
+  supportCalendars   SupportCalendar[]
+  configurationItems ConfigurationItem[]
+  incidents          Incident[]
+  userAccess         UserSiteAccess[]
+  racks              Rack[]
+  engineerShifts     EngineerShift[]
+  routingPolicy      RoutingPolicy?
 
   @@map("sites")
 }
@@ -224,14 +320,14 @@ model SiteContact {
 }
 
 model SupportCalendar {
-  id            String   @id @default(uuid())
-  siteId        String   @map("site_id")
+  id            String     @id @default(uuid())
+  siteId        String     @map("site_id")
   name          String
-  businessStart String   @map("business_start") // "09:00"
-  businessEnd   String   @map("business_end") // "18:00"
-  workdays      Int[]    @map("workdays") // 0=Sun .. 6=Sat
+  businessStart String     @map("business_start") // "09:00"
+  businessEnd   String     @map("business_end") // "18:00"
+  workdays      Int[]      @map("workdays") // 0=Sun .. 6=Sat
   holidays      DateTime[]
-  is247         Boolean  @default(false) @map("is_24x7")
+  is247         Boolean    @default(false) @map("is_24x7")
 
   site Site @relation(fields: [siteId], references: [id])
 
@@ -244,9 +340,263 @@ model SupportGroup {
   name      String   @unique
   createdAt DateTime @default(now()) @map("created_at")
 
-  incidents Incident[]
+  incidents     Incident[]
+  members       SupportGroupMember[]
+  categoryTeams CategoryTeam[]
 
   @@map("support_groups")
+}
+
+/// Which support group (team) owns an incident category, e.g.
+/// STORAGE_FAILURE -> Storage team. Owned by the routing module: offers and
+/// suggestions prefer that team's members, and an accepted offer records the
+/// team on the incident. One team per category (case-insensitive, enforced
+/// by the routing service). Deleting the group removes its mappings.
+model CategoryTeam {
+  id        String   @id @default(uuid())
+  category  String   @unique
+  groupId   String   @map("group_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  group SupportGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@map("category_teams")
+}
+
+/// Who's actually on a support group's roster — SupportGroup itself has no
+/// members concept without this, which meant assigning an incident to a
+/// group had no one to notify (spec gap; see incidents.service.ts's
+/// notifyGroupAssignment). Same explicit-join-table shape as UserSiteAccess.
+model SupportGroupMember {
+  id        String   @id @default(uuid())
+  groupId   String   @map("group_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  group SupportGroup @relation(fields: [groupId], references: [id])
+  user  User         @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@map("support_group_members")
+}
+
+/// A recurring weekly duty window for one engineer at one site — e.g. "Sam,
+/// SITE01, Mon-Fri 06:00-14:00". `daysOfWeek` uses the same 0=Sun..6=Sat
+/// convention as SupportCalendar.workdays (calendar.util.ts's `weekday % 7`).
+/// `startTime`/`endTime` are "HH:MM" local to the site's own timezone, same
+/// representation as SupportCalendar.businessStart/businessEnd — interpreted
+/// as an overnight wrap (e.g. 22:00-06:00) whenever startTime > endTime.
+/// `isOnCall` distinguishes a normal working shift from an on-call/escalation
+/// window; `isActive` retires a shift without losing its history (no hard
+/// delete, same posture as AlertRule/SlaPolicy — deactivate, don't delete).
+model EngineerShift {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  siteId     String   @map("site_id")
+  label      String
+  daysOfWeek Int[]    @map("days_of_week")
+  startTime  String   @map("start_time")
+  endTime    String   @map("end_time")
+  isOnCall   Boolean  @default(false) @map("is_on_call")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@index([userId])
+  @@index([siteId])
+  @@map("engineer_shifts")
+}
+
+/// Skill taxonomy (Phase 1 of skill-based routing) — admin-managed tags like
+/// "Windows", "Storage", "Backup", never hard-coded (CLAUDE.md: config over
+/// hard-code). Soft-deactivate only, same posture as AlertRule/SlaPolicy —
+/// a retired skill stays on historical assignments, just stops being
+/// offerable for new ones.
+model Skill {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  userSkills           UserSkill[]
+  categoryRequirements CategorySkillRequirement[]
+
+  @@map("skills")
+}
+
+/// Which engineers have which skills — a plain membership join, same
+/// hard-delete-on-remove posture as SupportGroupMember (removing a skill
+/// from an engineer is "they no longer have it," not a historical record
+/// worth soft-deleting; the audit log already captures the removal event).
+model UserSkill {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  skillId   String   @map("skill_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user  User  @relation(fields: [userId], references: [id])
+  skill Skill @relation(fields: [skillId], references: [id])
+
+  @@unique([userId, skillId])
+  @@index([skillId])
+  @@map("user_skills")
+}
+
+/// Phase 2 of skill-based routing: which skill(s) an incident category
+/// requires — admin-configured, never hard-coded (CLAUDE.md: config over
+/// hard-code). `category` mirrors Incident.category's own free-text field
+/// (no enum exists there either); matched case-insensitively by the
+/// routing module's suggestions (Phase 3 — suggest only, never auto-assigns).
+model CategorySkillRequirement {
+  id        String   @id @default(uuid())
+  category  String
+  skillId   String   @map("skill_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  skill Skill @relation(fields: [skillId], references: [id])
+
+  @@unique([category, skillId])
+  @@index([skillId])
+  @@map("category_skill_requirements")
+}
+
+/// Per-site skill-based routing settings. Owned by the routing module; one
+/// row per site, created on first write. A site with no row is treated as
+/// autoAssignEnabled = false, so the feature is opt-in per site (config
+/// over hard-code, CLAUDE.md). When on, a new incident is offered to the
+/// top-ranked engineer, who has the priority's offer timeout to accept
+/// before it moves to the next candidate (see RoutingOffer).
+model RoutingPolicy {
+  id                    String   @id @default(uuid())
+  siteId                String   @unique @map("site_id")
+  autoAssignEnabled     Boolean  @default(false) @map("auto_assign_enabled")
+  /// Minutes an engineer has to accept an offer, by incident priority.
+  offerTimeoutP1Minutes Int      @default(2) @map("offer_timeout_p1_minutes")
+  offerTimeoutP2Minutes Int      @default(5) @map("offer_timeout_p2_minutes")
+  offerTimeoutP3Minutes Int      @default(10) @map("offer_timeout_p3_minutes")
+  offerTimeoutP4Minutes Int      @default(15) @map("offer_timeout_p4_minutes")
+  /// How much one open incident of each priority counts toward an
+  /// engineer's workload when ranking candidates.
+  workloadWeightP1      Int      @default(4) @map("workload_weight_p1")
+  workloadWeightP2      Int      @default(3) @map("workload_weight_p2")
+  workloadWeightP3      Int      @default(2) @map("workload_weight_p3")
+  workloadWeightP4      Int      @default(1) @map("workload_weight_p4")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@map("routing_policies")
+}
+
+enum RoutingOfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  /// The ticket was assigned or moved on some other way while the offer
+  /// was open.
+  CANCELLED
+}
+
+/// One offer of a NEW incident to one engineer. Owned by the routing
+/// module. The incident itself stays NEW and unowned until an offer is
+/// accepted; at most one offer per incident is PENDING at a time (enforced
+/// by the routing service's conditional writes). Declined and expired
+/// offers stay as history so the next round skips those engineers.
+model RoutingOffer {
+  id            String             @id @default(uuid())
+  incidentId    String             @map("incident_id")
+  userId        String             @map("user_id")
+  status        RoutingOfferStatus @default(PENDING)
+  expiresAt     DateTime           @map("expires_at")
+  respondedAt   DateTime?          @map("responded_at")
+  declineReason String?            @map("decline_reason")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  incident Incident @relation(fields: [incidentId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([incidentId, status])
+  @@index([status, expiresAt])
+  @@index([userId, status])
+  @@map("routing_offers")
+}
+
+/// What an in-app notification is about: the subset of the email
+/// notification kinds that also land in the web app's bell.
+enum InAppNotificationKind {
+  INCIDENT_CREATED
+  INCIDENT_ASSIGNED
+  INCIDENT_GROUP_ASSIGNED
+  INCIDENT_STATUS_CHANGED
+  INCIDENT_COMMENT_ADDED
+  SLA_WARNING
+  SLA_BREACHED
+  INCIDENT_OFFERED
+  INCIDENT_OFFER_UNACCEPTED
+  ALERT_RECOVERED
+  ALERT_RAISED
+}
+
+/// How loudly the ops console announces a notification when it arrives.
+/// Resolved server-side from notification_sound_rules when the row is
+/// written, so the browser never guesses from the kind or title.
+enum NotificationUrgency {
+  CRITICAL
+  HIGH
+  NORMAL
+  SILENT
+}
+
+/// One entry in a user's notification bell. Owned by the inbox module;
+/// written best-effort next to the matching email, after the triggering
+/// mutation has committed. `dedupeKey` makes a repeated write of the same
+/// event for the same user a no-op. Rows older than
+/// NOTIFICATION_RETENTION_DAYS (default 90) are purged daily.
+model InAppNotification {
+  id         String                @id @default(uuid())
+  userId     String                @map("user_id")
+  kind       InAppNotificationKind
+  title      String
+  body       String?
+  entityType String                @map("entity_type")
+  entityId   String                @map("entity_id")
+  dedupeKey  String                @map("dedupe_key")
+  urgency    NotificationUrgency   @default(NORMAL)
+  readAt     DateTime?             @map("read_at")
+  createdAt  DateTime              @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("in_app_notifications")
+}
+
+/// Which sound tier a notification gets, per kind and level. `level` is 1-4:
+/// the incident's priority (P1-P4) or, for alert kinds, the alert's severity
+/// (CRITICAL=1, HIGH=2, WARNING=3, INFO=4). Owned by the inbox module and
+/// edited from the Notification sounds page; a missing row falls back to the
+/// inbox module's code default.
+model NotificationSoundRule {
+  id        String                @id @default(uuid())
+  kind      InAppNotificationKind
+  level     Int
+  urgency   NotificationUrgency
+  createdAt DateTime              @default(now()) @map("created_at")
+  updatedAt DateTime              @updatedAt @map("updated_at")
+
+  @@unique([kind, level])
+  @@map("notification_sound_rules")
 }
 
 // ---------------------------------------------------------------------------
@@ -287,17 +637,17 @@ model ConfigurationItem {
   managedBy          ManagedBy       @map("managed_by")
   criticality        Criticality
   lifecycleStatus    LifecycleStatus @map("lifecycle_status")
-  metadata           Json?           // vendor-specific fields only
+  metadata           Json? // vendor-specific fields only
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
 
-  site         Site           @relation(fields: [siteId], references: [id])
-  rack         Rack?          @relation(fields: [rackId], references: [id])
-  incidents    Incident[]
-  alerts       Alert[]
+  site           Site            @relation(fields: [siteId], references: [id])
+  rack           Rack?           @relation(fields: [rackId], references: [id])
+  incidents      Incident[]
+  alerts         Alert[]
   healthSnapshot HealthSnapshot?
-  warranties   Warranty[]
-  vendorCases  VendorCase[]
+  warranties     Warranty[]
+  vendorCases    VendorCase[]
 
   parentOf CiRelation[] @relation("ParentCi")
   childOf  CiRelation[] @relation("ChildCi")
@@ -321,12 +671,18 @@ model CiRelation {
 }
 
 model HealthSnapshot {
-  id           String   @id @default(uuid())
-  ciId         String   @unique @map("ci_id")
-  overallHealth String  @map("overall_health") // HEALTHY / WARNING / CRITICAL / UNKNOWN / MAINTENANCE
-  details      Json?
-  lastHeartbeatAt DateTime? @map("last_heartbeat_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id               String    @id @default(uuid())
+  ciId             String    @unique @map("ci_id")
+  overallHealth    String    @map("overall_health") // HEALTHY / WARNING / CRITICAL / UNKNOWN / MAINTENANCE
+  details          Json?
+  lastHeartbeatAt  DateTime? @map("last_heartbeat_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  // Alert.externalEventId of the currently-open hardware-health alert this CI's
+  // WARNING/CRITICAL streak opened (see MonitoringService.syncHealthAlert) — null
+  // when the CI is HEALTHY/UNKNOWN/MAINTENANCE with no open episode. Lets repeated
+  // bad polls update the same alert row and the eventual HEALTHY poll close it,
+  // instead of a fresh alert per poll.
+  openAlertEventId String?   @map("open_alert_event_id")
 
   ci ConfigurationItem @relation(fields: [ciId], references: [id])
 
@@ -334,12 +690,12 @@ model HealthSnapshot {
 }
 
 model Warranty {
-  id            String         @id @default(uuid())
-  ciId          String         @map("ci_id")
-  status        WarrantyStatus
-  provider      String?
-  expiresAt     DateTime?      @map("expires_at")
-  createdAt     DateTime       @default(now()) @map("created_at")
+  id        String         @id @default(uuid())
+  ciId      String         @map("ci_id")
+  status    WarrantyStatus
+  provider  String?
+  expiresAt DateTime?      @map("expires_at")
+  createdAt DateTime       @default(now()) @map("created_at")
 
   ci ConfigurationItem @relation(fields: [ciId], references: [id])
 
@@ -353,36 +709,42 @@ model Warranty {
 // ---------------------------------------------------------------------------
 
 model Incident {
-  id           String         @id @default(uuid())
-  incidentNo   String         @unique @map("incident_no")
-  siteId       String         @map("site_id")
-  ciId         String?        @map("ci_id")
-  status       IncidentStatus @default(NEW)
-  priority     Priority
-  category     String
-  impact       String
-  urgency      String
-  shortDescription String     @map("short_description")
-  ownerGroupId String?        @map("owner_group_id")
-  ownerUserId  String?        @map("owner_user_id")
-  acknowledgedAt DateTime?    @map("acknowledged_at")
-  resolutionCategory String?  @map("resolution_category")
-  rootCauseSummary   String?  @map("root_cause_summary")
-  restoredAt   DateTime?      @map("restored_at")
-  closedAt     DateTime?      @map("closed_at")
-  createdAt    DateTime       @default(now()) @map("created_at")
-  updatedAt    DateTime       @updatedAt @map("updated_at")
+  id                 String         @id @default(uuid())
+  incidentNo         String         @unique @map("incident_no")
+  siteId             String         @map("site_id")
+  ciId               String?        @map("ci_id")
+  status             IncidentStatus @default(NEW)
+  priority           Priority
+  category           String
+  impact             String
+  urgency            String
+  shortDescription   String         @map("short_description")
+  ownerGroupId       String?        @map("owner_group_id")
+  ownerUserId        String?        @map("owner_user_id")
+  // Set only when this incident came in via POST /incidents/customer-report —
+  // null for internally-created incidents (spec §10.3: who to notify back on
+  // status/comment updates for a self-service ticket).
+  reportedByUserId   String?        @map("reported_by_user_id")
+  acknowledgedAt     DateTime?      @map("acknowledged_at")
+  resolutionCategory String?        @map("resolution_category")
+  rootCauseSummary   String?        @map("root_cause_summary")
+  restoredAt         DateTime?      @map("restored_at")
+  closedAt           DateTime?      @map("closed_at")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
 
   site       Site               @relation(fields: [siteId], references: [id])
   ci         ConfigurationItem? @relation(fields: [ciId], references: [id])
   owner      User?              @relation("IncidentOwner", fields: [ownerUserId], references: [id])
   ownerGroup SupportGroup?      @relation(fields: [ownerGroupId], references: [id])
+  reportedBy User?              @relation("IncidentReportedBy", fields: [reportedByUserId], references: [id])
 
-  events    IncidentEvent[]
-  comments  IncidentComment[]
-  worklogs  Worklog[]
-  slaInstances SlaInstance[]
-  vendorCases  VendorCase[]
+  events        IncidentEvent[]
+  comments      IncidentComment[]
+  worklogs      Worklog[]
+  slaInstances  SlaInstance[]
+  vendorCases   VendorCase[]
+  routingOffers RoutingOffer[]
 
   @@index([siteId])
   @@index([status])
@@ -446,18 +808,18 @@ model Worklog {
 // ---------------------------------------------------------------------------
 
 model SlaPolicy {
-  id                String   @id @default(uuid())
-  name              String
-  priority          Priority
-  ackTargetMinutes  Int      @map("ack_target_minutes")
-  resolveTargetMinutes Int   @map("resolve_target_minutes")
-  usesBusinessCalendar Boolean @default(false) @map("uses_business_calendar")
-  escalationThresholdsPercent Int[] @default([50, 75, 90]) @map("escalation_thresholds_percent")
-  pausesOnPendingVendor   Boolean @default(true) @map("pauses_on_pending_vendor")
-  pausesOnPendingCustomer Boolean @default(true) @map("pauses_on_pending_customer")
-  effectiveFrom     DateTime @map("effective_from")
-  effectiveTo       DateTime? @map("effective_to")
-  isActive          Boolean  @default(true) @map("is_active")
+  id                          String    @id @default(uuid())
+  name                        String
+  priority                    Priority
+  ackTargetMinutes            Int       @map("ack_target_minutes")
+  resolveTargetMinutes        Int       @map("resolve_target_minutes")
+  usesBusinessCalendar        Boolean   @default(false) @map("uses_business_calendar")
+  escalationThresholdsPercent Int[]     @default([50, 75, 90]) @map("escalation_thresholds_percent")
+  pausesOnPendingVendor       Boolean   @default(true) @map("pauses_on_pending_vendor")
+  pausesOnPendingCustomer     Boolean   @default(true) @map("pauses_on_pending_customer")
+  effectiveFrom               DateTime  @map("effective_from")
+  effectiveTo                 DateTime? @map("effective_to")
+  isActive                    Boolean   @default(true) @map("is_active")
 
   slaInstances SlaInstance[]
 
@@ -496,23 +858,23 @@ model SlaInstance {
 // ---------------------------------------------------------------------------
 
 model Alert {
-  id              String        @id @default(uuid())
-  externalEventId String        @map("external_event_id")
-  source          String        // ZABBIX / PROMETHEUS / REDFISH / SNMP / SYSLOG
-  siteId          String?       @map("site_id")
-  ciId            String?       @map("ci_id")
-  alertType       String        @map("alert_type")
-  severity        AlertSeverity
-  fingerprint     String
-  firstSeenAt     DateTime      @map("first_seen_at")
-  lastSeenAt      DateTime      @map("last_seen_at")
-  state           AlertState    @default(OPEN)
-  rawReference    String?       @map("raw_reference") // pointer, not unlimited raw payload storage
+  id                   String        @id @default(uuid())
+  externalEventId      String        @map("external_event_id")
+  source               String // ZABBIX / PROMETHEUS / REDFISH / SNMP / SYSLOG
+  siteId               String?       @map("site_id")
+  ciId                 String?       @map("ci_id")
+  alertType            String        @map("alert_type")
+  severity             AlertSeverity
+  fingerprint          String
+  firstSeenAt          DateTime      @map("first_seen_at")
+  lastSeenAt           DateTime      @map("last_seen_at")
+  state                AlertState    @default(OPEN)
+  rawReference         String?       @map("raw_reference") // pointer, not unlimited raw payload storage
   // Set once when the alert is attached to a still-open incident on the same CI
   // (spec §10.10). Scalar, no FK relation: the incidents module owns that table,
   // correlation only reads it. Link-only — correlation never opens or mutates a
   // ticket.
-  correlatedIncidentId String?  @map("correlated_incident_id")
+  correlatedIncidentId String?       @map("correlated_incident_id")
 
   ci ConfigurationItem? @relation(fields: [ciId], references: [id])
 
@@ -531,18 +893,27 @@ model Alert {
 /// (site+type > site > type > global), falling back to code defaults, behind
 /// a short in-memory cache.
 model AlertRule {
-  id                     String          @id @default(uuid())
-  name                   String
-  siteId                 String?         @map("site_id")
-  alertType              String?         @map("alert_type")
-  flappingThreshold      Int             @default(3) @map("flapping_threshold")
-  flappingWindowMinutes  Int             @default(30) @map("flapping_window_minutes")
-  pagingSeverities       AlertSeverity[] @default([CRITICAL]) @map("paging_severities")
-  autoCorrelateIncidents Boolean         @default(true) @map("auto_correlate_incidents")
-  suppressAutoTicketDuringMaintenance Boolean @default(true) @map("suppress_auto_ticket_during_maintenance")
-  isActive               Boolean         @default(true) @map("is_active")
-  createdAt              DateTime        @default(now()) @map("created_at")
-  updatedAt              DateTime        @updatedAt @map("updated_at")
+  id                                  String          @id @default(uuid())
+  name                                String
+  siteId                              String?         @map("site_id")
+  alertType                           String?         @map("alert_type")
+  flappingThreshold                   Int             @default(3) @map("flapping_threshold")
+  flappingWindowMinutes               Int             @default(30) @map("flapping_window_minutes")
+  pagingSeverities                    AlertSeverity[] @default([CRITICAL]) @map("paging_severities")
+  autoCorrelateIncidents              Boolean         @default(true) @map("auto_correlate_incidents")
+  suppressAutoTicketDuringMaintenance Boolean         @default(true) @map("suppress_auto_ticket_during_maintenance")
+  /// Severities that open a new incident when the CI has no open one.
+  /// Empty turns auto-creation off for this rule's scope.
+  autoCreateSeverities                AlertSeverity[] @default([CRITICAL]) @map("auto_create_severities")
+  /// Category for auto-created incidents (drives skill-based routing).
+  /// Null means OTHER.
+  incidentCategory                    String?         @map("incident_category")
+  /// Priority for auto-created incidents. Null means derived from the alert
+  /// severity (CRITICAL P1, HIGH P2, WARNING P3, INFO P4).
+  incidentPriority                    Priority?       @map("incident_priority")
+  isActive                            Boolean         @default(true) @map("is_active")
+  createdAt                           DateTime        @default(now()) @map("created_at")
+  updatedAt                           DateTime        @updatedAt @map("updated_at")
 
   @@index([isActive])
   @@index([siteId])
@@ -556,7 +927,7 @@ model AlertRule {
 model Vendor {
   id        String   @id @default(uuid())
   name      String   @unique
-  type      String   // DELL / HPE / ISP / LOCAL
+  type      String // DELL / HPE / ISP / LOCAL
   createdAt DateTime @default(now()) @map("created_at")
 
   vendorCases VendorCase[]
@@ -565,20 +936,20 @@ model Vendor {
 }
 
 model VendorCase {
-  id                String          @id @default(uuid())
-  vendorCaseNo      String          @unique @map("vendor_case_no")
-  vendorId          String          @map("vendor_id")
-  linkedIncidentId  String?         @map("linked_incident_id")
-  ciId              String?         @map("ci_id")
-  warrantyStatus    WarrantyStatus  @default(UNKNOWN) @map("warranty_status")
-  openedAt          DateTime        @default(now()) @map("opened_at")
-  acknowledgedAt    DateTime?       @map("acknowledged_at")
-  rmaRequired       Boolean         @default(false) @map("rma_required")
-  replacementPart   String?         @map("replacement_part")
-  dispatchStatus    DispatchStatus? @map("dispatch_status")
-  vendorEta         DateTime?       @map("vendor_eta")
-  closedAt          DateTime?       @map("closed_at")
-  outcome           String?
+  id               String          @id @default(uuid())
+  vendorCaseNo     String          @unique @map("vendor_case_no")
+  vendorId         String          @map("vendor_id")
+  linkedIncidentId String?         @map("linked_incident_id")
+  ciId             String?         @map("ci_id")
+  warrantyStatus   WarrantyStatus  @default(UNKNOWN) @map("warranty_status")
+  openedAt         DateTime        @default(now()) @map("opened_at")
+  acknowledgedAt   DateTime?       @map("acknowledged_at")
+  rmaRequired      Boolean         @default(false) @map("rma_required")
+  replacementPart  String?         @map("replacement_part")
+  dispatchStatus   DispatchStatus? @map("dispatch_status")
+  vendorEta        DateTime?       @map("vendor_eta")
+  closedAt         DateTime?       @map("closed_at")
+  outcome          String?
 
   vendor   Vendor             @relation(fields: [vendorId], references: [id])
   incident Incident?          @relation(fields: [linkedIncidentId], references: [id])
@@ -669,60 +1040,64 @@ model ProblemLink {
 }
 
 model Change {
-  id               String     @id @default(uuid())
-  changeType       ChangeType @map("change_type")
-  reason           String
-  implementationPlan String   @map("implementation_plan")
-  validationPlan   String     @map("validation_plan")
-  rollbackPlan     String     @map("rollback_plan")
-  risk             String
-  windowStart      DateTime   @map("window_start")
-  windowEnd        DateTime   @map("window_end")
-  approverId       String?    @map("approver_id")
-  outcome          String?
+  id                 String     @id @default(uuid())
+  changeType         ChangeType @map("change_type")
+  reason             String
+  implementationPlan String     @map("implementation_plan")
+  validationPlan     String     @map("validation_plan")
+  rollbackPlan       String     @map("rollback_plan")
+  risk               String
+  windowStart        DateTime   @map("window_start")
+  windowEnd          DateTime   @map("window_end")
+  // Who raised the change — separate from approverId so approve() can refuse
+  // to let the raiser approve their own change (separation of duties).
+  // Nullable only because rows created before this column existed have none.
+  createdBy          String?    @map("created_by")
+  approverId         String?    @map("approver_id")
+  outcome            String?
   // CIs this change touches. Empty = a site-wide window. Lets the
   // alert-suppression feed answer "is CI X under maintenance right now?"
   // rather than only keying off ci.lifecycleStatus.
-  affectedCiIds    String[]   @default([]) @map("affected_ci_ids")
-  createdAt        DateTime   @default(now()) @map("created_at")
+  affectedCiIds      String[]   @default([]) @map("affected_ci_ids")
+  createdAt          DateTime   @default(now()) @map("created_at")
 
   @@map("changes")
 }
 
 model KnowledgeArticle {
-  id           String   @id @default(uuid())
-  title        String
-  body         String
-  version      Int      @default(1)
-  ownerId      String?  @map("owner_id")
+  id               String    @id @default(uuid())
+  title            String
+  body             String
+  version          Int       @default(1)
+  ownerId          String?   @map("owner_id")
   // Scope & linkage (spec §10.14). siteId null = global runbook; set = a
   // site-specific SOP. incidentCategory / ciType tie the article to the kind
   // of incident and hardware it applies to.
-  siteId       String?  @map("site_id")
-  incidentCategory String? @map("incident_category")
-  ciType       CiType?  @map("ci_type")
-  approvalState String  @default("DRAFT") @map("approval_state") // DRAFT / APPROVED
-  reviewDueAt  DateTime? @map("review_due_at")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  siteId           String?   @map("site_id")
+  incidentCategory String?   @map("incident_category")
+  ciType           CiType?   @map("ci_type")
+  approvalState    String    @default("DRAFT") @map("approval_state") // DRAFT / APPROVED
+  reviewDueAt      DateTime? @map("review_due_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   @@index([siteId])
   @@map("knowledge_articles")
 }
 
 model Risk {
-  id          String   @id @default(uuid())
-  siteId      String?  @map("site_id")
+  id          String    @id @default(uuid())
+  siteId      String?   @map("site_id")
   description String
   likelihood  Int
   impact      Int
   score       Int
   mitigation  String?
   evidence    String?
-  ownerId     String?  @map("owner_id")
+  ownerId     String?   @map("owner_id")
   dueDate     DateTime? @map("due_date")
-  status      String   @default("OPEN")
-  createdAt   DateTime @default(now()) @map("created_at")
+  status      String    @default("OPEN")
+  createdAt   DateTime  @default(now()) @map("created_at")
 
   @@map("risks")
 }

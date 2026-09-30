@@ -26,6 +26,11 @@ export class QueryAlertsDto {
   @IsString()
   ciCode?: string;
 
+  @ApiPropertyOptional({ description: "Only alerts correlated to this incident id." })
+  @IsOptional()
+  @IsString()
+  correlatedIncidentId?: string;
+
   @ApiPropertyOptional({ default: 50, minimum: 1, maximum: 200 })
   @IsOptional()
   @Type(() => Number)

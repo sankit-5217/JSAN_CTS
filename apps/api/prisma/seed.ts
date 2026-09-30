@@ -12,15 +12,24 @@ import {
   UserRole,
   WorklogActivityType,
 } from "@prisma/client";
+import { hashPassword, passwordPolicyProblem } from "../src/modules/auth/password-hasher";
 
 const prisma = new PrismaClient();
+
+/**
+ * Local/demo sign-in password for every seeded account (override with
+ * SEED_DEMO_PASSWORD). Never used in production: the seed refuses to set
+ * passwords there — real people choose their own via an emailed invite.
+ */
+const DEMO_PASSWORD = process.env.SEED_DEMO_PASSWORD ?? "OpsDesk-Demo-2026!";
 
 /**
  * Sites/users seeded in Sprint 2; a rack and a couple of CIs per site
  * added in Sprint 3; an incident walked through a few transitions, a
  * comment, and a worklog added in Sprint 4/5; SLA policies, a support
  * calendar per site, and the seeded incident's SLA instance added in
- * Sprint 6. No seeded attachment — that needs a live MinIO the local dev
+ * Sprint 6; skills, category requirements and engineer shifts for the
+ * skill-based routing demo. No seeded attachment — that needs a live MinIO the local dev
  * setup doesn't have running (Sprint 5 plan, Decision 7).
  * Extend per §31 "Recommended First Development Demo" as later sprints
  * land — do not seed production data here.
@@ -52,6 +61,18 @@ async function findOrCreateSupportCalendar(
   }
   return prisma.supportCalendar.create({ data });
 }
+
+/** EngineerShift has no natural unique key either — same find-or-create,
+ * guarded on engineer + site + label. */
+async function findOrCreateShift(data: Prisma.EngineerShiftUncheckedCreateInput): Promise<void> {
+  const existing = await prisma.engineerShift.findFirst({
+    where: { userId: data.userId, siteId: data.siteId, label: data.label },
+  });
+  if (!existing) {
+    await prisma.engineerShift.create({ data });
+  }
+}
+
 async function main() {
   const site1 = await prisma.site.upsert({
     where: { code: "SITE01" },
@@ -79,7 +100,6 @@ async function main() {
     where: { email: "admin@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-admin",
       email: "admin@example.com",
       displayName: "Seed Admin",
       role: UserRole.SUPER_ADMIN,
@@ -92,7 +112,6 @@ async function main() {
     where: { email: "servicedesk@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-service-desk",
       email: "servicedesk@example.com",
       displayName: "Seed Service Desk",
       role: UserRole.SERVICE_DESK_NOC,
@@ -105,7 +124,6 @@ async function main() {
     where: { email: "engineer@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-site-engineer",
       email: "engineer@example.com",
       displayName: "Seed Site Engineer",
       role: UserRole.SITE_ENGINEER,
@@ -119,11 +137,31 @@ async function main() {
     where: { email: "engineer1@example.com" },
     update: {},
     create: {
-      idpSubject: "seed-site-engineer-1",
       email: "engineer1@example.com",
       displayName: "Seed Site Engineer 1",
       role: UserRole.SITE_ENGINEER,
     },
+  });
+
+  // Client viewer: the customer's own read-only account (CLIENT_MANAGER_VIEWER
+  // isn't in AuthzService's ALL_SITES_ROLES, so it needs a UserSiteAccess row
+  // just like the scoped internal roles below). Scoped to SITE01 so logging
+  // in as this user actually shows something — the seeded incident lives
+  // there.
+  const clientViewer = await prisma.user.upsert({
+    where: { email: "viewer@example.com" },
+    update: {},
+    create: {
+      email: "viewer@example.com",
+      displayName: "Seed Client Manager Viewer",
+      role: UserRole.CLIENT_MANAGER_VIEWER,
+    },
+  });
+
+  await prisma.userSiteAccess.upsert({
+    where: { userId_siteId: { userId: clientViewer.id, siteId: site1.id } },
+    update: {},
+    create: { userId: clientViewer.id, siteId: site1.id },
   });
 
   await prisma.userSiteAccess.upsert({
@@ -298,6 +336,251 @@ async function main() {
     await prisma.alertRule.create({ data: { name: "default" } });
   }
 
+  // Skill-based routing demo (skills Phases 1-2 + routing Phase 3). A second
+  // SITE01 engineer so GET /incidents/:id/routing-suggestions has something
+  // to rank: on INC-SEED-001 (HARDWARE_FAILURE, owned by siteEngineer1) the
+  // new engineer comes first with 0 open incidents and siteEngineer1 shows
+  // as current owner. Rahul and Vikas (below) cover the rest of the
+  // omnichannel demo.
+  const siteEngineer2 = await prisma.user.upsert({
+    where: { email: "engineer2@example.com" },
+    update: {},
+    create: {
+      email: "engineer2@example.com",
+      displayName: "Seed Site Engineer 2",
+      role: UserRole.SITE_ENGINEER,
+    },
+  });
+  await prisma.userSiteAccess.upsert({
+    where: { userId_siteId: { userId: siteEngineer2.id, siteId: site1.id } },
+    update: {},
+    create: { userId: siteEngineer2.id, siteId: site1.id },
+  });
+
+  const [hardwareSkill, networkingSkill, storageSkill] = await Promise.all(
+    ["Hardware", "Networking", "Storage"].map((name) =>
+      prisma.skill.upsert({ where: { name }, update: {}, create: { name } }),
+    ),
+  );
+
+  const userSkills: [string, string][] = [
+    [siteEngineer1.id, hardwareSkill.id],
+    [siteEngineer1.id, networkingSkill.id],
+    [siteEngineer2.id, hardwareSkill.id],
+    [siteEngineer.id, storageSkill.id],
+  ];
+  for (const [userId, skillId] of userSkills) {
+    await prisma.userSkill.upsert({
+      where: { userId_skillId: { userId, skillId } },
+      update: {},
+      create: { userId, skillId },
+    });
+  }
+
+  const categoryRequirements: [string, string][] = [
+    ["HARDWARE_FAILURE", hardwareSkill.id],
+    ["NETWORK_OUTAGE", networkingSkill.id],
+    ["STORAGE_FAILURE", storageSkill.id],
+  ];
+  for (const [category, skillId] of categoryRequirements) {
+    await prisma.categorySkillRequirement.upsert({
+      where: { category_skillId: { category, skillId } },
+      update: {},
+      create: { category, skillId },
+    });
+  }
+
+  // Day + night shifts every day so the demo roster is live at whatever
+  // hour the seed is run — a single 24h shift isn't representable
+  // (startTime === endTime is rejected, see create-shift.dto.ts).
+  const everyDay = [0, 1, 2, 3, 4, 5, 6];
+  for (const engineer of [siteEngineer1, siteEngineer2]) {
+    await findOrCreateShift({
+      userId: engineer.id,
+      siteId: site1.id,
+      label: "Demo day cover",
+      daysOfWeek: everyDay,
+      startTime: "08:00",
+      endTime: "20:00",
+    });
+    await findOrCreateShift({
+      userId: engineer.id,
+      siteId: site1.id,
+      label: "Demo night cover",
+      daysOfWeek: everyDay,
+      startTime: "20:00",
+      endTime: "08:00",
+    });
+  }
+  await findOrCreateShift({
+    userId: siteEngineer.id,
+    siteId: site2.id,
+    label: "Demo on-call (day)",
+    daysOfWeek: everyDay,
+    startTime: "08:00",
+    endTime: "20:00",
+    isOnCall: true,
+  });
+  await findOrCreateShift({
+    userId: siteEngineer.id,
+    siteId: site2.id,
+    label: "Demo on-call (night)",
+    daysOfWeek: everyDay,
+    startTime: "20:00",
+    endTime: "08:00",
+    isOnCall: true,
+  });
+
+  // Omnichannel routing demo: two named SITE01 engineers with distinct
+  // skills, each owning a team, so an alert or ticket routes to the right
+  // person end to end:
+  //   Rahul: Windows + Servers    -> Windows & Servers team
+  //   Vikas: Storage + Backup     -> Storage & Backup team
+  // A "database.down" alert on the demo database server opens a DATABASE
+  // incident (the database.down alert rule below), which needs Storage +
+  // Backup, so it's offered to Vikas once SITE01's auto-routing is
+  // switched on (left off here, like every site's routing by default).
+  const rahul = await prisma.user.upsert({
+    where: { email: "rahul@example.com" },
+    update: {},
+    create: {
+      email: "rahul@example.com",
+      displayName: "Rahul",
+      role: UserRole.SITE_ENGINEER,
+    },
+  });
+  const vikas = await prisma.user.upsert({
+    where: { email: "vikas@example.com" },
+    update: {},
+    create: {
+      email: "vikas@example.com",
+      displayName: "Vikas",
+      role: UserRole.SITE_ENGINEER,
+    },
+  });
+  for (const engineer of [rahul, vikas]) {
+    await prisma.userSiteAccess.upsert({
+      where: { userId_siteId: { userId: engineer.id, siteId: site1.id } },
+      update: {},
+      create: { userId: engineer.id, siteId: site1.id },
+    });
+  }
+
+  const [windowsSkill, serversSkill, backupSkill] = await Promise.all(
+    ["Windows", "Servers", "Backup"].map((name) =>
+      prisma.skill.upsert({ where: { name }, update: {}, create: { name } }),
+    ),
+  );
+  const demoUserSkills: [string, string][] = [
+    [rahul.id, windowsSkill.id],
+    [rahul.id, serversSkill.id],
+    [vikas.id, storageSkill.id],
+    [vikas.id, backupSkill.id],
+  ];
+  for (const [userId, skillId] of demoUserSkills) {
+    await prisma.userSkill.upsert({
+      where: { userId_skillId: { userId, skillId } },
+      update: {},
+      create: { userId, skillId },
+    });
+  }
+
+  const demoCategoryRequirements: [string, string][] = [
+    ["SERVER_FAILURE", serversSkill.id],
+    ["WINDOWS_OS", windowsSkill.id],
+    ["WINDOWS_OS", serversSkill.id],
+    ["DATABASE", storageSkill.id],
+    ["DATABASE", backupSkill.id],
+    ["BACKUP_FAILURE", backupSkill.id],
+  ];
+  for (const [category, skillId] of demoCategoryRequirements) {
+    await prisma.categorySkillRequirement.upsert({
+      where: { category_skillId: { category, skillId } },
+      update: {},
+      create: { category, skillId },
+    });
+  }
+
+  const [serversTeam, storageTeam] = await Promise.all(
+    ["Windows & Servers team", "Storage & Backup team"].map((name) =>
+      prisma.supportGroup.upsert({ where: { name }, update: {}, create: { name } }),
+    ),
+  );
+  const teamMembers: [string, string][] = [
+    [serversTeam.id, rahul.id],
+    [storageTeam.id, vikas.id],
+  ];
+  for (const [groupId, userId] of teamMembers) {
+    await prisma.supportGroupMember.upsert({
+      where: { groupId_userId: { groupId, userId } },
+      update: {},
+      create: { groupId, userId },
+    });
+  }
+  const categoryTeams: [string, string][] = [
+    ["SERVER_FAILURE", serversTeam.id],
+    ["WINDOWS_OS", serversTeam.id],
+    ["DATABASE", storageTeam.id],
+    ["BACKUP_FAILURE", storageTeam.id],
+    ["STORAGE_FAILURE", storageTeam.id],
+  ];
+  for (const [category, groupId] of categoryTeams) {
+    await prisma.categoryTeam.upsert({
+      where: { category },
+      update: {},
+      create: { category, groupId },
+    });
+  }
+
+  for (const engineer of [rahul, vikas]) {
+    await findOrCreateShift({
+      userId: engineer.id,
+      siteId: site1.id,
+      label: "Demo day cover",
+      daysOfWeek: everyDay,
+      startTime: "08:00",
+      endTime: "20:00",
+    });
+    await findOrCreateShift({
+      userId: engineer.id,
+      siteId: site1.id,
+      label: "Demo night cover",
+      daysOfWeek: everyDay,
+      startTime: "20:00",
+      endTime: "08:00",
+    });
+  }
+
+  await prisma.configurationItem.upsert({
+    where: { ciCode: "SITE01-R01-DB-001" },
+    update: {},
+    create: {
+      ciCode: "SITE01-R01-DB-001",
+      siteId: site1.id,
+      rackId: rack1.id,
+      ciType: CiType.SERVER,
+      name: "SITE01 Rack01 Database server",
+      manufacturer: "Dell",
+      model: "PowerEdge R760",
+      managedBy: ManagedBy.JSAN,
+      criticality: Criticality.CRITICAL,
+      lifecycleStatus: LifecycleStatus.ACTIVE,
+    },
+  });
+  const dbAlertRule = await prisma.alertRule.findFirst({
+    where: { name: "demo: database.down" },
+  });
+  if (!dbAlertRule) {
+    await prisma.alertRule.create({
+      data: {
+        name: "demo: database.down",
+        alertType: "database.down",
+        autoCreateSeverities: ["CRITICAL"],
+        incidentCategory: "DATABASE",
+      },
+    });
+  }
+
   // Incident + timeline + comment — only created once (not upserted, since
   // Incident has no natural business key besides incidentNo we'd want to
   // update on reseed). Guarded by a findUnique check so re-running the seed
@@ -414,15 +697,49 @@ async function main() {
   }
 
   // eslint-disable-next-line no-console
+  await setDemoPasswords([
+    admin.email,
+    serviceDesk.email,
+    siteEngineer.email,
+    siteEngineer1.email,
+    siteEngineer2.email,
+    rahul.email,
+    vikas.email,
+    clientViewer.email,
+  ]);
+
   console.log(
     `Seeded sites ${site1.code}/${site2.code}, users ${admin.email} (SUPER_ADMIN, all sites), ` +
       `${serviceDesk.email} (SERVICE_DESK_NOC, ${site1.code} only), ` +
       `${siteEngineer.email} (SITE_ENGINEER, ${site2.code} only), ` +
       `${siteEngineer1.email} (SITE_ENGINEER, ${site1.code} only), ` +
-      `1 rack and 3 CIs (1 CI-to-CI relation, 3 health snapshots), ` +
+      `${siteEngineer2.email} (SITE_ENGINEER, ${site1.code} only), ` +
+      `${rahul.email} (Windows + Servers) and ${vikas.email} (Storage + Backup) ` +
+      `(SITE_ENGINEER, ${site1.code}, each owning a team), ` +
+      `${clientViewer.email} (CLIENT_MANAGER_VIEWER, ${site1.code} only), ` +
+      `1 rack and 4 CIs (1 CI-to-CI relation, 3 health snapshots), ` +
       `4 SLA policies (P1-P4) and 1 support calendar per site, ` +
+      `6 skills, 8 engineer-skill assignments, 9 category requirements, 10 demo shifts, ` +
+      `2 demo teams with 5 category -> team mappings, a database.down alert rule, ` +
       `1 incident (INC-SEED-001, IN_PROGRESS, 5 timeline events, 1 comment, 1 worklog, 1 SLA instance).`,
   );
+}
+
+/** Gives seeded accounts the demo password — only those still without one. */
+async function setDemoPasswords(emails: string[]): Promise<void> {
+  if (process.env.NODE_ENV === "production") {
+    // eslint-disable-next-line no-console
+    console.warn("NODE_ENV=production: not setting demo passwords on seeded accounts.");
+    return;
+  }
+  const problem = passwordPolicyProblem(DEMO_PASSWORD, "seed@example.com");
+  if (problem) throw new Error(`SEED_DEMO_PASSWORD rejected: ${problem}`);
+  const { count } = await prisma.user.updateMany({
+    where: { email: { in: emails }, passwordHash: null },
+    data: { passwordHash: await hashPassword(DEMO_PASSWORD), passwordSetAt: new Date() },
+  });
+  // eslint-disable-next-line no-console
+  console.log(`Demo password set on ${count} seeded account(s) (sign in with ${DEMO_PASSWORD}).`);
 }
 
 main()

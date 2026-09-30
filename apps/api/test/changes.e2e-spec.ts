@@ -6,12 +6,14 @@ describe("Changes API (e2e)", () => {
   let t: TestApp;
   let fx: Fixture;
   let token: string;
+  let infraLeadToken: string;
 
   beforeAll(async () => {
     t = await createTestApp();
     await resetSchema(t.prisma);
     fx = await seedFixture(t.prisma);
     token = await t.tokenFor(fx.users.superAdmin.email);
+    infraLeadToken = await t.tokenFor(fx.users.infraLead.email);
   });
   afterAll(async () => {
     await resetSchema(t.prisma);
@@ -49,11 +51,13 @@ describe("Changes API (e2e)", () => {
       .expect(200);
     expect(before.body.some((c: { id: string }) => c.id === id)).toBe(false);
 
+    // Approved by a different caller than the one who raised it — the
+    // service now always attributes approval to the authenticated caller,
+    // never a client-suppliable id, and refuses a self-approval.
     await t
       .http()
       .post(`/api/v1/changes/${id}/approve`)
-      .set("authorization", `Bearer ${token}`)
-      .send({ approverId: fx.users.infraLead.id })
+      .set("authorization", `Bearer ${infraLeadToken}`)
       .expect(201);
 
     const after = await t
@@ -72,14 +76,24 @@ describe("Changes API (e2e)", () => {
     await t
       .http()
       .post(`/api/v1/changes/${created.body.id}/approve`)
-      .set("authorization", `Bearer ${token}`)
-      .send({ approverId: fx.users.infraLead.id })
+      .set("authorization", `Bearer ${infraLeadToken}`)
       .expect(201);
     await t
       .http()
       .post(`/api/v1/changes/${created.body.id}/approve`)
-      .set("authorization", `Bearer ${token}`)
-      .send({ approverId: fx.users.infraLead.id })
+      .set("authorization", `Bearer ${infraLeadToken}`)
       .expect(409);
+  });
+
+  it("cannot be approved by whoever raised it (separation of duties, 400)", async () => {
+    const start = new Date(Date.now() + 86_400_000).toISOString();
+    const end = new Date(Date.now() + 90_000_000).toISOString();
+    const created = await raise(start, end).expect(201); // raised as superAdmin (`token`)
+
+    await t
+      .http()
+      .post(`/api/v1/changes/${created.body.id}/approve`)
+      .set("authorization", `Bearer ${token}`)
+      .expect(400);
   });
 });

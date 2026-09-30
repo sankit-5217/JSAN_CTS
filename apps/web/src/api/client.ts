@@ -1,10 +1,9 @@
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:3000/api/v1";
 
-// Dev-mode auth (Sprint 7 plan, Decision 4) — LoginPage stores the token
-// here after POSTing /auth/dev-login; every request reads it back. Swapping
-// in real OIDC later only touches how this key gets populated, not the
-// request layer.
+// The app JWT lives here whichever way the user signed in: password
+// (SignInCard) or Google/Microsoft/GitHub (SocialCallbackPage, after the
+// API's social callback). Every request reads it back from this one key.
 const TOKEN_STORAGE_KEY = "opsdesk_token";
 
 export function getStoredToken(): string | null {
@@ -17,6 +16,41 @@ export function storeToken(token: string): void {
 
 export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_STORAGE_KEY);
+  // Tidy up the key the retired SSO flow used.
+  localStorage.removeItem("opsdesk_auth_method");
+}
+
+/** Full-page navigation target that starts a Google/Microsoft/GitHub sign-in. */
+export function socialLoginUrl(provider: string): string {
+  return `${API_BASE_URL}/auth/social/${encodeURIComponent(provider)}/login`;
+}
+
+export function signOut(): void {
+  clearStoredToken();
+  window.location.assign("/login");
+}
+
+/**
+ * A non-2xx response. `message` keeps the old "<METHOD> <path> failed: <status>"
+ * prefix and appends the API's own explanation when it sent one (Nest's
+ * `{ message }` body), so existing error banners get more useful for free;
+ * `body` carries any structured detail (e.g. a 409's `blockers`).
+ */
+export class ApiError extends Error {
+  constructor(
+    prefix: string,
+    readonly status: number,
+    readonly body: unknown,
+  ) {
+    const detail = (body as { message?: unknown } | null)?.message;
+    const text = Array.isArray(detail)
+      ? detail.join("; ")
+      : typeof detail === "string"
+        ? detail
+        : "";
+    super(text ? `${prefix} — ${text}` : prefix);
+    this.name = "ApiError";
+  }
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -34,7 +68,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    throw new Error(`${init?.method ?? "GET"} ${path} failed: ${res.status}`);
+    const body = await res.json().catch(() => null);
+    throw new ApiError(`${init?.method ?? "GET"} ${path} failed: ${res.status}`, res.status, body);
   }
   if (res.status === 204) {
     return undefined as T;
@@ -54,6 +89,10 @@ export function apiPatch<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
 }
 
+export function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, { method: "PUT", body: body ? JSON.stringify(body) : undefined });
+}
+
 export function apiDelete<T>(path: string): Promise<T> {
   return request<T>(path, { method: "DELETE" });
 }
@@ -63,4 +102,29 @@ export function apiUpload<T>(path: string, file: File): Promise<T> {
   const formData = new FormData();
   formData.append("file", file);
   return request<T>(path, { method: "POST", body: formData });
+}
+
+/**
+ * Fetches a file endpoint (e.g. a CSV report) with the auth header attached
+ * and saves it client-side — a plain `<a href>` can't carry the Bearer
+ * token, so this does the fetch itself and triggers the save via a
+ * throwaway object URL.
+ */
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const token = getStoredToken();
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    throw new Error(`GET ${path} failed: ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }

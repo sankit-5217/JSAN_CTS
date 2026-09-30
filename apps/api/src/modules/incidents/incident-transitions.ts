@@ -40,6 +40,24 @@ export const ELEVATED_ROLES: readonly UserRole[] = [
   UserRole.DELIVERY_OPS_MANAGER,
 ];
 
+/**
+ * Who may reassign ownership (ownerGroupId/ownerUserId) or override priority
+ * through the plain PATCH /incidents/:id path, outside the transition state
+ * machine. Spec §4 gives "Triage, acknowledge, route, update incidents" to
+ * Service Desk/NOC, but Site Engineer's access is explicitly "limited admin"
+ * scoped to "On-site/remote diagnosis, worklogs, evidence, restoration" —
+ * routing a ticket to someone else, or overriding its calculated priority
+ * (§16: "Authorized priority override"), is a Service Desk/elevated call,
+ * not a Site Engineer one. Site Engineer keeps every other INCIDENT_WRITE_ROLES
+ * write (description, category, impact/urgency, CI) plus its normal
+ * transition moves (ASSIGNED -> ACKNOWLEDGED, etc.), which already carry
+ * their own role gates in TRANSITION_RULES above.
+ */
+export const INCIDENT_ROUTING_ROLES: readonly UserRole[] = [
+  UserRole.SERVICE_DESK_NOC,
+  ...ELEVATED_ROLES,
+];
+
 /** Reused by ReportsService for open-incident counters (Sprint 7) — the
  * single definition of "open" lives here, not duplicated per consumer. */
 export const OPEN_STATUSES: IncidentStatus[] = [
@@ -114,7 +132,13 @@ export const TRANSITION_RULES: TransitionRule[] = [
     requiresOwnerOrElevated: true,
   },
   {
-    // CI health-check validation deferred (alerts/health module, Dev B).
+    // CI health-check validation: IncidentsService.createTransition() blocks
+    // this move (and getAvailableTransitions() surfaces it as a hint) when any
+    // alert still linked to this incident hasn't been reported RECOVERED by
+    // monitoring yet — unless `reason` explicitly overrides it. Not expressed
+    // as `validate()` here because it needs a DB read (open alerts for this
+    // incident) and this table is deliberately pure/sync data, not a place for
+    // service calls.
     from: [IncidentStatus.IN_PROGRESS],
     to: IncidentStatus.RESOLVED,
     allowedRoles: [UserRole.SITE_ENGINEER, UserRole.INFRASTRUCTURE_LEAD, UserRole.SUPER_ADMIN],

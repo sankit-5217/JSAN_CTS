@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { AlertSeverity, AlertState, CiType, IncidentStatus, Priority } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { OPEN_STATUSES } from "../incidents/incident-transitions";
+import { ResponseTrendWindow } from "./dto/query-response-trend.dto";
 
 export type HealthLevel = "HEALTHY" | "WARNING" | "CRITICAL" | "UNKNOWN";
 
@@ -48,6 +49,8 @@ export interface SiteCard {
   serversTotal: number;
   openIncidents: number;
   oldestOpenIncidentAgeMinutes: number | null;
+  p1p2OpenIncidents: number;
+  slaAtRiskIncidents: number;
 }
 
 export interface CommandCenterSummary {
@@ -77,6 +80,73 @@ interface IncidentRow {
   priority: Priority;
   createdAt: Date;
   slaInstances: { breached: boolean; firedMilestones: string[] }[];
+}
+
+export interface DailyResponseTrendPoint {
+  date: string; // YYYY-MM-DD, UTC calendar day
+  incidentsCreated: number;
+  avgAckMinutes: number | null;
+  avgRestoreMinutes: number | null;
+}
+
+export interface PriorityResponseSummary {
+  priority: Priority;
+  incidentCount: number;
+  avgAckMinutes: number | null;
+  avgRestoreMinutes: number | null;
+}
+
+export interface ResponseTrendReport {
+  windowDays: ResponseTrendWindow;
+  from: string;
+  to: string;
+  overall: {
+    incidentCount: number;
+    avgAckMinutes: number | null;
+    avgRestoreMinutes: number | null;
+  };
+  daily: DailyResponseTrendPoint[];
+  byPriority: PriorityResponseSummary[];
+}
+
+interface ResponseTrendRow {
+  siteId: string;
+  priority: Priority;
+  createdAt: Date;
+  acknowledgedAt: Date | null;
+  restoredAt: Date | null;
+}
+
+export interface AlertSeverityCount {
+  severity: AlertSeverity;
+  count: number;
+}
+
+export interface AlertStateCount {
+  state: AlertState;
+  count: number;
+}
+
+export interface DailyAlertVolumePoint {
+  date: string; // YYYY-MM-DD, UTC calendar day
+  bySeverity: Record<AlertSeverity, number>;
+  total: number;
+}
+
+export interface AlertInsightsReport {
+  windowDays: ResponseTrendWindow;
+  from: string;
+  to: string;
+  totalNewAlerts: number;
+  bySeverity: AlertSeverityCount[];
+  byState: AlertStateCount[];
+  daily: DailyAlertVolumePoint[];
+}
+
+interface AlertInsightRow {
+  severity: AlertSeverity;
+  state: AlertState;
+  firstSeenAt: Date;
 }
 
 /**
@@ -174,6 +244,12 @@ export class ReportsService {
         oldestOpenIncidentAgeMinutes: oldestOpen
           ? Math.round((now - oldestOpen.getTime()) / 60_000)
           : null,
+        p1p2OpenIncidents: openSiteIncidents.filter(
+          (i) => i.priority === Priority.P1 || i.priority === Priority.P2,
+        ).length,
+        slaAtRiskIncidents: openSiteIncidents.filter((i) =>
+          i.slaInstances.some((inst) => this.isSlaAtRisk(inst)),
+        ).length,
       };
     });
 
@@ -205,6 +281,257 @@ export class ReportsService {
           .length,
         reopened: openIncidents.filter((i) => i.status === IncidentStatus.REOPENED).length,
       },
+    };
+  }
+
+  /** Quotes a field only when it actually needs it, per RFC 4180. */
+  private csvField(value: string | number): string {
+    const str = String(value);
+    return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  }
+
+  /**
+   * The same snapshot as {@link getCommandCenterSummary}, flattened into a
+   * downloadable CSV — the "is everything working fine" check admins and
+   * managers can pull without opening the app (spec §12: reports owns
+   * read-model output, not just live UI). Point-in-time only; no historical
+   * trend data is stored for this yet.
+   */
+  async generateOperationalHealthCsv(accessibleSiteIds: string[] | null): Promise<string> {
+    const summary = await this.getCommandCenterSummary(accessibleSiteIds);
+    const generatedAt = new Date().toISOString();
+
+    const lines: string[] = [
+      "JSAN Data Center OpsDesk - Operational Health Report",
+      `Generated At,${generatedAt}`,
+      `Sites In Scope,${summary.siteCards.length}`,
+      "",
+      "Summary",
+      "Metric,Value",
+      `Sites Healthy,${summary.counters.sitesHealthy}`,
+      `Sites Warning,${summary.counters.sitesWarning}`,
+      `Sites Critical,${summary.counters.sitesCritical}`,
+      `Servers Reachable,${summary.counters.serversReachable}`,
+      `Servers Total,${summary.counters.serversTotal}`,
+      `Critical Alerts Open,${summary.counters.criticalAlertsOpen}`,
+      `P1/P2 Open Incidents,${summary.counters.p1p2OpenIncidents}`,
+      `SLA At-Risk Incidents,${summary.counters.slaAtRiskIncidents}`,
+      `Unassigned Queue,${summary.queues.unassigned}`,
+      `Awaiting Ack Queue,${summary.queues.awaitingAck}`,
+      `SLA Breach Risk Queue,${summary.queues.slaBreachRisk}`,
+      `Vendor Waiting Queue,${summary.queues.vendorWaiting}`,
+      `Reopened Queue,${summary.queues.reopened}`,
+      "",
+      "Site Breakdown",
+      [
+        "Site Code",
+        "Site Name",
+        "Health",
+        "Servers Reachable",
+        "Servers Total",
+        "Open Incidents",
+        "Oldest Open Incident (min)",
+        "P1/P2 Open Incidents",
+        "SLA At-Risk Incidents",
+      ].join(","),
+      ...summary.siteCards.map((site) =>
+        [
+          this.csvField(site.code),
+          this.csvField(site.name),
+          site.health,
+          site.serversReachable,
+          site.serversTotal,
+          site.openIncidents,
+          site.oldestOpenIncidentAgeMinutes ?? "",
+          site.p1p2OpenIncidents,
+          site.slaAtRiskIncidents,
+        ].join(","),
+      ),
+    ];
+
+    return lines.join("\n");
+  }
+
+  private static dayKey(date: Date): string {
+    return date.toISOString().slice(0, 10);
+  }
+
+  private static average(values: number[]): number | null {
+    if (values.length === 0) {
+      return null;
+    }
+    return Math.round(values.reduce((sum, v) => sum + v, 0) / values.length);
+  }
+
+  private static minutesBetween(start: Date, end: Date): number {
+    return Math.round((end.getTime() - start.getTime()) / 60_000);
+  }
+
+  /**
+   * Incident response trend (spec §10.16, Insights) — MTTA/MTTR over a
+   * rolling window, bucketed by UTC calendar day of incident creation. Not
+   * a live/point-in-time read like {@link getCommandCenterSummary}: this
+   * necessarily looks backward over history, so it's exposed as its own
+   * endpoint/page rather than folded into the live dashboard.
+   */
+  async getResponseTrend(
+    accessibleSiteIds: string[] | null,
+    windowDays: ResponseTrendWindow,
+  ): Promise<ResponseTrendReport> {
+    const to = new Date();
+    const from = new Date(to.getTime() - windowDays * 24 * 60 * 60_000);
+
+    const incidents: ResponseTrendRow[] = await this.prisma.incident.findMany({
+      where: {
+        siteId: accessibleSiteIds ? { in: accessibleSiteIds } : undefined,
+        createdAt: { gte: from, lte: to },
+      },
+      select: {
+        siteId: true,
+        priority: true,
+        createdAt: true,
+        acknowledgedAt: true,
+        restoredAt: true,
+      },
+    });
+
+    // Pre-seed every day in the window so the trend has no gaps for days
+    // with zero incidents created.
+    const byDay = new Map<string, ResponseTrendRow[]>();
+    for (let cursor = new Date(from); cursor <= to; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      byDay.set(ReportsService.dayKey(cursor), []);
+    }
+    for (const incident of incidents) {
+      const key = ReportsService.dayKey(incident.createdAt);
+      const bucket = byDay.get(key);
+      if (bucket) {
+        bucket.push(incident);
+      }
+    }
+
+    const daily: DailyResponseTrendPoint[] = [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, rows]) => ({
+        date,
+        incidentsCreated: rows.length,
+        avgAckMinutes: ReportsService.average(
+          rows
+            .filter((r) => r.acknowledgedAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.acknowledgedAt!)),
+        ),
+        avgRestoreMinutes: ReportsService.average(
+          rows
+            .filter((r) => r.restoredAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.restoredAt!)),
+        ),
+      }));
+
+    const byPriority: PriorityResponseSummary[] = (
+      Object.values(Priority) as Priority[]
+    ).map((priority) => {
+      const rows = incidents.filter((i) => i.priority === priority);
+      return {
+        priority,
+        incidentCount: rows.length,
+        avgAckMinutes: ReportsService.average(
+          rows
+            .filter((r) => r.acknowledgedAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.acknowledgedAt!)),
+        ),
+        avgRestoreMinutes: ReportsService.average(
+          rows
+            .filter((r) => r.restoredAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.restoredAt!)),
+        ),
+      };
+    });
+
+    return {
+      windowDays,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      overall: {
+        incidentCount: incidents.length,
+        avgAckMinutes: ReportsService.average(
+          incidents
+            .filter((r) => r.acknowledgedAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.acknowledgedAt!)),
+        ),
+        avgRestoreMinutes: ReportsService.average(
+          incidents
+            .filter((r) => r.restoredAt)
+            .map((r) => ReportsService.minutesBetween(r.createdAt, r.restoredAt!)),
+        ),
+      },
+      daily,
+      byPriority,
+    };
+  }
+
+  /**
+   * Alert volume + severity/state mix over a rolling window (spec §10.16,
+   * Insights) — everything scoped to the SAME window (alerts first seen in
+   * [from, to]), so the severity/state breakdown and the daily trend always
+   * describe the same slice of alerts rather than mixing a live count with a
+   * historical one.
+   */
+  async getAlertInsights(
+    accessibleSiteIds: string[] | null,
+    windowDays: ResponseTrendWindow,
+  ): Promise<AlertInsightsReport> {
+    const to = new Date();
+    const from = new Date(to.getTime() - windowDays * 24 * 60 * 60_000);
+
+    const alerts: AlertInsightRow[] = await this.prisma.alert.findMany({
+      where: {
+        siteId: accessibleSiteIds ? { in: accessibleSiteIds } : undefined,
+        firstSeenAt: { gte: from, lte: to },
+      },
+      select: { severity: true, state: true, firstSeenAt: true },
+    });
+
+    const severities = Object.values(AlertSeverity) as AlertSeverity[];
+    const states = Object.values(AlertState) as AlertState[];
+
+    const bySeverity: AlertSeverityCount[] = severities.map((severity) => ({
+      severity,
+      count: alerts.filter((a) => a.severity === severity).length,
+    }));
+    const byState: AlertStateCount[] = states.map((state) => ({
+      state,
+      count: alerts.filter((a) => a.state === state).length,
+    }));
+
+    const byDay = new Map<string, AlertInsightRow[]>();
+    for (let cursor = new Date(from); cursor <= to; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+      byDay.set(ReportsService.dayKey(cursor), []);
+    }
+    for (const alert of alerts) {
+      const key = ReportsService.dayKey(alert.firstSeenAt);
+      const bucket = byDay.get(key);
+      if (bucket) {
+        bucket.push(alert);
+      }
+    }
+
+    const daily: DailyAlertVolumePoint[] = [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, rows]) => ({
+        date,
+        bySeverity: Object.fromEntries(
+          severities.map((s) => [s, rows.filter((r) => r.severity === s).length]),
+        ) as Record<AlertSeverity, number>,
+        total: rows.length,
+      }));
+
+    return {
+      windowDays,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      totalNewAlerts: alerts.length,
+      bySeverity,
+      byState,
+      daily,
     };
   }
 }

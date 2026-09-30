@@ -1,8 +1,8 @@
-# JSAN CTS Data Center OpsDesk
+# JSAN Data Center OpsDesk
 
 A centralized data-center infrastructure operations and service-management platform: site/asset visibility, CMDB, incidents and requests, SLA governance, engineer worklogs, Dell/HPE hardware lifecycle tracking, monitoring alerts, vendor/RMA coordination, SOPs, risk/BCP records, and management reporting.
 
-This is **not** a ServiceNow clone. We build only the capabilities required for CTS data-center operations and reuse mature monitoring/logging technologies (Zabbix/Prometheus/Grafana, Loki/OpenSearch) instead of rebuilding them.
+This is **not** a ServiceNow clone. We build only the capabilities required for JSAN data-center operations and reuse mature monitoring/logging technologies (Zabbix/Prometheus/Grafana, Loki/OpenSearch) instead of rebuilding them.
 
 Full requirements live in `docs/JSAN_CTS_DC_OpsDesk_Developer_Build_Architecture_v1.0.pdf` (the build specification). Read it before writing code — this scaffold implements Sprint 1 (Foundation) from that document's §23 backlog.
 
@@ -60,9 +60,10 @@ pnpm install
 # start infra dependencies only
 docker compose up -d postgres redis minio
 
-# run migrations + generate client
+# run migrations + generate client, then load demo data (incl. demo logins)
 pnpm prisma:migrate
 pnpm prisma:generate
+pnpm --filter @cts-dc-opsdesk/api prisma:seed
 
 # run api, worker, web in separate terminals
 pnpm dev:api
@@ -73,6 +74,28 @@ pnpm dev:web
 API health check: `GET http://localhost:3000/api/v1/health`
 Swagger/OpenAPI: `http://localhost:3000/api/docs`
 Web: `http://localhost:5173`
+
+### Demo logins (local/dev only)
+
+`prisma:seed` gives every seeded account the password **`OpsDesk-Demo-2026!`**
+(override with `SEED_DEMO_PASSWORD`). The seed never sets passwords when
+`NODE_ENV=production`; real people choose their own through the invite email
+(Administration → Users).
+
+| Email                     | Role                         | Sites  |
+| ------------------------- | ---------------------------- | ------ |
+| `admin@example.com`       | Super Admin                  | All    |
+| `servicedesk@example.com` | Service Desk / NOC           | SITE01 |
+| `engineer1@example.com`   | Site Engineer                | SITE01 |
+| `engineer2@example.com`   | Site Engineer                | SITE01 |
+| `rahul@example.com`       | Site Engineer (routing demo) | SITE01 |
+| `vikas@example.com`       | Site Engineer (routing demo) | SITE01 |
+| `engineer@example.com`    | Site Engineer                | SITE02 |
+| `viewer@example.com`      | Client Manager (viewer)      | SITE01 |
+
+Google / Microsoft / GitHub buttons appear once their client IDs are set
+(`.env.example`, and `docs/runbooks/README.md` → "Sign-in" for setup). Without
+`SMTP_HOST`, invite and reset emails are printed in the worker's log.
 
 ## Non-negotiable guardrails
 

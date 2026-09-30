@@ -63,7 +63,6 @@ export function KnowledgeDetailPage() {
   }, [refetch]);
 
   const [edit, setEdit] = useState<null | Record<string, string>>(null);
-  const [approverId, setApproverId] = useState("");
   const [reviewDueAt, setReviewDueAt] = useState("");
   const [unpublishReason, setUnpublishReason] = useState("");
 
@@ -279,13 +278,10 @@ export function KnowledgeDetailPage() {
                 Approve
               </Typography>
               <Stack spacing={2}>
-                <TextField
-                  size="small"
-                  label="Approver (reviewer) user id"
-                  value={approverId}
-                  onChange={(e) => setApproverId(e.target.value)}
-                  helperText="Must not be the article owner"
-                />
+                <Typography variant="body2" color="text.secondary">
+                  You'll be recorded as the reviewer. An article can't be approved by its own
+                  owner.
+                </Typography>
                 <TextField
                   type="date"
                   size="small"
@@ -296,18 +292,14 @@ export function KnowledgeDetailPage() {
                 />
                 <Button
                   variant="contained"
-                  disabled={!approverId || !reviewDueAt}
+                  disabled={!reviewDueAt}
                   onClick={() =>
                     call(
                       () =>
                         apiPost(`/knowledge/${id}/approve`, {
-                          approverId,
                           reviewDueAt: new Date(reviewDueAt).toISOString(),
                         }),
-                      () => {
-                        setApproverId("");
-                        setReviewDueAt("");
-                      },
+                      () => setReviewDueAt(""),
                     )
                   }
                 >

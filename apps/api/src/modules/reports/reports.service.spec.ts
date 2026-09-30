@@ -1,4 +1,4 @@
-import { CiType, IncidentStatus, Priority } from "@prisma/client";
+import { AlertSeverity, AlertState, CiType, IncidentStatus, Priority } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ReportsService } from "./reports.service";
 
@@ -22,17 +22,22 @@ function makeService(
     cis?: CiFixture[];
     incidents?: IncidentFixture[];
     criticalAlertsOpen?: number;
+    alerts?: { severity: AlertSeverity; state: AlertState; firstSeenAt: Date; siteId?: string }[];
   } = {},
 ) {
   const sites = overrides.sites ?? [{ id: "site-a", code: "SITE01", name: "Demo Data Center 1" }];
   const cis = overrides.cis ?? [];
   const incidents = overrides.incidents ?? [];
+  const alerts = overrides.alerts ?? [];
 
   const prisma = {
     site: { findMany: jest.fn().mockResolvedValue(sites) },
     configurationItem: { findMany: jest.fn().mockResolvedValue(cis) },
     incident: { findMany: jest.fn().mockResolvedValue(incidents) },
-    alert: { count: jest.fn().mockResolvedValue(overrides.criticalAlertsOpen ?? 0) },
+    alert: {
+      count: jest.fn().mockResolvedValue(overrides.criticalAlertsOpen ?? 0),
+      findMany: jest.fn().mockResolvedValue(alerts),
+    },
   } as unknown as PrismaService;
 
   return { service: new ReportsService(prisma), prisma };
@@ -175,6 +180,208 @@ describe("ReportsService.getCommandCenterSummary — incident counters and queue
     const result = await service.getCommandCenterSummary(null);
     expect(result.siteCards[0].openIncidents).toBe(2);
     expect(result.siteCards[0].oldestOpenIncidentAgeMinutes).toBeGreaterThanOrEqual(179);
+  });
+});
+
+describe("ReportsService.getCommandCenterSummary — per-site incident counters", () => {
+  it("scopes P1/P2 and SLA-at-risk counts to each site, not the global total", async () => {
+    const { service } = makeService({
+      sites: [
+        { id: "site-a", code: "SITE01", name: "Demo 1" },
+        { id: "site-b", code: "SITE02", name: "Demo 2" },
+      ],
+      incidents: [
+        incident({ siteId: "site-a", priority: Priority.P1, status: IncidentStatus.NEW }),
+        incident({
+          siteId: "site-a",
+          slaInstances: [{ breached: false, firedMilestones: ["ACK_75"] }],
+        }),
+        incident({ siteId: "site-b", priority: Priority.P3, status: IncidentStatus.NEW }),
+      ],
+    });
+    const result = await service.getCommandCenterSummary(null);
+    const siteA = result.siteCards.find((s) => s.code === "SITE01")!;
+    const siteB = result.siteCards.find((s) => s.code === "SITE02")!;
+    expect(siteA.p1p2OpenIncidents).toBe(1);
+    expect(siteA.slaAtRiskIncidents).toBe(1);
+    expect(siteB.p1p2OpenIncidents).toBe(0);
+    expect(siteB.slaAtRiskIncidents).toBe(0);
+  });
+});
+
+describe("ReportsService.generateOperationalHealthCsv", () => {
+  it("includes a summary section and a per-site breakdown row", async () => {
+    const { service } = makeService({
+      sites: [{ id: "site-a", code: "SITE01", name: "Demo Data Center 1" }],
+      cis: [ci({ healthSnapshot: { overallHealth: "HEALTHY" } })],
+      incidents: [incident({ priority: Priority.P1, status: IncidentStatus.NEW })],
+      criticalAlertsOpen: 2,
+    });
+    const csv = await service.generateOperationalHealthCsv(null);
+
+    expect(csv).toContain("Operational Health Report");
+    expect(csv).toContain("Sites Healthy,1");
+    expect(csv).toContain("Critical Alerts Open,2");
+    expect(csv).toContain("Site Breakdown");
+    expect(csv).toContain("SITE01,Demo Data Center 1,HEALTHY");
+  });
+
+  it("quotes a site name that contains a comma", async () => {
+    const { service } = makeService({
+      sites: [{ id: "site-a", code: "SITE01", name: "Demo, Data Center 1" }],
+    });
+    const csv = await service.generateOperationalHealthCsv(null);
+    expect(csv).toContain('"Demo, Data Center 1"');
+  });
+});
+
+describe("ReportsService.getResponseTrend", () => {
+  // Anchored to "yesterday, mid-morning" relative to the real clock at test
+  // time, so the fixture always lands inside the window regardless of when
+  // the suite runs, without mocking Date.
+  const yesterday = new Date(Date.now() - 24 * 60 * 60_000);
+  yesterday.setUTCHours(10, 0, 0, 0);
+  const dayKey = yesterday.toISOString().slice(0, 10);
+
+  function trendIncident(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      siteId: "site-a",
+      priority: Priority.P2,
+      createdAt: yesterday,
+      acknowledgedAt: null,
+      restoredAt: null,
+      ...overrides,
+    };
+  }
+
+  it("computes overall and per-day MTTA/MTTR averages in minutes", async () => {
+    const { service } = makeService({
+      incidents: [
+        trendIncident({
+          acknowledgedAt: new Date(yesterday.getTime() + 10 * 60_000), // 10 min ack
+          restoredAt: new Date(yesterday.getTime() + 60 * 60_000), // 60 min restore
+        }),
+        trendIncident({
+          acknowledgedAt: new Date(yesterday.getTime() + 30 * 60_000), // 30 min ack
+          restoredAt: null, // not yet restored — excluded from restore average
+        }),
+      ] as never,
+    });
+
+    const result = await service.getResponseTrend(null, 7);
+
+    expect(result.overall.incidentCount).toBe(2);
+    expect(result.overall.avgAckMinutes).toBe(20); // (10 + 30) / 2
+    expect(result.overall.avgRestoreMinutes).toBe(60); // only the one restored incident
+
+    const day = result.daily.find((d) => d.date === dayKey);
+    expect(day?.incidentsCreated).toBe(2);
+    expect(day?.avgAckMinutes).toBe(20);
+    expect(day?.avgRestoreMinutes).toBe(60);
+  });
+
+  it("fills every day in the window, including days with zero incidents", async () => {
+    const { service } = makeService({ incidents: [] });
+    const result = await service.getResponseTrend(null, 7);
+    expect(result.daily).toHaveLength(8); // inclusive of both endpoints
+    expect(result.daily.every((d) => d.incidentsCreated === 0)).toBe(true);
+    expect(result.daily.every((d) => d.avgAckMinutes === null)).toBe(true);
+  });
+
+  it("breaks the window down by priority", async () => {
+    const { service } = makeService({
+      incidents: [
+        trendIncident({
+          priority: Priority.P1,
+          acknowledgedAt: new Date(yesterday.getTime() + 5 * 60_000),
+        }),
+        trendIncident({
+          priority: Priority.P4,
+          acknowledgedAt: new Date(yesterday.getTime() + 20 * 60_000),
+        }),
+      ] as never,
+    });
+    const result = await service.getResponseTrend(null, 7);
+    const p1 = result.byPriority.find((p) => p.priority === Priority.P1);
+    const p4 = result.byPriority.find((p) => p.priority === Priority.P4);
+    expect(p1?.incidentCount).toBe(1);
+    expect(p1?.avgAckMinutes).toBe(5);
+    expect(p4?.incidentCount).toBe(1);
+    expect(p4?.avgAckMinutes).toBe(20);
+  });
+
+  it("passes the site filter and date window through to the query", async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const prisma = {
+      incident: { findMany },
+    } as unknown as PrismaService;
+    const service = new ReportsService(prisma);
+
+    await service.getResponseTrend(["site-9"], 30);
+    const arg = findMany.mock.calls[0][0];
+    expect(arg.where.siteId).toEqual({ in: ["site-9"] });
+    expect(arg.where.createdAt.gte).toBeInstanceOf(Date);
+    expect(arg.where.createdAt.lte).toBeInstanceOf(Date);
+  });
+});
+
+describe("ReportsService.getAlertInsights", () => {
+  const yesterday = new Date(Date.now() - 24 * 60 * 60_000);
+  yesterday.setUTCHours(9, 0, 0, 0);
+  const dayKey = yesterday.toISOString().slice(0, 10);
+
+  it("breaks the window's alerts down by severity and by state", async () => {
+    const { service } = makeService({
+      alerts: [
+        { severity: AlertSeverity.CRITICAL, state: AlertState.OPEN, firstSeenAt: yesterday },
+        { severity: AlertSeverity.CRITICAL, state: AlertState.RECOVERED, firstSeenAt: yesterday },
+        { severity: AlertSeverity.INFO, state: AlertState.ACKNOWLEDGED, firstSeenAt: yesterday },
+      ],
+    });
+
+    const result = await service.getAlertInsights(null, 7);
+
+    expect(result.totalNewAlerts).toBe(3);
+    expect(result.bySeverity.find((s) => s.severity === AlertSeverity.CRITICAL)?.count).toBe(2);
+    expect(result.bySeverity.find((s) => s.severity === AlertSeverity.INFO)?.count).toBe(1);
+    expect(result.bySeverity.find((s) => s.severity === AlertSeverity.HIGH)?.count).toBe(0);
+    expect(result.byState.find((s) => s.state === AlertState.OPEN)?.count).toBe(1);
+    expect(result.byState.find((s) => s.state === AlertState.RECOVERED)?.count).toBe(1);
+    expect(result.byState.find((s) => s.state === AlertState.ACKNOWLEDGED)?.count).toBe(1);
+  });
+
+  it("buckets daily volume by firstSeenAt day, per severity", async () => {
+    const { service } = makeService({
+      alerts: [
+        { severity: AlertSeverity.CRITICAL, state: AlertState.OPEN, firstSeenAt: yesterday },
+        { severity: AlertSeverity.WARNING, state: AlertState.OPEN, firstSeenAt: yesterday },
+      ],
+    });
+    const result = await service.getAlertInsights(null, 7);
+    const day = result.daily.find((d) => d.date === dayKey);
+    expect(day?.total).toBe(2);
+    expect(day?.bySeverity[AlertSeverity.CRITICAL]).toBe(1);
+    expect(day?.bySeverity[AlertSeverity.WARNING]).toBe(1);
+    expect(day?.bySeverity[AlertSeverity.HIGH]).toBe(0);
+  });
+
+  it("fills every day in the window, including zero-alert days", async () => {
+    const { service } = makeService({ alerts: [] });
+    const result = await service.getAlertInsights(null, 7);
+    expect(result.daily).toHaveLength(8);
+    expect(result.daily.every((d) => d.total === 0)).toBe(true);
+  });
+
+  it("passes the site filter and firstSeenAt window through to the query", async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const prisma = { alert: { findMany } } as unknown as PrismaService;
+    const service = new ReportsService(prisma);
+
+    await service.getAlertInsights(["site-9"], 30);
+    const arg = findMany.mock.calls[0][0];
+    expect(arg.where.siteId).toEqual({ in: ["site-9"] });
+    expect(arg.where.firstSeenAt.gte).toBeInstanceOf(Date);
+    expect(arg.where.firstSeenAt.lte).toBeInstanceOf(Date);
   });
 });
 
