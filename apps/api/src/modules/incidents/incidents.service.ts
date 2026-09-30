@@ -28,6 +28,7 @@ import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { InboxService } from "../inbox/inbox.service";
+import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import { SlaService } from "../sla/sla.service";
 import {
   ALLOWED_ATTACHMENT_CONTENT_TYPES,
@@ -1080,6 +1081,7 @@ export class IncidentsService {
         body: "Confirm the fix and resolve the ticket if nothing else is wrong.",
         entityType: "INCIDENT",
         entityId: incident.id,
+        level: levelForPriority(incident.priority),
         dedupeKey: `alert-recovered:${alert.id}`,
       });
     } catch (err) {
@@ -1428,6 +1430,7 @@ export class IncidentsService {
         body: incident.shortDescription,
         entityType: "INCIDENT",
         entityId: incident.id,
+        level: levelForPriority(incident.priority),
         dedupeKey: `created:${incident.id}`,
       });
       const to = roster
@@ -1480,6 +1483,7 @@ export class IncidentsService {
         body: incident.shortDescription,
         entityType: "INCIDENT",
         entityId: incident.id,
+        level: levelForPriority(incident.priority),
         dedupeKey: `assigned:${incident.id}:${ownerUserId}:${incident.updatedAt.getTime()}`,
       });
       const assignee = await this.prisma.user.findUnique({ where: { id: ownerUserId } });
@@ -1527,6 +1531,7 @@ export class IncidentsService {
         body: incident.shortDescription,
         entityType: "INCIDENT",
         entityId: incident.id,
+        level: levelForPriority(incident.priority),
         dedupeKey: `group:${incident.id}:${ownerGroupId}:${incident.updatedAt.getTime()}`,
       });
       const to: Party[] = group.members
@@ -1580,6 +1585,7 @@ export class IncidentsService {
         body: reason ?? after.shortDescription,
         entityType: "INCIDENT",
         entityId: after.id,
+        level: levelForPriority(after.priority),
         dedupeKey: `status:${after.id}:${after.status}:${after.updatedAt.getTime()}`,
       });
       const users = await this.prisma.user.findMany({ where: { id: { in: ids } } });
@@ -1636,6 +1642,7 @@ export class IncidentsService {
         body: comment.body.length > 200 ? `${comment.body.slice(0, 199)}…` : comment.body,
         entityType: "INCIDENT",
         entityId: incident.id,
+        level: levelForPriority(incident.priority),
         dedupeKey: `comment:${comment.id}`,
       });
       const recipient = await this.prisma.user.findUnique({ where: { id: recipientId } });

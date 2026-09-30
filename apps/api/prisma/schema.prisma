@@ -543,6 +543,17 @@ enum InAppNotificationKind {
   INCIDENT_OFFERED
   INCIDENT_OFFER_UNACCEPTED
   ALERT_RECOVERED
+  ALERT_RAISED
+}
+
+/// How loudly the ops console announces a notification when it arrives.
+/// Resolved server-side from notification_sound_rules when the row is
+/// written, so the browser never guesses from the kind or title.
+enum NotificationUrgency {
+  CRITICAL
+  HIGH
+  NORMAL
+  SILENT
 }
 
 /// One entry in a user's notification bell. Owned by the inbox module;
@@ -559,6 +570,7 @@ model InAppNotification {
   entityType String                @map("entity_type")
   entityId   String                @map("entity_id")
   dedupeKey  String                @map("dedupe_key")
+  urgency    NotificationUrgency   @default(NORMAL)
   readAt     DateTime?             @map("read_at")
   createdAt  DateTime              @default(now()) @map("created_at")
 
@@ -568,6 +580,23 @@ model InAppNotification {
   @@index([userId, createdAt])
   @@index([createdAt])
   @@map("in_app_notifications")
+}
+
+/// Which sound tier a notification gets, per kind and level. `level` is 1-4:
+/// the incident's priority (P1-P4) or, for alert kinds, the alert's severity
+/// (CRITICAL=1, HIGH=2, WARNING=3, INFO=4). Owned by the inbox module and
+/// edited from the Notification sounds page; a missing row falls back to the
+/// inbox module's code default.
+model NotificationSoundRule {
+  id        String                @id @default(uuid())
+  kind      InAppNotificationKind
+  level     Int
+  urgency   NotificationUrgency
+  createdAt DateTime              @default(now()) @map("created_at")
+  updatedAt DateTime              @updatedAt @map("updated_at")
+
+  @@unique([kind, level])
+  @@map("notification_sound_rules")
 }
 
 // ---------------------------------------------------------------------------

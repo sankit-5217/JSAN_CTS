@@ -5,6 +5,10 @@ import { InAppNotificationKind } from "@prisma/client";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import {
+  NotificationLevel,
+  NotificationSoundRulesService,
+} from "./notification-sound-rules.service";
 
 export const DEFAULT_RETENTION_DAYS = 90;
 const DEFAULT_LIST_LIMIT = 20;
@@ -16,8 +20,11 @@ export interface InAppNotificationInput {
   kind: InAppNotificationKind;
   title: string;
   body?: string;
-  entityType: "INCIDENT";
+  entityType: "INCIDENT" | "ALERT";
   entityId: string;
+  /** The incident's priority or the alert's severity, as 1-4. Picks the
+   *  sound tier together with `kind` (see NotificationSoundRulesService). */
+  level: NotificationLevel;
   /** Stable per-event key. Writing the same key twice for a user is a no-op.
    *  Omit for events that have no natural key; a random one is used. */
   dedupeKey?: string;
@@ -38,6 +45,7 @@ export class InboxService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly soundRules: NotificationSoundRulesService,
   ) {}
 
   async notifyUsers(input: InAppNotificationInput): Promise<void> {
@@ -58,6 +66,7 @@ export class InboxService {
         return;
       }
       const dedupeKey = input.dedupeKey ?? randomUUID();
+      const urgency = await this.soundRules.resolve(input.kind, input.level);
       await this.prisma.inAppNotification.createMany({
         data: recipients.map((r) => ({
           userId: r.id,
@@ -67,6 +76,7 @@ export class InboxService {
           entityType: input.entityType,
           entityId: input.entityId,
           dedupeKey,
+          urgency,
         })),
         skipDuplicates: true,
       });

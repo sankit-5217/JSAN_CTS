@@ -16,6 +16,7 @@ import type { EntityRef, NotificationEvent, Party } from "@cts-dc-opsdesk/email-
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { InboxService } from "../inbox/inbox.service";
+import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import { SlaTimersPublisher } from "./sla-timers.publisher";
 
 type SlaKindInternal = "ACK" | "RESOLVE";
@@ -271,6 +272,7 @@ export class SlaEscalationScanner {
         body: instance.incident.shortDescription,
         entityType: "INCIDENT",
         entityId: instance.incident.id,
+        level: levelForPriority(instance.incident.priority),
         dedupeKey: `sla:${instance.id}:${crossed.milestone}`,
       });
     } catch (err) {

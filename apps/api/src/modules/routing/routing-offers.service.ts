@@ -22,6 +22,7 @@ import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { InboxService } from "../inbox/inbox.service";
+import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import {
   INCIDENT_CREATED_EVENT,
   INCIDENT_UPDATED_EVENT,
@@ -340,6 +341,7 @@ export class RoutingOffersService {
       body: incident.shortDescription,
       entityType: "INCIDENT",
       entityId: incident.id,
+      level: levelForPriority(incident.priority),
       dedupeKey: `offer:${offer.id}`,
     });
     if (next.email) {
@@ -408,6 +410,7 @@ export class RoutingOffersService {
       body: `Offered to ${names.join(", ")}`,
       entityType: "INCIDENT",
       entityId: incident.id,
+      level: levelForPriority(incident.priority),
       dedupeKey: `unaccepted:${incident.id}:${round}`,
     });
     const to = desk.filter((u) => u.email).map((u) => ({ name: u.displayName, email: u.email }));

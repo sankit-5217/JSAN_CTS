@@ -5,12 +5,14 @@ import {
   AlertNormalizationError as ZabbixNormalizationError,
   normalizeZabbixEvent,
 } from "@cts-dc-opsdesk/zabbix-adapter";
-import { UserRole } from "@prisma/client";
+import { InAppNotificationKind, UserRole } from "@prisma/client";
 import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import { ChangesService } from "../changes/changes.service";
+import { InboxService } from "../inbox/inbox.service";
+import { levelForAlertSeverity } from "../inbox/notification-sound-rules.service";
 import { IncidentsService } from "../incidents/incidents.service";
 import { AlertRulesService } from "./alert-rules.service";
 import {
@@ -103,6 +105,7 @@ export class AlertsService {
     private readonly incidents: IncidentsService,
     private readonly alertRules: AlertRulesService,
     private readonly changes: ChangesService,
+    private readonly inbox: InboxService,
   ) {}
 
   async ingest(dto: IngestAlertDto, actor: ActorContext): Promise<AlertIngestResult> {
@@ -458,7 +461,8 @@ export class AlertsService {
   }
 
   /**
-   * Best-effort: a brand-new CRITICAL alert pages the NOC roster. Only on first
+   * Best-effort: a brand-new CRITICAL alert pages the NOC roster, in their bell
+   * (with the sound tier for its severity) and by email. Only on first
    * sighting (not dedup) so a re-fired trap doesn't re-page. Fully swallowed —
    * ingestion never blocks or fails on the notification.
    */
@@ -469,11 +473,21 @@ export class AlertsService {
           isActive: true,
           role: { in: [UserRole.SERVICE_DESK_NOC, UserRole.INFRASTRUCTURE_LEAD] },
         },
-        select: { email: true, displayName: true },
+        select: { id: true, email: true, displayName: true },
       });
       if (roster.length === 0) {
         return;
       }
+      await this.inbox.notifyUsers({
+        userIds: roster.map((u) => u.id),
+        kind: InAppNotificationKind.ALERT_RAISED,
+        title: `${dto.severity} alert on ${dto.siteCode}: ${dto.alertType}`,
+        body: dto.summary || undefined,
+        entityType: "ALERT",
+        entityId: alertId,
+        level: levelForAlertSeverity(dto.severity),
+        dedupeKey: `alert-raised:${alertId}`,
+      });
       await this.notifications.enqueue(
         {
           event: {

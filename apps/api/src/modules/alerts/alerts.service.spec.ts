@@ -3,6 +3,7 @@ import { NotificationsPublisher } from "../../common/notifications/notifications
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { ChangesService } from "../changes/changes.service";
+import { InboxService } from "../inbox/inbox.service";
 import { IncidentsService } from "../incidents/incidents.service";
 import { AlertRulesService } from "./alert-rules.service";
 import { DEFAULT_ALERT_RULE } from "./alerts.constants";
@@ -74,6 +75,7 @@ describe("AlertsService", () => {
   };
   let alertRules: { resolveRule: jest.Mock };
   let changes: { getActiveMaintenanceWindows: jest.Mock };
+  let inbox: { notifyUsers: jest.Mock };
   let service: AlertsService;
 
   beforeEach(() => {
@@ -91,6 +93,7 @@ describe("AlertsService", () => {
     };
     alertRules = { resolveRule: jest.fn().mockResolvedValue({ ...DEFAULT_ALERT_RULE }) };
     changes = { getActiveMaintenanceWindows: jest.fn().mockResolvedValue([]) };
+    inbox = { notifyUsers: jest.fn().mockResolvedValue(undefined) };
     service = new AlertsService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
@@ -98,6 +101,7 @@ describe("AlertsService", () => {
       incidents as unknown as IncidentsService,
       alertRules as unknown as AlertRulesService,
       changes as unknown as ChangesService,
+      inbox as unknown as InboxService,
     );
     prisma.site.findUnique.mockResolvedValue({ id: "site-1", code: "SITE01" });
     prisma.configurationItem.findUnique.mockResolvedValue({
@@ -670,10 +674,21 @@ describe("AlertsService", () => {
     prisma.alert.findUnique.mockResolvedValue(null);
     prisma.alert.create.mockResolvedValue({ id: "alert-crit", state: "OPEN" });
     prisma.user.findMany.mockResolvedValue([
-      { email: "noc@corp.example", displayName: "NOC Desk" },
+      { id: "noc-1", email: "noc@corp.example", displayName: "NOC Desk" },
     ]);
 
     await service.ingest(baseDto({ severity: "CRITICAL" }), ACTOR);
+
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userIds: ["noc-1"],
+        kind: "ALERT_RAISED",
+        entityType: "ALERT",
+        entityId: "alert-crit",
+        level: 1,
+        dedupeKey: "alert-raised:alert-crit",
+      }),
+    );
 
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -705,6 +720,7 @@ describe("AlertsService", () => {
 
     expect(notifications.enqueue).not.toHaveBeenCalled();
     expect(prisma.user.findMany).not.toHaveBeenCalled();
+    expect(inbox.notifyUsers).not.toHaveBeenCalled();
   });
 
   it("throws NotFoundException for an unknown alert id", async () => {

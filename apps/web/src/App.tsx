@@ -34,8 +34,10 @@ import ManageAccountsOutlinedIcon from "@mui/icons-material/ManageAccountsOutlin
 import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
+import VolumeUpOutlinedIcon from "@mui/icons-material/VolumeUpOutlined";
 import { AccountMenu, roleMeta } from "./components/AccountMenu";
 import { NotificationBell } from "./components/NotificationBell";
+import { SoundControl } from "./notifications/SoundControl";
 import { getStoredToken, signOut } from "./api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "./api/jwt";
 import { theme } from "./theme/theme";
@@ -63,6 +65,7 @@ import { SetPasswordPage } from "./pages/SetPasswordPage";
 import { SocialCallbackPage } from "./pages/SocialCallbackPage";
 import { UsersPage } from "./pages/UsersPage";
 import { MonitoringPage } from "./pages/MonitoringPage";
+import { NotificationSoundsPage } from "./pages/NotificationSoundsPage";
 import { ProblemDetailPage } from "./pages/ProblemDetailPage";
 import { ProblemsPage } from "./pages/ProblemsPage";
 import { RiskDetailPage } from "./pages/RiskDetailPage";
@@ -122,6 +125,11 @@ const NAV_GROUPS: NavGroup[] = [
         label: "SLA policies",
         to: "/sla-policies",
         icon: <ScheduleOutlinedIcon fontSize="small" />,
+      },
+      {
+        label: "Notification sounds",
+        to: "/notification-sounds",
+        icon: <VolumeUpOutlinedIcon fontSize="small" />,
       },
       {
         label: "Support groups",
@@ -323,8 +331,15 @@ function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => 
   );
 }
 
-/** Slim top bar: an interactive identity menu (avatar + role, click for
- * account details and logout) plus the mobile nav toggle. */
+function opsConsoleLink(n: { entityType: string; entityId: string }): string | null {
+  if (n.entityType === "INCIDENT") return `/incidents/${n.entityId}`;
+  if (n.entityType === "ALERT") return `/alerts/${n.entityId}`;
+  return null;
+}
+
+/** Slim top bar: sound settings, the notification bell (with sounds), an
+ * interactive identity menu (avatar + role, click for account details and
+ * logout) plus the mobile nav toggle. */
 function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
   const token = getStoredToken();
   const user = token ? decodeJwtPayload(token) : null;
@@ -347,11 +362,8 @@ function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
           <MenuOutlinedIcon />
         </IconButton>
         <Box sx={{ flex: 1 }} />
-        {user && (
-          <NotificationBell
-            linkFor={(n) => (n.entityType === "INCIDENT" ? `/incidents/${n.entityId}` : null)}
-          />
-        )}
+        {user && <SoundControl />}
+        {user && <NotificationBell sounds linkFor={opsConsoleLink} />}
         {user && meta && (
           <AccountMenu
             email={user.email}
@@ -412,6 +424,7 @@ export function App() {
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
         <Route path="/sla-policies" element={<SlaPoliciesPage />} />
+        <Route path="/notification-sounds" element={<NotificationSoundsPage />} />
         <Route path="/support-groups" element={<SupportGroupsPage />} />
         <Route path="/shifts" element={<ShiftsPage />} />
         <Route path="/alerts" element={<AlertsPage />} />

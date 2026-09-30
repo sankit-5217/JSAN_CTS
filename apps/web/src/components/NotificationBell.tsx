@@ -21,6 +21,7 @@ import CheckCircleOutlineOutlinedIcon from "@mui/icons-material/CheckCircleOutli
 import ChatBubbleOutlineOutlinedIcon from "@mui/icons-material/ChatBubbleOutlineOutlined";
 import FiberNewOutlinedIcon from "@mui/icons-material/FiberNewOutlined";
 import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
+import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import NotificationsOutlinedIcon from "@mui/icons-material/NotificationsOutlined";
 import PanToolOutlinedIcon from "@mui/icons-material/PanToolOutlined";
@@ -29,34 +30,8 @@ import SyncAltOutlinedIcon from "@mui/icons-material/SyncAltOutlined";
 import TimerOffOutlinedIcon from "@mui/icons-material/TimerOffOutlined";
 import TimerOutlinedIcon from "@mui/icons-material/TimerOutlined";
 import { apiGet, apiPost } from "../api/client";
-
-type NotificationKind =
-  | "INCIDENT_CREATED"
-  | "INCIDENT_ASSIGNED"
-  | "INCIDENT_GROUP_ASSIGNED"
-  | "INCIDENT_STATUS_CHANGED"
-  | "INCIDENT_COMMENT_ADDED"
-  | "SLA_WARNING"
-  | "SLA_BREACHED"
-  | "INCIDENT_OFFERED"
-  | "INCIDENT_OFFER_UNACCEPTED"
-  | "ALERT_RECOVERED";
-
-interface InAppNotification {
-  id: string;
-  kind: NotificationKind;
-  title: string;
-  body: string | null;
-  entityType: string;
-  entityId: string;
-  readAt: string | null;
-  createdAt: string;
-}
-
-interface NotificationList {
-  items: InAppNotification[];
-  unreadCount: number;
-}
+import type { InAppNotification, NotificationKind, NotificationList } from "../notifications/types";
+import { useNotificationSounds } from "../notifications/useNotificationSounds";
 
 // Same cadence family as the other live views (incident page 4s, roster
 // 30s). The bell is on every page, so it polls less often than a detail view.
@@ -74,6 +49,10 @@ const KIND_STYLE: Record<NotificationKind, { icon: ReactNode; color: string }> =
   SLA_WARNING: { icon: <TimerOutlinedIcon fontSize="small" />, color: "#ed6c02" },
   SLA_BREACHED: { icon: <TimerOffOutlinedIcon fontSize="small" />, color: "#d32f2f" },
   INCIDENT_OFFERED: { icon: <PanToolOutlinedIcon fontSize="small" />, color: "#ed6c02" },
+  ALERT_RAISED: {
+    icon: <NotificationsActiveOutlinedIcon fontSize="small" />,
+    color: "#d32f2f",
+  },
   ALERT_RECOVERED: {
     icon: <CheckCircleOutlineOutlinedIcon fontSize="small" />,
     color: "#2e7d32",
@@ -100,15 +79,19 @@ interface NotificationBellProps {
   /** Where clicking a notification goes. The client portal and the ops
    *  console open the same incident under different routes. */
   linkFor: (n: { entityType: string; entityId: string }) => string | null;
+  /** Play notification sounds (ops console only). Also keeps polling while
+   *  the tab is in the background, so a NOC desk hears arrivals it isn't
+   *  looking at. */
+  sounds?: boolean;
 }
 
 /**
  * The in-app notification bell shared by the ops console's TopBar and the
  * client portal header. It polls GET /notifications while the tab is
- * visible, shows the unread count as a badge, and opens a list where
- * clicking an entry marks it read and opens the ticket.
+ * visible (always, with `sounds`), shows the unread count as a badge, and
+ * opens a list where clicking an entry marks it read and opens the ticket.
  */
-export function NotificationBell({ linkFor }: NotificationBellProps) {
+export function NotificationBell({ linkFor, sounds = false }: NotificationBellProps) {
   const navigate = useNavigate();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [data, setData] = useState<NotificationList | null>(null);
@@ -116,6 +99,7 @@ export function NotificationBell({ linkFor }: NotificationBellProps) {
   const [markingAll, setMarkingAll] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const open = Boolean(anchorEl);
+  useNotificationSounds({ items: data?.items, enabled: sounds, panelOpen: open });
 
   const refetch = useCallback(() => {
     return apiGet<NotificationList>("/notifications?limit=20")
@@ -130,7 +114,7 @@ export function NotificationBell({ linkFor }: NotificationBellProps) {
   useEffect(() => {
     void refetch();
     const tick = () => {
-      if (document.visibilityState === "visible") {
+      if (sounds || document.visibilityState === "visible") {
         void refetch();
       }
     };
@@ -140,7 +124,7 @@ export function NotificationBell({ linkFor }: NotificationBellProps) {
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [refetch]);
+  }, [refetch, sounds]);
 
   const openPanel = (el: HTMLElement) => {
     setAnchorEl(el);
@@ -246,8 +230,8 @@ export function NotificationBell({ linkFor }: NotificationBellProps) {
               <NotificationsNoneOutlinedIcon sx={{ fontSize: 36, opacity: 0.6 }} />
               <Typography sx={{ fontSize: 13.5 }}>You're all caught up.</Typography>
               <Typography sx={{ fontSize: 12, textAlign: "center" }}>
-                Ticket offers, assignments, status changes, comments and SLA alerts will show up
-                here.
+                Ticket offers, assignments, status changes, comments, SLA and monitoring alerts will
+                show up here.
               </Typography>
             </Stack>
           )}

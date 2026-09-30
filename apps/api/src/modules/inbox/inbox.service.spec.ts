@@ -1,9 +1,10 @@
 import { NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { InAppNotificationKind, UserRole } from "@prisma/client";
+import { InAppNotificationKind, NotificationUrgency, UserRole } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { DEFAULT_RETENTION_DAYS, InAppNotificationInput, InboxService } from "./inbox.service";
+import { NotificationSoundRulesService } from "./notification-sound-rules.service";
 
 const USER = {
   id: "user-1",
@@ -39,7 +40,10 @@ function makeService(
   const config = {
     get: jest.fn().mockReturnValue(opts.retention),
   } as unknown as ConfigService;
-  return { service: new InboxService(prisma, config), prisma };
+  const soundRules = {
+    resolve: jest.fn().mockResolvedValue(NotificationUrgency.CRITICAL),
+  } as unknown as NotificationSoundRulesService;
+  return { service: new InboxService(prisma, config, soundRules), prisma, soundRules };
 }
 
 function input(overrides: Partial<InAppNotificationInput> = {}): InAppNotificationInput {
@@ -50,6 +54,7 @@ function input(overrides: Partial<InAppNotificationInput> = {}): InAppNotificati
     body: "Server unresponsive",
     entityType: "INCIDENT",
     entityId: "incident-1",
+    level: 1,
     dedupeKey: "assigned:incident-1:user-1:1",
     ...overrides,
   };
@@ -72,6 +77,19 @@ describe("InboxService.notifyUsers", () => {
       ],
       skipDuplicates: true,
     });
+  });
+
+  it("stamps every row with the sound tier resolved for its kind and level", async () => {
+    const { service, prisma, soundRules } = makeService({ activeUsers: [{ id: "user-1" }] });
+
+    await service.notifyUsers(input({ level: 2 }));
+
+    expect(soundRules.resolve).toHaveBeenCalledWith(InAppNotificationKind.INCIDENT_ASSIGNED, 2);
+    expect(prisma.inAppNotification.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [expect.objectContaining({ urgency: NotificationUrgency.CRITICAL })],
+      }),
+    );
   });
 
   it("drops the actor, blanks and repeats before looking anyone up", async () => {
