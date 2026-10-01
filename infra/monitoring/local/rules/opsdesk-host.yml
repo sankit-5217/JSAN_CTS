@@ -1,0 +1,42 @@
+# Alert rules for the demo host. Thresholds here belong to the monitoring
+# platform — OpsDesk only receives the resulting alerts. The `site` and `ci`
+# labels come from the scrape target in prometheus.yml; `severity` maps to the
+# OpsDesk alert severity (integrations/prometheus/src/normalize.ts).
+#
+# Everything here is `warning` on purpose: under the default OpsDesk alert rule
+# a `critical` alert emails the NOC roster and opens a P1 incident, which a
+# developer laptop must not do by accident.
+
+groups:
+  - name: opsdesk-host
+    rules:
+      - alert: HostExporterDown
+        expr: up{job="windows-host"} == 0
+        for: 1m
+        labels:
+          severity: warning
+          component: exporter
+        annotations:
+          summary: "{{ $labels.ci }} is not answering metric scrapes"
+
+      - alert: HostMemoryHigh
+        expr: |
+          100 * (1 - windows_memory_physical_free_bytes{job="windows-host"}
+                   / windows_memory_physical_total_bytes{job="windows-host"}) > 95
+        for: 5m
+        labels:
+          severity: warning
+          component: memory
+        annotations:
+          summary: "{{ $labels.ci }} memory use is {{ $value | printf \"%.0f\" }}%"
+
+      - alert: HostDiskSpaceLow
+        expr: |
+          100 * windows_logical_disk_free_bytes{job="windows-host", volume=~"[A-Z]:"}
+              / windows_logical_disk_size_bytes{job="windows-host", volume=~"[A-Z]:"} < 10
+        for: 5m
+        labels:
+          severity: warning
+          component: "disk {{ $labels.volume }}"
+        annotations:
+          summary: "{{ $labels.ci }} volume {{ $labels.volume }} has {{ $value | printf \"%.0f\" }}% free"

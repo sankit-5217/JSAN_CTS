@@ -17,3 +17,4 @@ redis-data/
 .dev-tls/
 apps/collector/*.local.json
 apps/collector/.buffer/
+infra/monitoring/local/secrets/

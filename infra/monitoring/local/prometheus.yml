@@ -1,0 +1,43 @@
+# Local Prometheus for developing against the OpsDesk alert pipeline.
+# Metrics stay here — OpsDesk only receives the alerts Alertmanager forwards
+# (ADR-003: telemetry outside the database).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["127.0.0.1:9093"]
+
+scrape_configs:
+  # This Windows machine, standing in for a demo server CI. Every alert routed
+  # to OpsDesk must carry `site` and `ci` labels matching a real site code and
+  # CI code (integrations/prometheus/README.md) — these two come from the seed.
+  - job_name: windows-host
+    static_configs:
+      - targets: ["127.0.0.1:9182"]
+        labels:
+          site: SITE02
+          ci: SITE02-SRV-001
+
+  # The monitoring stack watching itself.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:9090"]
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["127.0.0.1:9093"]
+  - job_name: loki
+    static_configs:
+      - targets: ["127.0.0.1:3100"]
+  - job_name: grafana
+    static_configs:
+      - targets: ["127.0.0.1:3001"]
+  - job_name: alloy
+    static_configs:
+      - targets: ["127.0.0.1:12345"]
