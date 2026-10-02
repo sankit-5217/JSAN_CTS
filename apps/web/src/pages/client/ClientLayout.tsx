@@ -13,7 +13,7 @@ function BrandMark() {
       component="img"
       src="/jsan-logo.png"
       alt="JSAN"
-      sx={{ height: 27, width: "auto", display: "block" }}
+      sx={{ height: 24, width: 70, display: "block" }}
     />
   );
 }

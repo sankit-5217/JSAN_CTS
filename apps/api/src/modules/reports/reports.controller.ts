@@ -1,14 +1,18 @@
 import { Controller, Get, Header, Query, UseGuards } from "@nestjs/common";
-import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { UserRole } from "@prisma/client";
 import { AuthzService } from "../auth/authz.service";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
+import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { ClientPortalService } from "./client-portal.service";
 import { QueryResponseTrendDto } from "./dto/query-response-trend.dto";
 import { ReportsService } from "./reports.service";
 
-// Read-only for every authenticated role — no @Roles restriction, matching
+// Read-only for every authenticated role — no @Roles restriction (bar
+// client-portal at the bottom), matching
 // AUDITOR_READ_ONLY/CLIENT_MANAGER_VIEWER's need to see operational health
 // too (spec §4). Site-scoped the same way as incidents/cmdb.
 @ApiTags("reports")
@@ -19,6 +23,7 @@ export class ReportsController {
   constructor(
     private readonly reportsService: ReportsService,
     private readonly authzService: AuthzService,
+    private readonly clientPortalService: ClientPortalService,
   ) {}
 
   @Get("command-center")
@@ -57,5 +62,19 @@ export class ReportsController {
   ) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
     return this.reportsService.getAlertInsights(accessibleSiteIds, query.windowDays ?? 30);
+  }
+
+  // The one role-restricted report: it's built around "tickets I reported",
+  // which only a customer has. A customer always has an explicit site list;
+  // if that ever came back as "all sites" this fails closed to none.
+  @Get("client-portal")
+  @Roles(UserRole.CLIENT_MANAGER_VIEWER)
+  @ApiOperation({
+    summary:
+      "Client portal overview: service desk contacts, on-duty team and state per site, SLA status and live activity per reported ticket",
+  })
+  async getClientPortal(@CurrentUser() user: AuthenticatedUser) {
+    const accessibleSiteIds = (await this.authzService.getAccessibleSiteIds(user)) ?? [];
+    return this.clientPortalService.getOverview(user, accessibleSiteIds);
   }
 }

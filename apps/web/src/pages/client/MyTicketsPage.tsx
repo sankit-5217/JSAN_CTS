@@ -23,6 +23,13 @@ import {
   STATUS_COLOR,
   STATUS_LABEL,
 } from "./clientTicket";
+import {
+  describeActivity,
+  SLA_COLOR,
+  SLA_LABEL,
+  useClientPortal,
+  type PortalTicket,
+} from "./clientPortal";
 import { useAnsweredResolutions } from "./useAnsweredResolutions";
 
 export interface ClientIncident {
@@ -68,6 +75,9 @@ export function MyTicketsPage() {
   }, []);
 
   const answered = useAnsweredResolutions(incidents);
+  // SLA badges and live activity are extras on top of the list: if the
+  // overview fails to load, the tickets still show without them.
+  const { ticketsById } = useClientPortal();
 
   const counts = useMemo(() => {
     const c: Record<Filter, number> = { "needs-you": 0, open: 0, closed: 0, all: 0 };
@@ -162,7 +172,12 @@ export function MyTicketsPage() {
 
       <Stack spacing={1.25}>
         {shown.map((inc) => (
-          <TicketRow key={inc.id} incident={inc} actionNeeded={needsYou(inc, answered)} />
+          <TicketRow
+            key={inc.id}
+            incident={inc}
+            actionNeeded={needsYou(inc, answered)}
+            portal={ticketsById.get(inc.id)}
+          />
         ))}
       </Stack>
     </Box>
@@ -172,10 +187,16 @@ export function MyTicketsPage() {
 export function TicketRow({
   incident: inc,
   actionNeeded,
+  portal,
 }: {
   incident: ClientIncident;
   actionNeeded: boolean;
+  /** SLA status and live activity, once the portal overview has loaded. */
+  portal?: PortalTicket;
 }) {
+  const activity =
+    portal && !isFinished(inc.status) ? describeActivity(portal.activity, relativeTime) : null;
+  const sla = inc.status === "CANCELLED" ? null : portal?.sla;
   return (
     <Card
       elevation={0}
@@ -200,7 +221,20 @@ export function TicketRow({
                 {inc.status === "RESOLVED" ? "Please confirm it's fixed" : "Waiting for your reply"}
               </Typography>
             )}
+            {activity && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                {activity}
+              </Typography>
+            )}
           </Box>
+          {sla && (
+            <Chip
+              size="small"
+              variant="outlined"
+              color={SLA_COLOR[sla.overall]}
+              label={`SLA: ${SLA_LABEL[sla.overall]}`}
+            />
+          )}
           <Chip
             size="small"
             label={PRIORITY_LABEL[inc.priority]}

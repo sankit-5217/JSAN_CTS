@@ -35,6 +35,15 @@ import {
   STATUS_LABEL,
   type TicketProgress,
 } from "./clientTicket";
+import {
+  describeActivity,
+  describeClock,
+  SLA_COLOR,
+  SLA_LABEL,
+  useClientPortal,
+  type SlaStatus,
+} from "./clientPortal";
+import { SiteContacts } from "./SitePanel";
 
 interface Incident {
   id: string;
@@ -98,6 +107,11 @@ export function TicketDetailPage() {
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
+  // SLA status, live activity and site contacts are extras: the ticket
+  // itself still renders if the overview hasn't loaded or fails.
+  const { overview, ticketsById } = useClientPortal();
+  const portal = id ? ticketsById.get(id) : undefined;
+  const site = overview?.sites.find((s) => s.id === portal?.siteId);
 
   const refetch = useCallback(() => {
     if (!id) return Promise.resolve();
@@ -203,6 +217,7 @@ export function TicketDetailPage() {
 
   const finished = isFinished(incident.status);
   const handler = progress.handledBy;
+  const activity = portal && !finished ? describeActivity(portal.activity, relativeTime) : null;
 
   return (
     <Box>
@@ -254,6 +269,13 @@ export function TicketDetailPage() {
                   : "Waiting for the service desk to assign it"}
             </Typography>
           </Stack>
+          {activity && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, ml: 3.5 }}>
+              {activity}
+            </Typography>
+          )}
+
+          {incident.status !== "CANCELLED" && portal?.sla && <SlaPanel sla={portal.sla} />}
 
           {incident.status !== "CANCELLED" && (
             <Stepper
@@ -408,11 +430,64 @@ export function TicketDetailPage() {
           </Stack>
         ))}
       </Stack>
+
+      {site && (
+        <Card
+          elevation={0}
+          sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mt: 3 }}
+        >
+          <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+            <SiteContacts contacts={site.contacts} />
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
+              Quote {incident.incidentNo} when you call or email.
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
       {loadError && (
         <Typography variant="caption" color="error" sx={{ display: "block", mt: 2 }}>
           Couldn't refresh: {loadError}
         </Typography>
       )}
+    </Box>
+  );
+}
+
+/** Response and resolution targets, each with where it stands. */
+function SlaPanel({ sla }: { sla: SlaStatus }) {
+  const rows = [
+    { kind: "response", label: "Response", clock: sla.response },
+    { kind: "resolution", label: "Resolution", clock: sla.resolution },
+  ] as const;
+  return (
+    <Box
+      sx={{
+        mt: 2,
+        p: 1.5,
+        borderRadius: 2,
+        bgcolor: "action.hover",
+        display: "grid",
+        gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+        gap: 1.5,
+      }}
+    >
+      {rows.map((row) => (
+        <Box key={row.kind}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+              {row.label} target
+            </Typography>
+            <Chip
+              size="small"
+              color={SLA_COLOR[row.clock.state]}
+              label={SLA_LABEL[row.clock.state]}
+            />
+          </Stack>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+            {describeClock(row.kind, row.clock)}
+          </Typography>
+        </Box>
+      ))}
     </Box>
   );
 }

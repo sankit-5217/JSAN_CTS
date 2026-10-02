@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
+import { ShiftsModule } from "../shifts/shifts.module";
+import { ClientPortalService } from "./client-portal.service";
 import { ReportsController } from "./reports.controller";
 import { ReportsService } from "./reports.service";
 
@@ -14,9 +16,9 @@ import { ReportsService } from "./reports.service";
  * broader reports sprint — this module keeps growing beyond Sprint 7.
  */
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, ShiftsModule],
   controllers: [ReportsController],
-  providers: [ReportsService],
+  providers: [ReportsService, ClientPortalService],
   exports: [ReportsService],
 })
 export class ReportsModule {}

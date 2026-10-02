@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   CardContent,
+  Chip,
   Grid2 as Grid,
   Link,
   Stack,
@@ -17,8 +18,10 @@ import ChatOutlinedIcon from "@mui/icons-material/ChatOutlined";
 import TaskAltOutlinedIcon from "@mui/icons-material/TaskAltOutlined";
 import { apiGet, getStoredToken } from "../../api/client";
 import { decodeJwtPayload } from "../../api/jwt";
+import { SLA_COLOR, SLA_LABEL, useClientPortal, type SlaClockState } from "./clientPortal";
 import { isFinished, needsYou } from "./clientTicket";
 import { TicketRow, type ClientIncident } from "./MyTicketsPage";
+import { SitePanel } from "./SitePanel";
 import { useAnsweredResolutions } from "./useAnsweredResolutions";
 
 const HOW_IT_WORKS = [
@@ -70,6 +73,23 @@ export function ClientHomePage() {
   }, []);
 
   const answered = useAnsweredResolutions(incidents);
+  const { overview, ticketsById, error: overviewError } = useClientPortal();
+
+  // How the open tickets are doing against their targets, worst first.
+  const slaSummary = useMemo(() => {
+    const counts: Record<SlaClockState, number> = {
+      BREACHED: 0,
+      AT_RISK: 0,
+      PAUSED: 0,
+      ON_TRACK: 0,
+      MET: 0,
+    };
+    for (const inc of incidents ?? []) {
+      const sla = ticketsById.get(inc.id)?.sla;
+      if (sla && !isFinished(inc.status)) counts[sla.overall] += 1;
+    }
+    return (Object.entries(counts) as [SlaClockState, number][]).filter(([, n]) => n > 0);
+  }, [incidents, ticketsById]);
 
   const { attention, open, closed } = useMemo(() => {
     const all = incidents ?? [];
@@ -112,6 +132,30 @@ export function ClientHomePage() {
         </Grid>
       </Grid>
 
+      {slaSummary.length > 0 && (
+        <Stack
+          direction="row"
+          spacing={1}
+          alignItems="center"
+          flexWrap="wrap"
+          useFlexGap
+          sx={{ mb: 3 }}
+        >
+          <Typography variant="body2" color="text.secondary">
+            Service targets on your open tickets:
+          </Typography>
+          {slaSummary.map(([state, n]) => (
+            <Chip
+              key={state}
+              size="small"
+              variant="outlined"
+              color={SLA_COLOR[state]}
+              label={`${n} ${SLA_LABEL[state].toLowerCase()}`}
+            />
+          ))}
+        </Stack>
+      )}
+
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           Couldn't load your tickets: {error}
@@ -140,13 +184,44 @@ export function ClientHomePage() {
       )}
       <Stack spacing={1.25} sx={{ mb: 4 }}>
         {attention.slice(0, 5).map((inc) => (
-          <TicketRow key={inc.id} incident={inc} actionNeeded />
+          <TicketRow key={inc.id} incident={inc} actionNeeded portal={ticketsById.get(inc.id)} />
         ))}
         {attention.length > 5 && (
           <Link component={RouterLink} to="/client/tickets?show=needs-you">
             See all {attention.length}
           </Link>
         )}
+      </Stack>
+
+      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
+        {overview && overview.sites.length > 1 ? "Your sites" : "Your site"}
+      </Typography>
+      {overviewError && !overview && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          Couldn't load site status and contacts: {overviewError}
+        </Alert>
+      )}
+      {!overview && !overviewError && (
+        <Typography color="text.secondary" sx={{ mb: 3 }}>
+          Loading...
+        </Typography>
+      )}
+      {overview && overview.sites.length === 0 && (
+        <Card
+          elevation={0}
+          sx={{ borderRadius: 3, border: "1px dashed", borderColor: "divider", mb: 3 }}
+        >
+          <CardContent sx={{ py: 3, textAlign: "center" }}>
+            <Typography color="text.secondary">
+              Your account isn't linked to a site yet. Ask your JSAN contact to set that up.
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
+      <Stack spacing={2} sx={{ mb: 4 }}>
+        {overview?.sites.map((site) => (
+          <SitePanel key={site.id} site={site} />
+        ))}
       </Stack>
 
       <Grid container spacing={2} sx={{ mb: 4 }}>

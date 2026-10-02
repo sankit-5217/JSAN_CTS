@@ -145,7 +145,7 @@ async function main() {
 
   // Client viewer: the customer's own read-only account (CLIENT_MANAGER_VIEWER
   // isn't in AuthzService's ALL_SITES_ROLES, so it needs a UserSiteAccess row
-  // just like the scoped internal roles below). Scoped to SITE01 so logging
+  // just like the scoped internal roles below). Scoped to SITE01 so
   // in as this user actually shows something — the seeded incident lives
   // there.
   const clientViewer = await prisma.user.upsert({
