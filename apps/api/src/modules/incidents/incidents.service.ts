@@ -28,6 +28,7 @@ import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { InboxService } from "../inbox/inbox.service";
+import { ownIncidentsFilter } from "./incident-visibility";
 import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import { SlaService } from "../sla/sla.service";
 import {
@@ -163,6 +164,9 @@ export class IncidentsService {
       // there's no ?reportedByUserId= query param a customer could spoof
       // even if they tried; this branches on the caller's own role only.
       reportedByUserId: user.role === UserRole.CLIENT_MANAGER_VIEWER ? user.id : undefined,
+      // A Site Engineer's list is their own work only (see ownIncidentsFilter).
+      // Under AND so it can't collide with the ?q= search's own OR below.
+      AND: ownIncidentsFilter(user) ?? undefined,
       // An explicit ?status= wins; slaAtRisk alone still implies "open"
       // (a resolved incident's stale fired-milestone history isn't
       // actionable risk) — matches ReportsService's own queue definition.
@@ -214,6 +218,17 @@ export class IncidentsService {
     // caller at all — see reportedByUserId, added for exactly this reason).
     if (user.role === UserRole.CLIENT_MANAGER_VIEWER && incident.reportedByUserId !== user.id) {
       throw new ForbiddenException("You do not have access to this incident");
+    }
+    // A Site Engineer only reaches incidents they own or are currently being
+    // offered — the same rule as their list, enforced here because every
+    // incident sub-resource (comments, worklogs, attachments, transitions,
+    // routing offers) comes through this method.
+    const ownOnly = ownIncidentsFilter(user);
+    if (ownOnly && incident.ownerUserId !== user.id) {
+      const visible = await this.prisma.incident.count({ where: { id, AND: ownOnly } });
+      if (visible === 0) {
+        throw new ForbiddenException("You do not have access to this incident");
+      }
     }
     return incident;
   }

@@ -7,6 +7,7 @@ import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { ownIncidentsFilter } from "../incidents/incident-visibility";
 import { ClientPortalService } from "./client-portal.service";
 import { QueryResponseTrendDto } from "./dto/query-response-trend.dto";
 import { ReportsService } from "./reports.service";
@@ -29,7 +30,7 @@ export class ReportsController {
   @Get("command-center")
   async getCommandCenter(@CurrentUser() user: AuthenticatedUser) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
-    return this.reportsService.getCommandCenterSummary(accessibleSiteIds);
+    return this.reportsService.getCommandCenterSummary(accessibleSiteIds, ownIncidentsFilter(user));
   }
 
   // Same audience/scope as command-center above — a downloadable snapshot
@@ -39,7 +40,10 @@ export class ReportsController {
   @Header("Content-Disposition", 'attachment; filename="operational-health-report.csv"')
   async downloadOperationalHealthCsv(@CurrentUser() user: AuthenticatedUser): Promise<string> {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
-    return this.reportsService.generateOperationalHealthCsv(accessibleSiteIds);
+    return this.reportsService.generateOperationalHealthCsv(
+      accessibleSiteIds,
+      ownIncidentsFilter(user),
+    );
   }
 
   // Same audience/scope as the other reports above.
@@ -49,7 +53,11 @@ export class ReportsController {
     @Query() query: QueryResponseTrendDto,
   ) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
-    return this.reportsService.getResponseTrend(accessibleSiteIds, query.windowDays ?? 30);
+    return this.reportsService.getResponseTrend(
+      accessibleSiteIds,
+      query.windowDays ?? 30,
+      ownIncidentsFilter(user),
+    );
   }
 
   // Same audience/scope as the other reports above. Reuses

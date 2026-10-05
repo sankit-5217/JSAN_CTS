@@ -1,5 +1,12 @@
 import { Injectable } from "@nestjs/common";
-import { AlertSeverity, AlertState, CiType, IncidentStatus, Priority } from "@prisma/client";
+import {
+  AlertSeverity,
+  AlertState,
+  CiType,
+  IncidentStatus,
+  Prisma,
+  Priority,
+} from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { OPEN_STATUSES } from "../incidents/incident-transitions";
 import { ResponseTrendWindow } from "./dto/query-response-trend.dto";
@@ -168,7 +175,15 @@ export class ReportsService {
     return !instance.breached && instance.firedMilestones.length > 0;
   }
 
-  async getCommandCenterSummary(accessibleSiteIds: string[] | null): Promise<CommandCenterSummary> {
+  /**
+   * `incidentScope` narrows only the incident-derived numbers (open counts,
+   * queues, SLA risk) for a caller who sees just their own incidents — see
+   * ownIncidentsFilter. Site, CI and alert figures stay site-wide.
+   */
+  async getCommandCenterSummary(
+    accessibleSiteIds: string[] | null,
+    incidentScope: Prisma.IncidentWhereInput | null = null,
+  ): Promise<CommandCenterSummary> {
     const sites = await this.prisma.site.findMany({
       where: accessibleSiteIds ? { id: { in: accessibleSiteIds } } : undefined,
       select: { id: true, code: true, name: true },
@@ -182,7 +197,7 @@ export class ReportsService {
     });
 
     const incidents: IncidentRow[] = await this.prisma.incident.findMany({
-      where: { siteId: { in: siteIds } },
+      where: { siteId: { in: siteIds }, AND: incidentScope ?? undefined },
       select: {
         siteId: true,
         status: true,
@@ -297,8 +312,11 @@ export class ReportsService {
    * read-model output, not just live UI). Point-in-time only; no historical
    * trend data is stored for this yet.
    */
-  async generateOperationalHealthCsv(accessibleSiteIds: string[] | null): Promise<string> {
-    const summary = await this.getCommandCenterSummary(accessibleSiteIds);
+  async generateOperationalHealthCsv(
+    accessibleSiteIds: string[] | null,
+    incidentScope: Prisma.IncidentWhereInput | null = null,
+  ): Promise<string> {
+    const summary = await this.getCommandCenterSummary(accessibleSiteIds, incidentScope);
     const generatedAt = new Date().toISOString();
 
     const lines: string[] = [
@@ -377,6 +395,7 @@ export class ReportsService {
   async getResponseTrend(
     accessibleSiteIds: string[] | null,
     windowDays: ResponseTrendWindow,
+    incidentScope: Prisma.IncidentWhereInput | null = null,
   ): Promise<ResponseTrendReport> {
     const to = new Date();
     const from = new Date(to.getTime() - windowDays * 24 * 60 * 60_000);
@@ -385,6 +404,7 @@ export class ReportsService {
       where: {
         siteId: accessibleSiteIds ? { in: accessibleSiteIds } : undefined,
         createdAt: { gte: from, lte: to },
+        AND: incidentScope ?? undefined,
       },
       select: {
         siteId: true,
@@ -426,25 +446,25 @@ export class ReportsService {
         ),
       }));
 
-    const byPriority: PriorityResponseSummary[] = (
-      Object.values(Priority) as Priority[]
-    ).map((priority) => {
-      const rows = incidents.filter((i) => i.priority === priority);
-      return {
-        priority,
-        incidentCount: rows.length,
-        avgAckMinutes: ReportsService.average(
-          rows
-            .filter((r) => r.acknowledgedAt)
-            .map((r) => ReportsService.minutesBetween(r.createdAt, r.acknowledgedAt!)),
-        ),
-        avgRestoreMinutes: ReportsService.average(
-          rows
-            .filter((r) => r.restoredAt)
-            .map((r) => ReportsService.minutesBetween(r.createdAt, r.restoredAt!)),
-        ),
-      };
-    });
+    const byPriority: PriorityResponseSummary[] = (Object.values(Priority) as Priority[]).map(
+      (priority) => {
+        const rows = incidents.filter((i) => i.priority === priority);
+        return {
+          priority,
+          incidentCount: rows.length,
+          avgAckMinutes: ReportsService.average(
+            rows
+              .filter((r) => r.acknowledgedAt)
+              .map((r) => ReportsService.minutesBetween(r.createdAt, r.acknowledgedAt!)),
+          ),
+          avgRestoreMinutes: ReportsService.average(
+            rows
+              .filter((r) => r.restoredAt)
+              .map((r) => ReportsService.minutesBetween(r.createdAt, r.restoredAt!)),
+          ),
+        };
+      },
+    );
 
     return {
       windowDays,

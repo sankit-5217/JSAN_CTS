@@ -132,7 +132,12 @@ function makeService(
   const prisma = {
     $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(tx)),
     incident: {
-      findUnique: overrides.incidentFindUnique ?? jest.fn().mockResolvedValue(baseIncident()),
+      // Owned by `engineer` by default: a Site Engineer only reaches their own
+      // incidents (see incident-visibility.ts), and most tests here use that
+      // fixture as a generic staff caller.
+      findUnique:
+        overrides.incidentFindUnique ??
+        jest.fn().mockResolvedValue(baseIncident({ ownerUserId: engineer.id })),
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
@@ -388,7 +393,9 @@ describe("IncidentsService.update", () => {
 
   it("does not call onPriorityChanged when priority is left unchanged", async () => {
     const { service, slaService } = makeService({
-      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ priority: Priority.P3 })),
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ ownerUserId: engineer.id, priority: Priority.P3 })),
     });
     await service.update("incident-1", { shortDescription: "Updated text" }, engineer, {
       actorId: engineer.id,
@@ -542,7 +549,7 @@ describe("IncidentsService.update", () => {
 
   it("still allows a Site Engineer to edit non-routing fields (diagnosis/description/CI)", async () => {
     const { service, tx } = makeService({
-      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerUserId: engineer.id })),
     });
     await service.update(
       "incident-1",
@@ -601,7 +608,54 @@ describe("IncidentsService site-scope enforcement", () => {
         .fn()
         .mockResolvedValue(baseIncident({ reportedByUserId: "someone-else" })),
     });
+    await expect(service.findOneScoped("incident-1", serviceDesk)).resolves.toBeDefined();
+  });
+
+  it("findOneScoped allows a SITE_ENGINEER to see an incident they own", async () => {
+    const { service, prisma } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerUserId: engineer.id })),
+    });
     await expect(service.findOneScoped("incident-1", engineer)).resolves.toBeDefined();
+    expect(prisma.incident.count).not.toHaveBeenCalled();
+  });
+
+  it("findOneScoped allows a SITE_ENGINEER to see an unowned incident currently offered to them", async () => {
+    const { service, prisma } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+    });
+    (prisma.incident.count as jest.Mock).mockResolvedValue(1);
+    await expect(service.findOneScoped("incident-1", engineer)).resolves.toBeDefined();
+    expect(prisma.incident.count).toHaveBeenCalledWith({
+      where: {
+        id: "incident-1",
+        AND: {
+          OR: [
+            { ownerUserId: engineer.id },
+            { routingOffers: { some: { userId: engineer.id, status: "PENDING" } } },
+          ],
+        },
+      },
+    });
+  });
+
+  it("findOneScoped throws for a SITE_ENGINEER on an incident owned by another engineer", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ ownerUserId: otherEngineer.id })),
+    });
+    await expect(service.findOneScoped("incident-1", engineer)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it("findOneScoped throws for a SITE_ENGINEER on an unowned incident with no offer to them", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+    });
+    await expect(service.findOneScoped("incident-1", engineer)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 
   it("findOneScoped allows a CLIENT_MANAGER_VIEWER to see an incident they reported", async () => {
@@ -704,6 +758,36 @@ describe("IncidentsService.findAll", () => {
         where: expect.objectContaining({ reportedByUserId: clientViewer.id }),
       }),
     );
+  });
+
+  it("limits a SITE_ENGINEER to incidents they own or are currently offered", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll({ q: "disk", limit: 50, offset: 0 }, ["site-a"], engineer);
+    const expected = expect.objectContaining({
+      where: expect.objectContaining({
+        siteId: { in: ["site-a"] },
+        AND: {
+          OR: [
+            { ownerUserId: engineer.id },
+            { routingOffers: { some: { userId: engineer.id, status: "PENDING" } } },
+          ],
+        },
+      }),
+    });
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(expected);
+    expect(prisma.incident.count).toHaveBeenCalledWith(expected);
+  });
+
+  it("applies no own-incidents filter for Service Desk or Admin", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll({ limit: 50, offset: 0 }, null, serviceDesk);
+    await service.findAll({ limit: 50, offset: 0 }, null, {
+      ...serviceDesk,
+      role: UserRole.SUPER_ADMIN,
+    });
+    for (const [args] of (prisma.incident.findMany as jest.Mock).mock.calls) {
+      expect(args.where.AND).toBeUndefined();
+    }
   });
 
   it("never filters by reportedByUserId for staff roles", async () => {
@@ -1419,7 +1503,9 @@ describe("IncidentsService.createComment notifications", () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: "customer-1" })),
+        .mockResolvedValue(
+          baseIncident({ ownerUserId: engineer.id, reportedByUserId: "customer-1" }),
+        ),
       userFindUnique: jest.fn().mockResolvedValue({
         id: "customer-1",
         email: "customer@example.com",
@@ -1444,7 +1530,9 @@ describe("IncidentsService.createComment notifications", () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: "customer-1" })),
+        .mockResolvedValue(
+          baseIncident({ ownerUserId: engineer.id, reportedByUserId: "customer-1" }),
+        ),
     });
     await service.createComment(
       "incident-1",
@@ -1854,6 +1942,7 @@ describe("IncidentsService incident.created event", () => {
 describe("IncidentsService.autoAssign", () => {
   it("moves a NEW unowned incident to ASSIGNED as a system action", async () => {
     const { service, tx, auditService, notifications } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
       userFindUnique: jest
         .fn()
         .mockResolvedValue({ id: "eng-1", displayName: "Eng", email: "eng@corp.example" }),
@@ -2054,7 +2143,9 @@ describe("IncidentsService in-app notifications", () => {
     const { service, inbox } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: "customer-1" })),
+        .mockResolvedValue(
+          baseIncident({ ownerUserId: engineer.id, reportedByUserId: "customer-1" }),
+        ),
     });
 
     await service.createComment(
@@ -2105,7 +2196,9 @@ describe("IncidentsService in-app notifications", () => {
   });
 
   it("auto-assign sends the assignment and status change in-app with no human actor", async () => {
-    const { service, inbox } = makeService();
+    const { service, inbox } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+    });
 
     await service.autoAssign("incident-1", "eng-1");
 
@@ -2163,7 +2256,9 @@ describe("IncidentsService routing-offer hooks", () => {
   });
 
   it("records the owning team alongside the engineer when one is given", async () => {
-    const { service, tx } = makeService();
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+    });
 
     await service.autoAssign("incident-1", "eng-1", "corr-1", "eng-1", "grp-storage");
 
@@ -2179,7 +2274,9 @@ describe("IncidentsService routing-offer hooks", () => {
   });
 
   it("records the accepting engineer as the actor when an offer is accepted", async () => {
-    const { service, tx, auditService, inbox } = makeService();
+    const { service, tx, auditService, inbox } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+    });
 
     await service.autoAssign("incident-1", "eng-1", "corr-1", "eng-1");
 
