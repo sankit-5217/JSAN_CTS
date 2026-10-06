@@ -54,21 +54,6 @@ export function SitePanel({ site }: { site: PortalSite }) {
 
         <Divider sx={{ my: 2 }} />
 
-        <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
-          On duty now
-        </Typography>
-        {site.team.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            No engineer is scheduled at this site right now. The service desk still receives
-            everything you report.
-          </Typography>
-        ) : (
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            {site.team.map((member, i) => (
-              <TeamMemberChip key={`${member.name}-${i}`} member={member} />
-            ))}
-          </Stack>
-        )}
       </CardContent>
     </Card>
   );
