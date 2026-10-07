@@ -105,10 +105,12 @@ describe("normalizeRedfishSystem", () => {
     expect(snapshot.overallHealth).toBe("CRITICAL");
     expect(snapshot.degraded).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "SYSTEM", health: "CRITICAL" }),
+        expect.objectContaining({ kind: "SYSTEM", health: "CRITICAL", rollup: true }),
         expect.objectContaining({ kind: "FAN", name: "Fan1A", health: "WARNING", detail: "0RPM" }),
       ]),
     );
+    // only the ComputerSystem's own status is the rollup; real parts aren't
+    expect(snapshot.degraded.filter((d) => d.rollup)).toHaveLength(1);
     expect(snapshot.summary.fans).toEqual({ total: 2, healthy: 1 });
   });
 

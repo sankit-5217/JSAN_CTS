@@ -100,6 +100,18 @@ export interface AvailableTransition {
 }
 
 /** Minimal shape of what NestJS's FileInterceptor hands us (multer.File). */
+/** A monitoring alert as the incident timeline records it (`ALERT_LINKED`). */
+export interface LinkableAlert {
+  id: string;
+  alertType: string;
+  severity: string;
+  source: string;
+  fingerprint: string;
+  summary?: string | null;
+  /** Failing sub-component, e.g. a drive bay or interface. */
+  componentKey?: string | null;
+}
+
 export interface UploadedAttachmentFile {
   originalname: string;
   mimetype: string;
@@ -295,13 +307,7 @@ export class IncidentsService {
       category: string;
       priority: Priority;
       shortDescription: string;
-      alert: {
-        id: string;
-        alertType: string;
-        severity: string;
-        source: string;
-        fingerprint: string;
-      };
+      alert: LinkableAlert;
     },
     actor: ActorContext,
   ): Promise<{ incident: Incident; created: boolean }> {
@@ -345,6 +351,8 @@ export class IncidentsService {
     const createdEvent: IncidentCreatedEvent = {
       incidentId: incident.id,
       siteId: incident.siteId,
+      ciId: incident.ciId,
+      actorId: actor.actorId,
       correlationId: actor.correlationId,
     };
     this.events.emit(INCIDENT_CREATED_EVENT, createdEvent);
@@ -682,6 +690,7 @@ export class IncidentsService {
       status: after.status,
       ownerUserId: after.ownerUserId,
       ownerGroupId: after.ownerGroupId,
+      ciId: after.ciId,
       actorId: actor.actorId,
       correlationId: actor.correlationId,
     };
@@ -889,6 +898,48 @@ export class IncidentsService {
     IncidentStatus.REOPENED,
   ];
 
+  /**
+   * Other still-open incidents on the same CI as this one — most often a
+   * client-reported ticket and the incident a monitoring alert already opened
+   * for the same fault. Advisory only: Service Desk decides whether to link,
+   * cancel or keep both; nothing is blocked. Visibility follows the caller's
+   * own list scope (same site; a Site Engineer sees only their own; a client
+   * never sees other reporters' tickets).
+   */
+  async findPossibleDuplicates(
+    id: string,
+    user: AuthenticatedUser,
+  ): Promise<
+    Pick<Incident, "id" | "incidentNo" | "shortDescription" | "status" | "priority" | "createdAt">[]
+  > {
+    const incident = await this.findOneScoped(id, user);
+    if (
+      !incident.ciId ||
+      !IncidentsService.OPEN_INCIDENT_STATUSES.includes(incident.status) ||
+      user.role === UserRole.CLIENT_MANAGER_VIEWER
+    ) {
+      return [];
+    }
+    return this.prisma.incident.findMany({
+      where: {
+        id: { not: incident.id },
+        ciId: incident.ciId,
+        siteId: incident.siteId,
+        status: { in: IncidentsService.OPEN_INCIDENT_STATUSES },
+        AND: ownIncidentsFilter(user) ?? undefined,
+      },
+      select: {
+        id: true,
+        incidentNo: true,
+        shortDescription: true,
+        status: true,
+        priority: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
   /** Most-recently-created still-open incident for a CI, or null. Read-only. */
   async findOpenByCi(ciId: string): Promise<Incident | null> {
     return this.prisma.incident.findFirst({
@@ -905,13 +956,7 @@ export class IncidentsService {
    */
   async linkAlert(
     incidentId: string,
-    alert: {
-      id: string;
-      alertType: string;
-      severity: string;
-      source: string;
-      fingerprint: string;
-    },
+    alert: LinkableAlert,
     actor: ActorContext,
   ): Promise<{ linked: boolean }> {
     const incident = await this.prisma.incident.findUnique({ where: { id: incidentId } });
@@ -938,7 +983,7 @@ export class IncidentsService {
   private async writeAlertLink(
     tx: Prisma.TransactionClient,
     incidentId: string,
-    alert: { id: string; alertType: string; severity: string; source: string; fingerprint: string },
+    alert: LinkableAlert,
     actor: ActorContext,
   ): Promise<void> {
     await tx.incidentEvent.create({
@@ -952,6 +997,10 @@ export class IncidentsService {
           severity: alert.severity,
           source: alert.source,
           fingerprint: alert.fingerprint,
+          // what actually broke (e.g. "DRIVE:Disk.Bay.3") so the timeline is
+          // diagnosable without opening each alert
+          summary: alert.summary ?? null,
+          componentKey: alert.componentKey ?? null,
         } as Prisma.InputJsonValue,
       },
     });
@@ -966,6 +1015,7 @@ export class IncidentsService {
           alertType: alert.alertType,
           severity: alert.severity,
           source: alert.source,
+          componentKey: alert.componentKey ?? null,
         },
         correlationId: actor.correlationId,
       },

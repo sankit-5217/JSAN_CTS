@@ -184,7 +184,13 @@ function makeService(
   };
 }
 
-const CREATED = { incidentId: "inc-1", siteId: "site-1", correlationId: "corr-1" };
+const CREATED = {
+  incidentId: "inc-1",
+  siteId: "site-1",
+  ciId: null,
+  actorId: "desk-1",
+  correlationId: "corr-1",
+};
 
 describe("RoutingOffersService.onIncidentCreated", () => {
   it("does nothing when the site has no policy", async () => {
@@ -571,6 +577,7 @@ describe("RoutingOffersService.onIncidentUpdated", () => {
     status: "ASSIGNED",
     ownerUserId: "eng-9",
     ownerGroupId: null,
+    ciId: null,
     actorId: "desk-1",
   };
 

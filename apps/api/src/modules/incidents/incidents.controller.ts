@@ -112,6 +112,14 @@ export class IncidentsController {
     return this.incidentsService.update(id, dto, user, { actorId: user.id, correlationId });
   }
 
+  @Get(":id/possible-duplicates")
+  @ApiOperation({
+    summary: "Other open incidents on the same CI (advisory duplicate warning)",
+  })
+  findPossibleDuplicates(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.incidentsService.findPossibleDuplicates(id, user);
+  }
+
   @Get(":id/transitions")
   listAvailableTransitions(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.incidentsService.getAvailableTransitions(id, user);

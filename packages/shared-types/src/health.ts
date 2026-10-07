@@ -28,6 +28,12 @@ export interface DegradedComponent {
   /** WARNING | CRITICAL | UNKNOWN — healthy components are never listed. */
   health: HealthState;
   detail?: string;
+  /**
+   * The server/device's own overall status rather than a specific part. It
+   * echoes whatever child is failing, so consumers raising per-component
+   * alerts skip it whenever a real component is degraded too.
+   */
+  rollup?: boolean;
 }
 
 export interface PredictiveFailure {

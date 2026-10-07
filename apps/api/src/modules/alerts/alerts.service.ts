@@ -1,11 +1,12 @@
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { OnEvent } from "@nestjs/event-emitter";
 import { normalizeAlertmanagerWebhook } from "@cts-dc-opsdesk/prometheus-adapter";
 import { normalizeSnmpTrap, SnmpNormalizationError } from "@cts-dc-opsdesk/snmp-adapter";
 import {
   AlertNormalizationError as ZabbixNormalizationError,
   normalizeZabbixEvent,
 } from "@cts-dc-opsdesk/zabbix-adapter";
-import { InAppNotificationKind, UserRole } from "@prisma/client";
+import { InAppNotificationKind, Prisma, UserRole } from "@prisma/client";
 import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
@@ -13,6 +14,13 @@ import { AuditService } from "../audit/audit.service";
 import { ChangesService } from "../changes/changes.service";
 import { InboxService } from "../inbox/inbox.service";
 import { levelForAlertSeverity } from "../inbox/notification-sound-rules.service";
+import {
+  INCIDENT_CREATED_EVENT,
+  INCIDENT_UPDATED_EVENT,
+  IncidentCreatedEvent,
+  IncidentUpdatedEvent,
+} from "../incidents/incident-events";
+import { OPEN_STATUSES } from "../incidents/incident-transitions";
 import { IncidentsService } from "../incidents/incidents.service";
 import { AlertRulesService } from "./alert-rules.service";
 import {
@@ -27,6 +35,16 @@ import { IngestAlertDto } from "./dto/ingest-alert.dto";
 import { QueryAlertsDto } from "./dto/query-alerts.dto";
 import { SnmpTrapDto } from "./dto/snmp-trap.dto";
 import { ZabbixWebhookEventDto } from "./dto/zabbix-webhook.dto";
+
+/** What the incident timeline records about a linked alert. */
+type LinkedAlertMeta = {
+  alertType: string;
+  severity: string;
+  source: string;
+  fingerprint: string;
+  summary: string | null;
+  componentKey: string | null;
+};
 
 /** Outcome of an ingestion call. Safe to return to the calling adapter/collector. */
 export interface AlertIngestResult {
@@ -156,6 +174,11 @@ export class AlertsService {
       const updateData = {
         severity: dto.severity,
         state: nextState,
+        // latest wording + source metadata win: a re-delivered alert carries the
+        // freshest reading (e.g. a drive that went from Warning to Critical).
+        summary: dto.summary,
+        componentKey: existing.componentKey ?? dto.componentKey ?? null,
+        details: toAlertDetails(dto.attributes),
         lastSeenAt:
           occurredAt.getTime() > existing.lastSeenAt.getTime() ? occurredAt : existing.lastSeenAt,
         // backfill references if the site / CI became known since first sighting
@@ -208,6 +231,9 @@ export class AlertsService {
             lastSeenAt: occurredAt,
             state: dto.state,
             rawReference: extractRawReference(dto.attributes),
+            summary: dto.summary,
+            componentKey: dto.componentKey ?? null,
+            details: toAlertDetails(dto.attributes),
           },
         });
         await this.audit.record(
@@ -225,6 +251,8 @@ export class AlertsService {
               severity: c.severity,
               siteId: c.siteId,
               ciId: c.ciId,
+              summary: c.summary,
+              componentKey: c.componentKey,
             },
           },
           tx,
@@ -233,6 +261,14 @@ export class AlertsService {
       });
       alertId = created.id;
     }
+
+    // A clear that arrives under its own event id (SNMP: linkUp after
+    // linkDown, an iDRAC "...Normal" / HPE "...Ok" trap) closes the fault it
+    // pairs with — same source + fingerprint (site + CI + type + component).
+    const paired =
+      !existing && dto.state === "RECOVERED"
+        ? await this.recoverPairedAlerts(alertId, fingerprint, dto, occurredAt, actor)
+        : [];
 
     const since = new Date(Date.now() - rule.flappingWindowMinutes * 60_000);
     const recentOccurrences = await this.prisma.alert.count({
@@ -269,6 +305,8 @@ export class AlertsService {
           severity: dto.severity,
           source: dto.source,
           fingerprint,
+          summary: dto.summary,
+          componentKey: dto.componentKey ?? null,
         },
         actor,
       );
@@ -312,6 +350,16 @@ export class AlertsService {
     if (finalState === "RECOVERED" && stateChanged && correlatedIncidentId) {
       await this.notifyAlertRecoveredIfAlreadyClosed(correlatedIncidentId, alertId, dto, actor);
     }
+    for (const fault of paired) {
+      if (fault.correlatedIncidentId) {
+        await this.notifyAlertRecoveredIfAlreadyClosed(
+          fault.correlatedIncidentId,
+          fault.id,
+          dto,
+          actor,
+        );
+      }
+    }
 
     return {
       alertId,
@@ -327,6 +375,53 @@ export class AlertsService {
       correlatedIncidentId,
       incidentCreated,
     };
+  }
+
+  /**
+   * Recovers still-open alerts from the same source with the same fingerprint
+   * as an incoming clear event, auditing each as ALERT_STATE_CHANGED. Returns
+   * what it recovered so correlated incidents can be told the fault cleared.
+   */
+  private async recoverPairedAlerts(
+    clearAlertId: string,
+    fingerprint: string,
+    dto: IngestAlertDto,
+    occurredAt: Date,
+    actor: ActorContext,
+  ): Promise<Array<{ id: string; correlatedIncidentId: string | null }>> {
+    const open = await this.prisma.alert.findMany({
+      where: {
+        id: { not: clearAlertId },
+        source: dto.source,
+        fingerprint,
+        state: { in: ["OPEN", "ACKNOWLEDGED"] },
+      },
+    });
+    for (const fault of open) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.alert.update({
+          where: { id: fault.id },
+          data: {
+            state: "RECOVERED",
+            lastSeenAt:
+              occurredAt.getTime() > fault.lastSeenAt.getTime() ? occurredAt : fault.lastSeenAt,
+          },
+        });
+        await this.audit.record(
+          {
+            actorId: actor.actorId,
+            correlationId: actor.correlationId,
+            entityType: "alert",
+            entityId: fault.id,
+            action: "ALERT_STATE_CHANGED",
+            before: { state: fault.state, severity: fault.severity },
+            after: { state: "RECOVERED", severity: fault.severity, clearedBy: dto.eventId },
+          },
+          tx,
+        );
+      });
+    }
+    return open.map((a) => ({ id: a.id, correlatedIncidentId: a.correlatedIncidentId }));
   }
 
   /**
@@ -355,6 +450,8 @@ export class AlertsService {
             severity: dto.severity,
             source: dto.source,
             fingerprint: ctx.fingerprint,
+            summary: dto.summary,
+            componentKey: dto.componentKey ?? null,
           },
         },
         actor,
@@ -409,7 +506,7 @@ export class AlertsService {
   private async correlateToOpenIncident(
     alertId: string,
     ciId: string,
-    meta: { alertType: string; severity: string; source: string; fingerprint: string },
+    meta: LinkedAlertMeta,
     actor: ActorContext,
   ): Promise<string | null> {
     try {
@@ -431,6 +528,98 @@ export class AlertsService {
         }`,
       );
       return null;
+    }
+  }
+
+  /**
+   * The reverse of ingest-time correlation: an incident that gains a CI —
+   * created with one, or a client-reported ticket Service Desk has just
+   * triaged onto a CI — picks up that CI's alerts that are still live and not
+   * yet attached anywhere (e.g. a WARNING predictive-failure alert that never
+   * auto-opened a ticket, or one that fired before the client called). Same
+   * link-only posture as correlateToOpenIncident: never touches incident
+   * status, honours each alert's rule `autoCorrelateIncidents`, and is fully
+   * best-effort — a failure is logged, never surfaced to the incident write.
+   */
+  @OnEvent(INCIDENT_CREATED_EVENT, { async: true })
+  async onIncidentCreated(event: IncidentCreatedEvent): Promise<void> {
+    if (event.ciId) {
+      await this.backlinkOpenAlerts(event.incidentId, event.ciId, {
+        actorId: event.actorId,
+        correlationId: event.correlationId,
+      });
+    }
+  }
+
+  @OnEvent(INCIDENT_UPDATED_EVENT, { async: true })
+  async onIncidentUpdated(event: IncidentUpdatedEvent): Promise<void> {
+    if (
+      event.ciId &&
+      event.actorId &&
+      OPEN_STATUSES.includes(event.status as (typeof OPEN_STATUSES)[number])
+    ) {
+      await this.backlinkOpenAlerts(event.incidentId, event.ciId, {
+        actorId: event.actorId,
+        correlationId: event.correlationId,
+      });
+    }
+  }
+
+  private async backlinkOpenAlerts(
+    incidentId: string,
+    ciId: string,
+    actor: ActorContext,
+  ): Promise<void> {
+    try {
+      const candidates = await this.prisma.alert.findMany({
+        where: { ciId, correlatedIncidentId: null, state: { in: ["OPEN", "ACKNOWLEDGED"] } },
+        orderBy: { lastSeenAt: "desc" },
+        take: MAX_BACKLINKED_ALERTS,
+      });
+      let linked = 0;
+      for (const alert of candidates) {
+        const rule = await this.alertRules.resolveRule({
+          siteId: alert.siteId,
+          alertType: alert.alertType,
+        });
+        if (!rule.autoCorrelateIncidents) {
+          continue;
+        }
+        // claim first, so a concurrent ingest that correlated this alert
+        // elsewhere in the meantime wins and we don't double-link it
+        const claimed = await this.prisma.alert.updateMany({
+          where: { id: alert.id, correlatedIncidentId: null },
+          data: { correlatedIncidentId: incidentId },
+        });
+        if (claimed.count === 0) {
+          continue;
+        }
+        await this.incidents.linkAlert(
+          incidentId,
+          {
+            id: alert.id,
+            alertType: alert.alertType,
+            severity: alert.severity,
+            source: alert.source,
+            fingerprint: alert.fingerprint,
+            summary: alert.summary,
+            componentKey: alert.componentKey,
+          },
+          actor,
+        );
+        linked += 1;
+      }
+      if (linked > 0) {
+        this.logger.log(
+          `back-linked ${linked} open alert(s) on CI ${ciId} to incident ${incidentId}`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `back-linking open alerts on CI ${ciId} to incident ${incidentId} failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
   }
 
@@ -659,6 +848,32 @@ function reduceAlertState(current: AlertState, incoming: AlertState): AlertState
 function extractRawReference(attributes: Record<string, unknown> | undefined): string | null {
   const ref = attributes?.rawReference;
   return typeof ref === "string" && ref.length > 0 ? ref : null;
+}
+
+/**
+ * Upper bound on the persisted `details` JSON. Adapters only put normalized
+ * metadata in `attributes` (labels, trap varbinds, one degraded component), so
+ * this is a guard against a misbehaving source, not an expected path.
+ */
+const MAX_ALERT_DETAILS_BYTES = 8_192;
+
+/** Bound on how many of a CI's open alerts one incident event back-links —
+ *  a storm on one device must not turn an incident PATCH into a long job. */
+const MAX_BACKLINKED_ALERTS = 200;
+
+/** Normalized source metadata worth keeping on the alert row for diagnosis —
+ *  never telemetry. Oversized payloads keep only their top-level keys. */
+function toAlertDetails(
+  attributes: Record<string, unknown> | undefined,
+): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  if (!attributes || Object.keys(attributes).length === 0) {
+    return Prisma.DbNull;
+  }
+  const json = JSON.stringify(attributes);
+  if (json.length <= MAX_ALERT_DETAILS_BYTES) {
+    return JSON.parse(json) as Prisma.InputJsonValue;
+  }
+  return { truncated: true, keys: Object.keys(attributes) };
 }
 
 function toRejectedAlert(index: number, err: unknown): RejectedAlert {

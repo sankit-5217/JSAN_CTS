@@ -1934,6 +1934,8 @@ describe("IncidentsService incident.created event", () => {
     expect(events.emit).toHaveBeenCalledWith("incident.created", {
       incidentId: result.id,
       siteId: result.siteId,
+      ciId: result.ciId,
+      actorId: "user-1",
       correlationId: "corr-1",
     });
   });
@@ -2454,5 +2456,59 @@ describe("IncidentsService.listEvents for a customer", () => {
     const { service } = makeService({ incidentEventFindMany: jest.fn().mockResolvedValue(events) });
 
     await expect(service.listEvents("incident-1", staff)).resolves.toHaveLength(4);
+  });
+});
+
+describe("IncidentsService.findPossibleDuplicates", () => {
+  const onCi = baseIncident({ ciId: "ci-1" });
+
+  it("lists other open incidents on the same CI and site, oldest first", async () => {
+    const dup = { id: "incident-2", incidentNo: "INC-000002" };
+    const { service, prisma } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(onCi),
+    });
+    (prisma.incident.findMany as jest.Mock).mockResolvedValue([dup]);
+
+    await expect(service.findPossibleDuplicates("incident-1", serviceDesk)).resolves.toEqual([dup]);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { not: "incident-1" },
+          ciId: "ci-1",
+          siteId: "site-a",
+        }),
+        orderBy: { createdAt: "asc" },
+      }),
+    );
+  });
+
+  it("returns nothing for an incident with no CI or one that is already resolved", async () => {
+    for (const incident of [baseIncident(), baseIncident({ ciId: "ci-1", status: "RESOLVED" })]) {
+      const { service, prisma } = makeService({
+        incidentFindUnique: jest.fn().mockResolvedValue(incident),
+      });
+      await expect(service.findPossibleDuplicates("incident-1", serviceDesk)).resolves.toEqual([]);
+      expect(prisma.incident.findMany).not.toHaveBeenCalled();
+    }
+  });
+
+  it("never shows a client other reporters' tickets", async () => {
+    const { service, prisma } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ ciId: "ci-1", reportedByUserId: clientViewer.id })),
+    });
+    await expect(service.findPossibleDuplicates("incident-1", clientViewer)).resolves.toEqual([]);
+    expect(prisma.incident.findMany).not.toHaveBeenCalled();
+  });
+
+  it("limits a Site Engineer to incidents they could see in their own list", async () => {
+    const { service, prisma } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ ciId: "ci-1", ownerUserId: engineer.id })),
+    });
+    await service.findPossibleDuplicates("incident-1", engineer);
+    expect((prisma.incident.findMany as jest.Mock).mock.calls[0][0].where.AND).toBeDefined();
   });
 });

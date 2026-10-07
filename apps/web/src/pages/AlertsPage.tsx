@@ -33,6 +33,8 @@ interface AlertRow {
   severity: string;
   state: string;
   fingerprint: string;
+  summary: string | null;
+  componentKey: string | null;
   lastSeenAt: string;
   correlatedIncidentId: string | null;
 }
@@ -165,6 +167,12 @@ export function AlertsPage() {
                   <Link component={RouterLink} to={`/alerts/${a.id}`}>
                     {a.alertType}
                   </Link>
+                  {(a.componentKey || a.summary) && (
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      {a.componentKey ? `${a.componentKey} · ` : ""}
+                      {a.summary}
+                    </Typography>
+                  )}
                 </TableCell>
                 <TableCell>{a.source}</TableCell>
                 <TableCell>

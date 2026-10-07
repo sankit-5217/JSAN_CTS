@@ -144,6 +144,17 @@ function describeRoutingEvent(e: IncidentEvent): string | null {
   }
 }
 
+/** Plain-language line for an ALERT_LINKED timeline entry — what broke, not
+ *  just the alert type. */
+function describeAlertLinkedEvent(e: IncidentEvent): string | null {
+  if (e.eventType !== "ALERT_LINKED") return null;
+  const p = e.payload;
+  const what = typeof p.summary === "string" && p.summary ? p.summary : String(p.alertType ?? "");
+  const component =
+    typeof p.componentKey === "string" && p.componentKey ? ` [${p.componentKey}]` : "";
+  return `${String(p.severity ?? "")} ${String(p.source ?? "")} alert linked: ${what}${component}`;
+}
+
 interface Comment {
   id: string;
   authorId: string;
@@ -204,7 +215,19 @@ interface LinkedAlert {
   alertType: string;
   severity: string;
   state: string;
+  summary: string | null;
+  componentKey: string | null;
   lastSeenAt: string;
+}
+
+/** Another open incident on the same CI (GET /incidents/:id/possible-duplicates). */
+interface PossibleDuplicate {
+  id: string;
+  incidentNo: string;
+  shortDescription: string;
+  status: string;
+  priority: string;
+  createdAt: string;
 }
 
 const PRIORITY_COLOR: Record<string, "error" | "warning" | "info" | "default"> = {
@@ -855,6 +878,7 @@ export function IncidentDetailPage() {
   const [availableTransitions, setAvailableTransitions] = useState<AvailableTransition[]>([]);
   const [vendorCases, setVendorCases] = useState<VendorCase[]>([]);
   const [linkedAlerts, setLinkedAlerts] = useState<LinkedAlert[]>([]);
+  const [possibleDuplicates, setPossibleDuplicates] = useState<PossibleDuplicate[]>([]);
   const [customerProgress, setCustomerProgress] = useState<CustomerProgress | null>(null);
   const [supportGroups, setSupportGroups] = useState<GroupOption[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -913,6 +937,15 @@ export function IncidentDetailPage() {
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  // Advisory only, so it loads on its own: a failure here must not take the
+  // rest of the page down. Re-checked when the CI or status changes.
+  useEffect(() => {
+    if (!id) return;
+    apiGet<PossibleDuplicate[]>(`/incidents/${id}/possible-duplicates`)
+      .then(setPossibleDuplicates)
+      .catch(() => setPossibleDuplicates([]));
+  }, [id, incident?.ciId, incident?.status]);
 
   // Live timeline (plan Decision: polling, not a WebSocket gateway — no
   // real-time transport exists anywhere in this codebase yet, and polling
@@ -1177,6 +1210,22 @@ export function IncidentDetailPage() {
   return (
     <Box>
       <CustomerStatusBanner incident={incident} progress={customerProgress} />
+      {possibleDuplicates.length > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Possible duplicate: this CI already has{" "}
+          {possibleDuplicates.length === 1 ? "another open incident" : "other open incidents"}{" "}
+          {possibleDuplicates.map((d, i) => (
+            <span key={d.id}>
+              {i > 0 && ", "}
+              <Link component={RouterLink} to={`/incidents/${d.id}`}>
+                {d.incidentNo}
+              </Link>{" "}
+              ({d.priority}, {d.status}: {d.shortDescription})
+            </span>
+          ))}
+          . Check whether it's the same fault before working both.
+        </Alert>
+      )}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Stack
@@ -1672,9 +1721,9 @@ export function IncidentDetailPage() {
               Linked alerts
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Monitoring alerts the ingestion pipeline correlated to this ticket automatically — no
-              manual step. New alerts on the same CI appear here as soon as the next poll picks them
-              up.
+              Monitoring alerts on this ticket's CI, linked automatically — including ones that were
+              already open when the ticket was raised or its CI was set. New alerts on the same CI
+              appear here as soon as the next poll picks them up.
             </Typography>
             <Stack spacing={1.5}>
               {linkedAlerts.map((a) => (
@@ -1695,6 +1744,17 @@ export function IncidentDetailPage() {
                       color={a.state === "RECOVERED" ? "default" : "warning"}
                     />
                   </Stack>
+                  {(a.summary || a.componentKey) && (
+                    <Typography variant="body2" display="block" sx={{ mt: 0.5 }}>
+                      {a.summary}
+                      {a.componentKey && (
+                        <Typography component="span" variant="body2" color="text.secondary">
+                          {" "}
+                          · {a.componentKey}
+                        </Typography>
+                      )}
+                    </Typography>
+                  )}
                   <Typography variant="caption" color="text.secondary" display="block">
                     {a.source} · last seen {new Date(a.lastSeenAt).toLocaleString()}
                   </Typography>
@@ -1826,7 +1886,9 @@ export function IncidentDetailPage() {
                     <strong>{e.eventType}</strong> — {new Date(e.createdAt).toLocaleString()}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {describeRoutingEvent(e) ?? JSON.stringify(e.payload)}
+                    {describeRoutingEvent(e) ??
+                      describeAlertLinkedEvent(e) ??
+                      JSON.stringify(e.payload)}
                   </Typography>
                   <Divider sx={{ mt: 1 }} />
                 </Box>

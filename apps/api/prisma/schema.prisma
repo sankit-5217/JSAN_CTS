@@ -684,6 +684,13 @@ model HealthSnapshot {
   // bad polls update the same alert row and the eventual HEALTHY poll close it,
   // instead of a fresh alert per poll.
   openAlertEventId String?   @map("open_alert_event_id")
+  // Per-component hardware alerts currently open for this CI, keyed by the
+  // alert's componentKey: { [componentKey]: { eventId, alertType } }. Each
+  // degraded drive / PSU / fan gets its own alert that opens and recovers
+  // independently (MonitoringService.syncComponentAlerts). Supersedes the
+  // single rollup `openAlertEventId`, which is only read to close a legacy
+  // rollup alert left open from before this column existed.
+  openAlerts       Json?     @map("open_alerts")
 
   ci ConfigurationItem @relation(fields: [ciId], references: [id])
 
@@ -871,6 +878,14 @@ model Alert {
   lastSeenAt           DateTime      @map("last_seen_at")
   state                AlertState    @default(OPEN)
   rawReference         String?       @map("raw_reference") // pointer, not unlimited raw payload storage
+  // What the engineer needs to diagnose without leaving the portal: the
+  // adapter's one-line summary, the failing sub-component (e.g. a drive bay or
+  // interface — also part of the fingerprint) and a size-capped copy of the
+  // normalized source metadata (labels, trap varbinds, degraded list). Never
+  // time-series or log bodies — those stay in Zabbix/Prometheus/Loki.
+  summary              String?       @db.VarChar(500)
+  componentKey         String?       @map("component_key") @db.VarChar(128)
+  details              Json?
   // Set once when the alert is attached to a still-open incident on the same CI
   // (spec §10.10). Scalar, no FK relation: the incidents module owns that table,
   // correlation only reads it. Link-only — correlation never opens or mutates a

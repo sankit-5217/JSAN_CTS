@@ -1,5 +1,6 @@
 import type { NormalizedAlertPayload } from "@cts-dc-opsdesk/shared-types";
 import type { SnmpTrap, SnmpTrapVarbind } from "./types";
+import { classifyVendorTrap } from "./vendor-traps";
 
 /** Thrown when an SNMP trap cannot be mapped onto the OpsDesk alert contract. */
 export class SnmpNormalizationError extends Error {
@@ -159,9 +160,11 @@ function varbindMap(varbinds: SnmpTrapVarbind[]): Record<string, unknown> {
 /**
  * Normalize one parsed SNMP trap into the OpsDesk alert contract. Pure and
  * deterministic — no I/O, no MIB loading. Recognises the standard SNMPv2-MIB
- * traps and synthesises the OID for a raw SNMPv1 trap (RFC 3584); every other
- * trap becomes `snmp.<trapName|last OID arcs>` at `WARNING` unless the collector
- * supplied `severity` / `clears`. Throws {@link SnmpNormalizationError} when a
+ * traps, Dell iDRAC / HPE hardware-fault traps (vendor-traps.ts — e.g. a
+ * failed physical disk becomes `hardware.drive_fault` CRITICAL keyed by the
+ * drive), and synthesises the OID for a raw SNMPv1 trap (RFC 3584); every other
+ * trap becomes `snmp.<trapName|last OID arcs>` at `WARNING`. A collector-supplied
+ * `severity` / `clears` always wins. Throws {@link SnmpNormalizationError} when a
  * required field is absent; the caller decides drop vs dead-letter.
  *
  * `eventId` is occurrence-unique (retransmits of the same trap dedupe);
@@ -197,19 +200,29 @@ export function normalizeSnmpTrap(trap: SnmpTrap): NormalizedAlertPayload {
   const known = KNOWN_TRAPS[trapOid];
   const varbinds = trap.varbinds ?? [];
 
-  const componentKey = extractComponentKey(varbinds, known?.component);
-  const alertType = known?.alertType ?? genericAlertType(trap, trapOid);
-  const severity: Severity = trap.severity ?? known?.severity ?? "WARNING";
-  const state: State = trap.clears ? "RECOVERED" : (known?.state ?? "OPEN");
+  const vendor = known ? undefined : classifyVendorTrap(trapOid, varbinds);
+
+  const componentKey =
+    vendor?.componentKey?.slice(0, 128) ?? extractComponentKey(varbinds, known?.component);
+  const alertType = known?.alertType ?? vendor?.alertType ?? genericAlertType(trap, trapOid);
+  const severity: Severity = trap.severity ?? known?.severity ?? vendor?.severity ?? "WARNING";
+  const state: State = trap.clears ? "RECOVERED" : (known?.state ?? vendor?.state ?? "OPEN");
 
   const occurrenceKey =
     trap.sysUpTimeTicks != null ? String(trap.sysUpTimeTicks) : String(Date.parse(occurredAt));
   const eventId = `snmp-${slug(ciCode)}-${slug(alertType)}-${slug(componentKey ?? "device")}-${occurrenceKey}`;
 
-  const label = trap.trapName?.trim() || known?.alertType || `SNMP trap ${trapOid}`;
-  const summary = [label, componentKey ? `on ${componentKey}` : "", `from ${agentAddress}`]
+  const label =
+    trap.trapName?.trim() || known?.alertType || vendor?.trapName || `SNMP trap ${trapOid}`;
+  const summary = [
+    label,
+    componentKey ? `on ${componentKey}` : "",
+    vendor?.detail ? `— ${vendor.detail}` : "",
+    `from ${agentAddress}`,
+  ]
     .filter(Boolean)
-    .join(" ");
+    .join(" ")
+    .slice(0, 500);
 
   return {
     eventId,
@@ -224,7 +237,8 @@ export function normalizeSnmpTrap(trap: SnmpTrap): NormalizedAlertPayload {
     summary,
     attributes: {
       trapOid,
-      trapName: trap.trapName,
+      trapName: trap.trapName ?? vendor?.trapName,
+      vendor: vendor?.vendor,
       snmpVersion: trap.version,
       agentAddress,
       sysUpTimeTicks: trap.sysUpTimeTicks,

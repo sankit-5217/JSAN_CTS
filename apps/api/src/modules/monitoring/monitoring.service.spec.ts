@@ -122,87 +122,234 @@ describe("MonitoringService", () => {
       );
     });
 
-    it("raises a hardware.health_degraded alert with a fresh eventId on first bad reading", async () => {
+    const DISK1 = "DRIVE:Disk 1";
+    const DISK1_KEY = `hardware.drive_degraded|${DISK1}`;
+    const PSU2_KEY = "hardware.power_supply_degraded|POWER_SUPPLY:PSU 2";
+    const openDisk = (eventId: string) => ({
+      [DISK1_KEY]: {
+        eventId,
+        alertType: "hardware.drive_degraded",
+        componentKey: DISK1,
+        kind: "DRIVE",
+      },
+    });
+
+    it("raises one alert per failing component, each with its componentKey and a fresh eventId", async () => {
       prisma.healthSnapshot.findUnique.mockResolvedValue(null);
 
-      await service.recordSnapshots([snapshot({ overallHealth: "CRITICAL" })], ACTOR);
+      await service.recordSnapshots(
+        [
+          snapshot({
+            overallHealth: "CRITICAL",
+            degraded: [
+              { kind: "SYSTEM", name: "System", health: "CRITICAL", rollup: true },
+              { kind: "DRIVE", name: "Disk 1", health: "CRITICAL", detail: "HDD" },
+            ],
+            predictiveFailures: [],
+          }),
+        ],
+        ACTOR,
+      );
 
+      // the System rollup echoes the drive — only the drive gets an alert
       expect(alerts.ingest).toHaveBeenCalledTimes(1);
       const [payload] = alerts.ingest.mock.calls[0];
       expect(payload).toMatchObject({
         source: "REDFISH",
         siteCode: "SITE01",
         ciCode: "SITE01-R01-SRV-040",
-        alertType: "hardware.health_degraded",
+        alertType: "hardware.drive_degraded",
+        componentKey: DISK1,
         severity: "CRITICAL",
         state: "OPEN",
+        summary: "Drive Disk 1 CRITICAL — HDD",
       });
-      expect(typeof payload.eventId).toBe("string");
       expect(payload.eventId.length).toBeGreaterThan(0);
 
       const upsertArgs = prisma.healthSnapshot.upsert.mock.calls[0][0];
-      expect(upsertArgs.create.openAlertEventId).toBe(payload.eventId);
+      expect(upsertArgs.create.openAlerts).toEqual(openDisk(payload.eventId));
     });
 
-    it("reuses the same eventId on a repeated bad reading instead of opening a new alert", async () => {
-      prisma.healthSnapshot.findUnique.mockResolvedValue({ openAlertEventId: "episode-1" });
+    it("raises a degraded drive and its predictive failure as separate alerts", async () => {
+      prisma.healthSnapshot.findUnique.mockResolvedValue(null);
 
-      await service.recordSnapshots([snapshot({ overallHealth: "WARNING" })], ACTOR);
+      await service.recordSnapshots([snapshot()], ACTOR);
+
+      expect(alerts.ingest.mock.calls.map(([p]) => p.alertType)).toEqual([
+        "hardware.drive_degraded",
+        "hardware.drive_predictive_failure",
+      ]);
+    });
+
+    it("does not raise the rollup when only a predictive failure is named", async () => {
+      prisma.healthSnapshot.findUnique.mockResolvedValue(null);
+
+      await service.recordSnapshots(
+        [
+          snapshot({
+            degraded: [{ kind: "SYSTEM", name: "System", health: "WARNING", rollup: true }],
+          }),
+        ],
+        ACTOR,
+      );
+
+      expect(alerts.ingest.mock.calls.map(([p]) => p.alertType)).toEqual([
+        "hardware.drive_predictive_failure",
+      ]);
+    });
+
+    it("uses the server-level fallback when the rollup is the only degraded entry", async () => {
+      prisma.healthSnapshot.findUnique.mockResolvedValue(null);
+
+      await service.recordSnapshots(
+        [
+          snapshot({
+            overallHealth: "CRITICAL",
+            degraded: [{ kind: "SYSTEM", name: "System", health: "CRITICAL", rollup: true }],
+            predictiveFailures: [],
+          }),
+        ],
+        ACTOR,
+      );
 
       expect(alerts.ingest).toHaveBeenCalledTimes(1);
-      const [payload] = alerts.ingest.mock.calls[0];
-      expect(payload.eventId).toBe("episode-1");
-      expect(payload.state).toBe("OPEN");
-
-      const upsertArgs = prisma.healthSnapshot.upsert.mock.calls[0][0];
-      expect(upsertArgs.create.openAlertEventId).toBe("episode-1");
+      expect(alerts.ingest.mock.calls[0][0]).toMatchObject({
+        alertType: "hardware.health_degraded",
+        componentKey: "SYSTEM",
+        severity: "CRITICAL",
+      });
     });
 
-    it("recovers the alert under the same eventId, keeping its last severity, when health returns to HEALTHY", async () => {
-      prisma.healthSnapshot.findUnique.mockResolvedValue({ openAlertEventId: "episode-1" });
+    it("falls back to a server-level alert when no specific part is named", async () => {
+      prisma.healthSnapshot.findUnique.mockResolvedValue(null);
+
+      await service.recordSnapshots(
+        [snapshot({ overallHealth: "WARNING", degraded: [], predictiveFailures: [] })],
+        ACTOR,
+      );
+
+      expect(alerts.ingest).toHaveBeenCalledTimes(1);
+      expect(alerts.ingest.mock.calls[0][0]).toMatchObject({
+        alertType: "hardware.health_degraded",
+        componentKey: "SYSTEM",
+        severity: "WARNING",
+      });
+    });
+
+    it("reuses the component's eventId on a repeated bad reading instead of opening a new alert", async () => {
+      prisma.healthSnapshot.findUnique.mockResolvedValue({ openAlerts: openDisk("episode-1") });
+
+      await service.recordSnapshots([snapshot({ predictiveFailures: [] })], ACTOR);
+
+      expect(alerts.ingest).toHaveBeenCalledTimes(1);
+      expect(alerts.ingest.mock.calls[0][0]).toMatchObject({ eventId: "episode-1", state: "OPEN" });
+    });
+
+    it("recovers only the component that went healthy, keeping its last severity", async () => {
+      prisma.healthSnapshot.findUnique.mockResolvedValue({
+        openAlerts: {
+          ...openDisk("disk-episode"),
+          [PSU2_KEY]: {
+            eventId: "psu-episode",
+            alertType: "hardware.power_supply_degraded",
+            componentKey: "POWER_SUPPLY:PSU 2",
+            kind: "POWER_SUPPLY",
+          },
+        },
+      });
       prisma.alert.findUnique.mockResolvedValue({ severity: "CRITICAL" });
 
       await service.recordSnapshots(
-        [snapshot({ overallHealth: "HEALTHY", degraded: [] })],
+        [
+          snapshot({
+            overallHealth: "CRITICAL",
+            degraded: [{ kind: "POWER_SUPPLY", name: "PSU 2", health: "CRITICAL" }],
+            predictiveFailures: [],
+          }),
+        ],
+        ACTOR,
+      );
+
+      expect(alerts.ingest.mock.calls.map(([p]) => p)).toEqual([
+        expect.objectContaining({ eventId: "psu-episode", state: "OPEN" }),
+        expect.objectContaining({
+          eventId: "disk-episode",
+          state: "RECOVERED",
+          severity: "CRITICAL",
+          componentKey: DISK1,
+        }),
+      ]);
+      const upsertArgs = prisma.healthSnapshot.upsert.mock.calls[0][0];
+      expect(Object.keys(upsertArgs.update.openAlerts)).toEqual([PSU2_KEY]);
+    });
+
+    it("keeps a drive alert open when this poll could not read any drives", async () => {
+      prisma.healthSnapshot.findUnique.mockResolvedValue({ openAlerts: openDisk("disk-episode") });
+
+      await service.recordSnapshots(
+        [
+          snapshot({
+            overallHealth: "HEALTHY",
+            degraded: [],
+            predictiveFailures: [],
+            summary: {
+              drives: { total: 0, healthy: 0, predictedFailure: 0 },
+              fans: { total: 4, healthy: 4 },
+              powerSupplies: { total: 2, healthy: 2 },
+            },
+          }),
+        ],
+        ACTOR,
+      );
+
+      expect(alerts.ingest).not.toHaveBeenCalled();
+      expect(prisma.healthSnapshot.upsert.mock.calls[0][0].update.openAlerts).toEqual(
+        openDisk("disk-episode"),
+      );
+    });
+
+    it("does not touch alerts for an UNKNOWN reading with nothing open", async () => {
+      prisma.healthSnapshot.findUnique.mockResolvedValue(null);
+
+      await service.recordSnapshots([snapshot({ overallHealth: "UNKNOWN", degraded: [] })], ACTOR);
+
+      expect(alerts.ingest).not.toHaveBeenCalled();
+      expect(prisma.healthSnapshot.upsert.mock.calls[0][0].create.openAlerts).toEqual({});
+    });
+
+    it("carries open alerts (and a legacy rollup episode) forward through an UNKNOWN reading", async () => {
+      prisma.healthSnapshot.findUnique.mockResolvedValue({
+        openAlerts: openDisk("disk-episode"),
+        openAlertEventId: "legacy-episode",
+      });
+
+      await service.recordSnapshots([snapshot({ overallHealth: "UNKNOWN", degraded: [] })], ACTOR);
+
+      expect(alerts.ingest).not.toHaveBeenCalled();
+      const upsertArgs = prisma.healthSnapshot.upsert.mock.calls[0][0];
+      expect(upsertArgs.update.openAlerts).toEqual(openDisk("disk-episode"));
+      expect(upsertArgs.update.openAlertEventId).toBe("legacy-episode");
+    });
+
+    it("closes a legacy rollup alert on the first decisive reading", async () => {
+      prisma.healthSnapshot.findUnique.mockResolvedValue({ openAlertEventId: "legacy-episode" });
+      prisma.alert.findUnique.mockResolvedValue({ severity: "HIGH" });
+
+      await service.recordSnapshots(
+        [snapshot({ overallHealth: "HEALTHY", degraded: [], predictiveFailures: [] })],
         ACTOR,
       );
 
       expect(alerts.ingest).toHaveBeenCalledTimes(1);
       const [payload] = alerts.ingest.mock.calls[0];
       expect(payload).toMatchObject({
-        eventId: "episode-1",
+        eventId: "legacy-episode",
+        alertType: "hardware.health_degraded",
         state: "RECOVERED",
-        severity: "CRITICAL",
+        severity: "HIGH",
       });
-
-      const upsertArgs = prisma.healthSnapshot.upsert.mock.calls[0][0];
-      expect(upsertArgs.create.openAlertEventId).toBeNull();
-    });
-
-    it("does not touch alerts for an UNKNOWN reading with no open episode", async () => {
-      prisma.healthSnapshot.findUnique.mockResolvedValue(null);
-
-      await service.recordSnapshots(
-        [snapshot({ overallHealth: "UNKNOWN", degraded: [] })],
-        ACTOR,
-      );
-
-      expect(alerts.ingest).not.toHaveBeenCalled();
-      const upsertArgs = prisma.healthSnapshot.upsert.mock.calls[0][0];
-      expect(upsertArgs.create.openAlertEventId).toBeNull();
-    });
-
-    it("carries an open episode forward through an UNKNOWN reading without recovering it", async () => {
-      prisma.healthSnapshot.findUnique.mockResolvedValue({ openAlertEventId: "episode-1" });
-
-      await service.recordSnapshots(
-        [snapshot({ overallHealth: "UNKNOWN", degraded: [] })],
-        ACTOR,
-      );
-
-      expect(alerts.ingest).not.toHaveBeenCalled();
-      const upsertArgs = prisma.healthSnapshot.upsert.mock.calls[0][0];
-      expect(upsertArgs.create.openAlertEventId).toBe("episode-1");
+      expect(payload.componentKey).toBeUndefined();
+      expect(prisma.healthSnapshot.upsert.mock.calls[0][0].update.openAlertEventId).toBeNull();
     });
 
     it("never fails the snapshot write when the alert sync throws", async () => {
