@@ -101,7 +101,8 @@ function main(): void {
       if (r.failed.length > 0) {
         // eslint-disable-next-line no-console
         console.warn(
-          `[collector] health poll: ${r.enqueued}/${r.polled} enqueued, ${r.failed.length} failed`,
+          `[collector] health poll: ${r.enqueued}/${r.polled} enqueued, ${r.failed.length} failed: ` +
+            r.failed.map((f) => `${f.ciCode} (${f.reason})`).join("; "),
         );
       }
     });

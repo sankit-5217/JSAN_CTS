@@ -18,3 +18,5 @@ redis-data/
 apps/collector/*.local.json
 apps/collector/.buffer/
 infra/monitoring/local/secrets/
+tools/site-lab/secrets/
+tools/site-lab/.run/

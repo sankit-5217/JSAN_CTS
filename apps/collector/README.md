@@ -53,9 +53,10 @@ still missing is packaging/tooling around it, not collector logic itself:
   `worker.Dockerfile`, but nothing runs it automatically yet.
 - `EnvCredentialResolver` is a dev/default backing only — a real deployment
   needs a vault-backed `CredentialResolver`.
-- No hardware simulator, so local testing without real Redfish/OME/iLO gear
-  exercises everything except a successful health-snapshot delivery (the poll
-  loop fails per-endpoint gracefully — logged, not fatal — see below).
+- Hardware simulators live in `tools/site-lab` (iDRAC + iLO Redfish, vendor
+  SNMP traps, control panel). `tools/site-lab/start-site-lab.ps1` runs this
+  collector end to end against them; see that README. Dell OME has no
+  simulator yet.
 
 ## Config shape
 

@@ -10,7 +10,8 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "integrations/*"
+    "integrations/*",
+    "tools/*"
   ],
   "scripts": {
     "dev:api": "pnpm --filter @cts-dc-opsdesk/api start:dev",
@@ -18,6 +19,7 @@
     "dev:worker": "pnpm --filter @cts-dc-opsdesk/worker start:dev",
     "dev:collector": "pnpm --filter @cts-dc-opsdesk/collector start:dev",
     "dev:tls-proxy": "node scripts/dev-tls-proxy.mjs",
+    "dev:site-lab": "pnpm --filter @cts-dc-opsdesk/site-lab build && pnpm --filter @cts-dc-opsdesk/site-lab start",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
