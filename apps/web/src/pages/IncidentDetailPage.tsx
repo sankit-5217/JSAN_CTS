@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import {
   Alert,
@@ -40,6 +40,13 @@ import TimerOutlinedIcon from "@mui/icons-material/TimerOutlined";
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload, getStoredToken } from "../api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "../api/jwt";
 import { severityColors } from "../theme/theme";
+import {
+  allSubComponents,
+  labelFor,
+  parseCcList,
+  subComponentsFor,
+  type IssueCatalog,
+} from "./client/issueReporting";
 
 const pulse = keyframes`
   0%, 100% { opacity: 1; }
@@ -96,6 +103,16 @@ interface Incident {
   closedAt: string | null;
   reportedByUserId: string | null;
   createdAt: string;
+  // "Report an issue" template fields — catalog values, labelled via
+  // GET /issue-reporting/catalog (see client/issueReporting.ts).
+  description: string | null;
+  issueType: string | null;
+  severity: string | null;
+  component: string | null;
+  subComponent: string | null;
+  tool: string | null;
+  refIncidentNo: string | null;
+  ccEmails: string[];
 }
 
 /** GET /incidents/:id/progress: the customer side of the ticket. */
@@ -317,6 +334,134 @@ function EngineerPicker({
  * has no query params at all) — client-side filtering is enough, no search
  * round-trip needed. `options` is fetched once at the page level and shared
  * by every instance instead of each picker re-fetching the same list. */
+/** A select over one of the issue catalog's pick-lists, with "none". */
+function CatalogSelect({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  options: { id: string; value: string; label: string }[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  // A stored value no longer in the active catalog still shows, so saving
+  // another field doesn't silently drop it.
+  const stale = value && !options.some((o) => o.value === value);
+  return (
+    <TextField
+      select
+      label={label}
+      size="small"
+      fullWidth
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+    >
+      <MenuItem value="">
+        <em>None</em>
+      </MenuItem>
+      {stale && (
+        <MenuItem value={value}>
+          {value} <em style={{ marginLeft: 6 }}>(retired)</em>
+        </MenuItem>
+      )}
+      {options.map((o) => (
+        <MenuItem key={o.id} value={o.value}>
+          {o.label}
+        </MenuItem>
+      ))}
+    </TextField>
+  );
+}
+
+/**
+ * The "Report an issue" sheet as the reporter filled it in: description,
+ * classification, reporter, ref bug and CC list. Only renders rows that
+ * have a value, so an alert- or staff-created ticket adds nothing here.
+ */
+function ReportSheet({
+  incident,
+  catalog,
+  reporter,
+}: {
+  incident: Incident;
+  catalog: IssueCatalog | null;
+  reporter: EngineerOption | null;
+}) {
+  const label = (options: { id: string; value: string; label: string }[] | undefined, v: string) =>
+    catalog && options ? labelFor(options, v) : v;
+  const rows: [string, ReactNode][] = [];
+  if (reporter) rows.push(["Reporter", `${reporter.displayName} <${reporter.email}>`]);
+  if (incident.issueType) rows.push(["Issue type", label(catalog?.issueTypes, incident.issueType)]);
+  if (incident.severity) rows.push(["Severity", label(catalog?.severities, incident.severity)]);
+  if (incident.component || incident.subComponent) {
+    const component = incident.component ? label(catalog?.components, incident.component) : "";
+    const sub = incident.subComponent
+      ? label(catalog ? allSubComponents(catalog) : undefined, incident.subComponent)
+      : "";
+    rows.push(["Component", [component, sub].filter(Boolean).join(" › ")]);
+  }
+  if (incident.tool) rows.push(["Tool", label(catalog?.tools, incident.tool)]);
+  if (incident.refIncidentNo) {
+    rows.push([
+      "Ref Bug ID",
+      <Link
+        key="ref"
+        component={RouterLink}
+        to={`/incidents?q=${encodeURIComponent(incident.refIncidentNo)}`}
+      >
+        {incident.refIncidentNo}
+      </Link>,
+    ]);
+  }
+  if (incident.ccEmails?.length) rows.push(["CC", incident.ccEmails.join(", ")]);
+  if (rows.length === 0 && !incident.description) return null;
+  return (
+    <Box sx={{ my: 1.5 }}>
+      {incident.description && (
+        <Typography
+          variant="body2"
+          sx={{
+            whiteSpace: "pre-wrap",
+            overflowWrap: "anywhere",
+            p: 1.5,
+            mb: 1,
+            borderRadius: 1,
+            bgcolor: "action.hover",
+          }}
+        >
+          {incident.description}
+        </Typography>
+      )}
+      {rows.length > 0 && (
+        <Box
+          component="dl"
+          sx={{
+            m: 0,
+            display: "grid",
+            gridTemplateColumns: "max-content 1fr",
+            columnGap: 2,
+            rowGap: 0.25,
+            "& dt": { fontWeight: 600, fontSize: 13, color: "text.secondary" },
+            "& dd": { m: 0, fontSize: 13, overflowWrap: "anywhere" },
+          }}
+        >
+          {rows.map(([k, v]) => (
+            <Fragment key={k}>
+              <dt>{k}</dt>
+              <dd>{v}</dd>
+            </Fragment>
+          ))}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 function GroupPicker({
   options,
   value,
@@ -881,8 +1026,29 @@ export function IncidentDetailPage() {
   const [possibleDuplicates, setPossibleDuplicates] = useState<PossibleDuplicate[]>([]);
   const [customerProgress, setCustomerProgress] = useState<CustomerProgress | null>(null);
   const [supportGroups, setSupportGroups] = useState<GroupOption[]>([]);
+  const [catalog, setCatalog] = useState<IssueCatalog | null>(null);
+  const [reporter, setReporter] = useState<EngineerOption | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // The "Report an issue" pick-lists, for labelling the stored values and
+  // for the edit form's selects. Advisory: raw values still render without it.
+  useEffect(() => {
+    apiGet<IssueCatalog>("/issue-reporting/catalog")
+      .then(setCatalog)
+      .catch(() => undefined);
+  }, []);
+
+  // Who reported it (the template's "Reporter" row), for self-service tickets.
+  useEffect(() => {
+    if (!incident?.reportedByUserId) {
+      setReporter(null);
+      return;
+    }
+    apiGet<EngineerOption>(`/users/${incident.reportedByUserId}`)
+      .then(setReporter)
+      .catch(() => setReporter(null));
+  }, [incident?.reportedByUserId]);
 
   // Fetched once, not per-incident — the whole app shares one support-group
   // register (GET /support-groups isn't site-scoped, see support-groups.controller.ts).
@@ -982,6 +1148,15 @@ export function IncidentDetailPage() {
   const [editPriorityChangeReason, setEditPriorityChangeReason] = useState("");
   const [editOwnerUser, setEditOwnerUser] = useState<EngineerOption | null>(null);
   const [editOwnerGroup, setEditOwnerGroup] = useState<GroupOption | null>(null);
+  // The "Report an issue" template fields.
+  const [editDescription, setEditDescription] = useState("");
+  const [editIssueType, setEditIssueType] = useState("");
+  const [editSeverity, setEditSeverity] = useState("");
+  const [editComponent, setEditComponent] = useState("");
+  const [editSubComponent, setEditSubComponent] = useState("");
+  const [editTool, setEditTool] = useState("");
+  const [editRefIncidentNo, setEditRefIncidentNo] = useState("");
+  const [editCcText, setEditCcText] = useState("");
   const [ciQuery, setCiQuery] = useState("");
   const [ciOptions, setCiOptions] = useState<CiOption[]>([]);
   const [selectedCi, setSelectedCi] = useState<CiOption | null>(null);
@@ -994,6 +1169,14 @@ export function IncidentDetailPage() {
     setEditUrgency(incident.urgency);
     setEditPriority(incident.priority);
     setEditPriorityChangeReason("");
+    setEditDescription(incident.description ?? "");
+    setEditIssueType(incident.issueType ?? "");
+    setEditSeverity(incident.severity ?? "");
+    setEditComponent(incident.component ?? "");
+    setEditSubComponent(incident.subComponent ?? "");
+    setEditTool(incident.tool ?? "");
+    setEditRefIncidentNo(incident.refIncidentNo ?? "");
+    setEditCcText((incident.ccEmails ?? []).join(", "));
     // The incident only carries owner/CI ids, not readable names — resolve
     // each to show a name instead of a raw UUID. Not `refetch`'s problem to
     // fold in: this only needs to happen once per incident, same as
@@ -1039,15 +1222,30 @@ export function IncidentDetailPage() {
 
   const priorityChanged = incident !== null && editPriority !== incident.priority;
 
+  const editCc = parseCcList(editCcText);
+
   const submitEdit = async () => {
     if (!id) return;
     setActionError(null);
+    if (editCc.invalid.length > 0) {
+      setActionError(`CC list: not an email address: ${editCc.invalid.join(", ")}`);
+      return;
+    }
     try {
       await apiPatch(`/incidents/${id}`, {
         shortDescription: editShortDescription,
         category: editCategory,
         impact: editImpact,
         urgency: editUrgency,
+        description: editDescription.trim() || undefined,
+        issueType: editIssueType || undefined,
+        severity: editSeverity || undefined,
+        component: editComponent || undefined,
+        subComponent: editSubComponent || undefined,
+        tool: editTool || undefined,
+        // "" clears the reference; undefined would leave it untouched.
+        refIncidentNo: editRefIncidentNo.trim(),
+        ccEmails: editCc.emails,
         // The backend requires priorityChangeReason whenever `priority` is
         // present in the body at all (spec §16), not just when it differs
         // from the current value — so only include the key when it's
@@ -1266,6 +1464,7 @@ export function IncidentDetailPage() {
           <Typography variant="body2" color="text.secondary">
             {incident.category} · impact {incident.impact} · urgency {incident.urgency}
           </Typography>
+          <ReportSheet incident={incident} catalog={catalog} reporter={reporter} />
           <Typography variant="body2" color="text.secondary">
             Owner: {editOwnerUser?.displayName ?? (incident.ownerUserId ? "…" : "unassigned")}
             {" · "}
@@ -1325,6 +1524,88 @@ export function IncidentDetailPage() {
                   fullWidth
                   value={editCategory}
                   onChange={(e) => setEditCategory(e.target.value)}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  label="Description"
+                  size="small"
+                  fullWidth
+                  multiline
+                  minRows={3}
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <CatalogSelect
+                  label="Issue type"
+                  value={editIssueType}
+                  options={catalog?.issueTypes ?? []}
+                  onChange={setEditIssueType}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <CatalogSelect
+                  label="Severity"
+                  value={editSeverity}
+                  options={catalog?.severities ?? []}
+                  onChange={setEditSeverity}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <CatalogSelect
+                  label="Component"
+                  value={editComponent}
+                  options={catalog?.components ?? []}
+                  onChange={(v) => {
+                    setEditComponent(v);
+                    setEditSubComponent("");
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <CatalogSelect
+                  label="Sub component"
+                  value={editSubComponent}
+                  options={catalog ? subComponentsFor(catalog, editComponent) : []}
+                  onChange={setEditSubComponent}
+                  disabled={!editComponent}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <CatalogSelect
+                  label="Tool"
+                  value={editTool}
+                  options={catalog?.tools ?? []}
+                  onChange={setEditTool}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="Ref Bug ID"
+                  size="small"
+                  fullWidth
+                  placeholder="INC-000123"
+                  value={editRefIncidentNo}
+                  onChange={(e) => setEditRefIncidentNo(e.target.value)}
+                  helperText="Duplicate of / blocked by"
+                />
+              </Grid>
+              <Grid item xs={12} sm={8}>
+                <TextField
+                  label="CC list"
+                  size="small"
+                  fullWidth
+                  placeholder="email, email"
+                  value={editCcText}
+                  onChange={(e) => setEditCcText(e.target.value)}
+                  error={editCc.invalid.length > 0}
+                  helperText={
+                    editCc.invalid.length > 0
+                      ? `Not an email address: ${editCc.invalid.join(", ")}`
+                      : "Copied on customer-facing updates"
+                  }
                 />
               </Grid>
               <Grid item xs={6} sm={3}>

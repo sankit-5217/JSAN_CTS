@@ -27,6 +27,8 @@ interface SupportGroup {
   id: string;
   name: string;
   createdAt: string;
+  /** true on the one group new client reports land in by default. */
+  isDefaultAssignee: boolean | null;
 }
 
 interface Member {
@@ -159,6 +161,18 @@ export function SupportGroupsPage() {
 
   const selectedGroup = groups.find((g) => g.id === selectedGroupId) ?? null;
 
+  // --- Default assignee group ("Assignee Group: Service Desk is default") --
+  const makeDefault = async () => {
+    if (!selectedGroup) return;
+    setActionError(null);
+    try {
+      await apiPost(`/support-groups/${selectedGroup.id}/default`);
+      refetchGroups();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <Box>
       <Typography variant="h4" sx={{ mb: 2 }}>
@@ -195,6 +209,9 @@ export function SupportGroupsPage() {
                   sx={{ borderRadius: 1, mb: 0.5 }}
                 >
                   <ListItemText primary={g.name} />
+                  {g.isDefaultAssignee && (
+                    <Chip size="small" color="primary" variant="outlined" label="Default" />
+                  )}
                 </ListItemButton>
               ))}
               {groups.length === 0 && (
@@ -236,16 +253,33 @@ export function SupportGroupsPage() {
                 {selectedGroup ? `${selectedGroup.name} — members` : "Select a group"}
               </Typography>
               {selectedGroup && canWrite && (
-                <Button
-                  size="small"
-                  color="error"
-                  startIcon={<DeleteOutlineIcon fontSize="small" />}
-                  onClick={deleteGroup}
-                >
-                  Delete group
-                </Button>
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    size="small"
+                    variant={selectedGroup.isDefaultAssignee ? "contained" : "outlined"}
+                    disabled={Boolean(selectedGroup.isDefaultAssignee)}
+                    onClick={makeDefault}
+                  >
+                    {selectedGroup.isDefaultAssignee
+                      ? "Default for new reports"
+                      : "Make default for new reports"}
+                  </Button>
+                  <Button
+                    size="small"
+                    color="error"
+                    startIcon={<DeleteOutlineIcon fontSize="small" />}
+                    onClick={deleteGroup}
+                  >
+                    Delete group
+                  </Button>
+                </Stack>
               )}
             </Stack>
+            {selectedGroup?.isDefaultAssignee && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                New client reports are assigned to this group unless the reporter picks another.
+              </Typography>
+            )}
             {selectedGroup && (
               <>
                 <Stack spacing={1} sx={{ mb: 2 }}>

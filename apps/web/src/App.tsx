@@ -76,6 +76,7 @@ import { SiteDetailPage } from "./pages/SiteDetailPage";
 import { SitesPage } from "./pages/SitesPage";
 import { SlaPoliciesPage } from "./pages/SlaPoliciesPage";
 import { SupportGroupsPage } from "./pages/SupportGroupsPage";
+import { IssueReportingPage } from "./pages/IssueReportingPage";
 import { VendorCaseDetailPage } from "./pages/VendorCaseDetailPage";
 import { VendorsPage } from "./pages/VendorsPage";
 
@@ -136,6 +137,11 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Support groups",
         to: "/support-groups",
         icon: <GroupsOutlinedIcon fontSize="small" />,
+      },
+      {
+        label: "Issue reporting",
+        to: "/issue-reporting",
+        icon: <ReportProblemOutlinedIcon fontSize="small" />,
       },
       {
         label: "Team & Shifts",
@@ -429,6 +435,7 @@ export function App() {
         <Route path="/sla-policies" element={<SlaPoliciesPage />} />
         <Route path="/notification-sounds" element={<NotificationSoundsPage />} />
         <Route path="/support-groups" element={<SupportGroupsPage />} />
+        <Route path="/issue-reporting" element={<IssueReportingPage />} />
         <Route path="/shifts" element={<ShiftsPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/alerts/:id" element={<AlertDetailPage />} />

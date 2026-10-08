@@ -83,6 +83,20 @@ enum Priority {
   P4
 }
 
+// The dropdown lists on the "Report an issue" form (client portal) — every
+// value a reporter can pick lives in issue_catalog_options, never in code
+// (CLAUDE.md: configuration over hard-code). PRIORITY options only re-label
+// the fixed Priority enum above (their `value` must be P1..P4); status is
+// not here at all — it is the incident state machine's, not a pick-list.
+enum IssueCatalogKind {
+  ISSUE_TYPE
+  PRIORITY
+  SEVERITY
+  COMPONENT
+  SUB_COMPONENT
+  TOOL
+}
+
 // Problem/RCA lifecycle (spec §10.5, owner: Dev B). Distinct from incident
 // status — closing an incident never changes a problem's status.
 enum ProblemStatus {
@@ -336,14 +350,20 @@ model SupportCalendar {
 }
 
 model SupportGroup {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  createdAt DateTime @default(now()) @map("created_at")
+  id                String   @id @default(uuid())
+  name              String   @unique
+  // The "Assignee Group" a new client report lands in when the reporter
+  // doesn't pick one (at most one group carries this, enforced by
+  // SitesService.setDefaultSupportGroup). Nullable-unique so the partial
+  // index only ever holds a single TRUE row.
+  isDefaultAssignee Boolean? @map("is_default_assignee")
+  createdAt         DateTime @default(now()) @map("created_at")
 
   incidents     Incident[]
   members       SupportGroupMember[]
   categoryTeams CategoryTeam[]
 
+  @@unique([isDefaultAssignee])
   @@map("support_groups")
 }
 
@@ -362,6 +382,54 @@ model CategoryTeam {
 
   @@index([groupId])
   @@map("category_teams")
+}
+
+/// One pick-list entry on the "Report an issue" form (see IssueCatalogKind).
+/// SUB_COMPONENT rows hang off a COMPONENT row via `parentId`; every other
+/// kind is flat. Retire with `isActive = false` rather than deleting —
+/// incidents reference the `value`, not the row.
+model IssueCatalogOption {
+  id        String           @id @default(uuid())
+  kind      IssueCatalogKind
+  value     String           @db.VarChar(64)
+  label     String           @db.VarChar(120)
+  parentId  String?          @map("parent_id")
+  sortOrder Int              @default(0) @map("sort_order")
+  isActive  Boolean          @default(true) @map("is_active")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  parent    IssueCatalogOption?  @relation("IssueCatalogParent", fields: [parentId], references: [id])
+  children  IssueCatalogOption[] @relation("IssueCatalogParent")
+  templates IssueTemplate[]
+
+  @@unique([kind, value])
+  @@index([kind, isActive, sortOrder])
+  @@map("issue_catalog_options")
+}
+
+/// The auto-draft behind the form's "Template" picker: one per issue type.
+/// Picking it fills the subject/description drafts and the default
+/// priority/severity/component/tool, all of which the reporter can still
+/// change before submitting.
+model IssueTemplate {
+  id                  String    @id @default(uuid())
+  issueTypeId         String    @unique @map("issue_type_id")
+  name                String    @db.VarChar(120)
+  subjectDraft        String?   @map("subject_draft") @db.VarChar(256)
+  descriptionDraft    String    @map("description_draft")
+  defaultPriority     Priority? @map("default_priority")
+  defaultSeverity     String?   @map("default_severity") @db.VarChar(64)
+  defaultComponent    String?   @map("default_component") @db.VarChar(64)
+  defaultSubComponent String?   @map("default_sub_component") @db.VarChar(64)
+  defaultTool         String?   @map("default_tool") @db.VarChar(64)
+  isActive            Boolean   @default(true) @map("is_active")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  issueType IssueCatalogOption @relation(fields: [issueTypeId], references: [id])
+
+  @@map("issue_templates")
 }
 
 /// Who's actually on a support group's roster — SupportGroup itself has no
@@ -727,6 +795,21 @@ model Incident {
   impact             String
   urgency            String
   shortDescription   String         @map("short_description")
+  // The "Report an issue" template fields (client portal). `issueType`,
+  // `severity`, `component`, `subComponent` and `tool` hold the `value` of
+  // an IssueCatalogOption of that kind — stored as the code, like
+  // `category`, so a later catalog edit doesn't rewrite ticket history.
+  description        String?
+  issueType          String?        @map("issue_type")
+  severity           String?
+  component          String?
+  subComponent       String?        @map("sub_component")
+  tool               String?
+  // "Ref Bug ID": another ticket this one duplicates or is blocked by.
+  refIncidentNo      String?        @map("ref_incident_no")
+  // "CC List": extra addresses copied on customer-facing notifications,
+  // maintained by the reporter or the assignee.
+  ccEmails           String[]       @default([]) @map("cc_emails")
   ownerGroupId       String?        @map("owner_group_id")
   ownerUserId        String?        @map("owner_user_id")
   // Set only when this incident came in via POST /incidents/customer-report —
@@ -763,7 +846,7 @@ model Incident {
 model IncidentEvent {
   id         String   @id @default(uuid())
   incidentId String   @map("incident_id")
-  eventType  String   @map("event_type") // STATUS_CHANGE / OWNER_CHANGE / SLA_EVENT / COMMENT / WORKLOG / VENDOR_UPDATE / ATTACHMENT / ATTACHMENT_REMOVED / ROUTING / CUSTOMER_FEEDBACK
+  eventType  String   @map("event_type") // CREATED / STATUS_CHANGE / OWNER_CHANGE / SLA_EVENT / COMMENT / WORKLOG / VENDOR_UPDATE / ATTACHMENT / ATTACHMENT_REMOVED / ROUTING / CUSTOMER_FEEDBACK / CC_LIST_CHANGED / ALERT_LINKED / ALERT_RECOVERED
   actorId    String?  @map("actor_id")
   payload    Json
   createdAt  DateTime @default(now()) @map("created_at")

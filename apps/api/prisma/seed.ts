@@ -2,6 +2,7 @@ import {
   CiType,
   Criticality,
   IncidentStatus,
+  IssueCatalogKind,
   LifecycleStatus,
   ManagedBy,
   Prisma,
@@ -70,6 +71,336 @@ async function findOrCreateShift(data: Prisma.EngineerShiftUncheckedCreateInput)
   });
   if (!existing) {
     await prisma.engineerShift.create({ data });
+  }
+}
+
+/**
+ * The "Report an issue" template configuration (client portal): the default
+ * Assignee Group, the pick-list catalog and one auto-draft template per
+ * issue type. All idempotent upserts keyed on (kind, value) / issue type, so
+ * an admin's later edits in the UI survive a re-seed (update: {} never
+ * overwrites a label or draft).
+ */
+async function seedIssueReporting(serviceDeskUserId: string) {
+  const serviceDeskGroup = await prisma.supportGroup.upsert({
+    where: { name: "JSAN ServiceDesk" },
+    update: {},
+    create: { name: "JSAN ServiceDesk" },
+  });
+  const currentDefault = await prisma.supportGroup.findFirst({
+    where: { isDefaultAssignee: true },
+  });
+  if (!currentDefault) {
+    await prisma.supportGroup.update({
+      where: { id: serviceDeskGroup.id },
+      data: { isDefaultAssignee: true },
+    });
+  }
+  await prisma.supportGroupMember.upsert({
+    where: { groupId_userId: { groupId: serviceDeskGroup.id, userId: serviceDeskUserId } },
+    update: {},
+    create: { groupId: serviceDeskGroup.id, userId: serviceDeskUserId },
+  });
+
+  const option = async (
+    kind: IssueCatalogKind,
+    value: string,
+    label: string,
+    sortOrder: number,
+    parentId?: string,
+  ) =>
+    prisma.issueCatalogOption.upsert({
+      where: { kind_value: { kind, value } },
+      update: {},
+      create: { kind, value, label, sortOrder, parentId },
+    });
+
+  const issueTypes: [string, string][] = [
+    ["HARDWARE_FAILURE", "Hardware fault (server, disk, PSU...)"],
+    ["NETWORK", "Network / connectivity"],
+    ["POWER", "Power"],
+    ["COOLING", "Cooling / temperature"],
+    ["STORAGE", "Storage / backup"],
+    ["OS_SOFTWARE", "OS / software"],
+    ["MONITORING", "Monitoring / alerting"],
+    ["ACCESS_REQUEST", "Access request"],
+    ["SERVICE_REQUEST", "Service request"],
+    ["OTHER", "Something else"],
+  ];
+  const issueTypeRows = new Map<string, string>();
+  for (const [i, [value, label]] of issueTypes.entries()) {
+    const row = await option(IssueCatalogKind.ISSUE_TYPE, value, label, i);
+    issueTypeRows.set(value, row.id);
+  }
+
+  const priorities: [Priority, string][] = [
+    [Priority.P1, "P1 - Critical"],
+    [Priority.P2, "P2 - High"],
+    [Priority.P3, "P3 - Standard"],
+    [Priority.P4, "P4 - Low"],
+  ];
+  for (const [i, [value, label]] of priorities.entries()) {
+    await option(IssueCatalogKind.PRIORITY, value, label, i);
+  }
+
+  const severities: [string, string][] = [
+    ["BLOCKER", "Blocker - service down"],
+    ["CRITICAL", "Critical - major degradation"],
+    ["MAJOR", "Major - partial impact"],
+    ["MINOR", "Minor - workaround available"],
+    ["TRIVIAL", "Trivial / cosmetic"],
+  ];
+  for (const [i, [value, label]] of severities.entries()) {
+    await option(IssueCatalogKind.SEVERITY, value, label, i);
+  }
+
+  const components: [string, string, [string, string][]][] = [
+    [
+      "SERVER",
+      "Server",
+      [
+        ["CPU", "CPU"],
+        ["MEMORY", "Memory"],
+        ["DISK", "Disk / drive"],
+        ["RAID_CONTROLLER", "RAID controller"],
+        ["PSU", "Power supply"],
+        ["FAN", "Fan"],
+        ["NIC", "Network card"],
+        ["BMC", "iDRAC / iLO"],
+      ],
+    ],
+    [
+      "STORAGE",
+      "Storage",
+      [
+        ["ARRAY", "Storage array"],
+        ["CONTROLLER", "Controller"],
+        ["DISK_SHELF", "Disk shelf"],
+        ["BACKUP_JOB", "Backup job"],
+      ],
+    ],
+    [
+      "NETWORK",
+      "Network",
+      [
+        ["SWITCH", "Switch"],
+        ["ROUTER", "Router"],
+        ["FIREWALL", "Firewall"],
+        ["CABLING", "Cabling / patching"],
+        ["WIFI", "Wi-Fi"],
+      ],
+    ],
+    [
+      "POWER",
+      "Power",
+      [
+        ["UPS", "UPS"],
+        ["PDU", "PDU"],
+        ["RACK_FEED", "Rack power feed"],
+        ["GENERATOR", "Generator"],
+      ],
+    ],
+    [
+      "COOLING",
+      "Cooling",
+      [
+        ["CRAC_UNIT", "CRAC / CRAH unit"],
+        ["CHILLER", "Chiller"],
+        ["SENSOR", "Temperature / humidity sensor"],
+      ],
+    ],
+    [
+      "FACILITY",
+      "Facility",
+      [
+        ["DOOR_ACCESS", "Door access"],
+        ["FIRE_SUPPRESSION", "Fire suppression"],
+        ["CCTV", "CCTV"],
+      ],
+    ],
+    [
+      "SOFTWARE",
+      "Software",
+      [
+        ["OS", "Operating system"],
+        ["HYPERVISOR", "Hypervisor"],
+        ["DATABASE", "Database"],
+        ["APPLICATION", "Application"],
+      ],
+    ],
+  ];
+  for (const [i, [value, label, subs]] of components.entries()) {
+    const component = await option(IssueCatalogKind.COMPONENT, value, label, i);
+    for (const [j, [subValue, subLabel]] of subs.entries()) {
+      await option(
+        IssueCatalogKind.SUB_COMPONENT,
+        `${value}.${subValue}`,
+        subLabel,
+        j,
+        component.id,
+      );
+    }
+  }
+
+  const tools: [string, string][] = [
+    ["ZABBIX", "Zabbix"],
+    ["PROMETHEUS", "Prometheus / Alertmanager"],
+    ["GRAFANA", "Grafana"],
+    ["LOKI", "Loki (logs)"],
+    ["IDRAC", "Dell iDRAC"],
+    ["ILO", "HPE iLO"],
+    ["OPSDESK", "OpsDesk portal"],
+    ["VISUAL", "Visual inspection on site"],
+    ["OTHER", "Other"],
+  ];
+  for (const [i, [value, label]] of tools.entries()) {
+    await option(IssueCatalogKind.TOOL, value, label, i);
+  }
+
+  const steps =
+    "\n\nSteps to reproduce / what you did:\n1. \n\nExpected:\n\nActual:\n\nWhen did it start?\n\nAlready tried:\n";
+  const templates: {
+    issueType: string;
+    name: string;
+    subjectDraft: string;
+    descriptionDraft: string;
+    defaultPriority: Priority;
+    defaultSeverity?: string;
+    defaultComponent?: string;
+    defaultSubComponent?: string;
+    defaultTool?: string;
+  }[] = [
+    {
+      issueType: "HARDWARE_FAILURE",
+      name: "Hardware fault",
+      subjectDraft: "[Hardware] <device / rack> - <symptom>",
+      descriptionDraft:
+        "Device (service tag / CI code):\nRack and position:\nWhat you can see (LEDs, alarms, error on screen):" +
+        steps,
+      defaultPriority: Priority.P2,
+      defaultSeverity: "MAJOR",
+      defaultComponent: "SERVER",
+      defaultTool: "VISUAL",
+    },
+    {
+      issueType: "NETWORK",
+      name: "Network / connectivity",
+      subjectDraft: "[Network] <what is unreachable> from <where>",
+      descriptionDraft:
+        "Affected devices / VLAN / IPs:\nReachable from elsewhere? (yes/no):\nRecent change you know of:" +
+        steps,
+      defaultPriority: Priority.P2,
+      defaultSeverity: "MAJOR",
+      defaultComponent: "NETWORK",
+      defaultTool: "OPSDESK",
+    },
+    {
+      issueType: "POWER",
+      name: "Power",
+      subjectDraft: "[Power] <rack / feed / UPS> - <symptom>",
+      descriptionDraft:
+        "Rack / feed / UPS affected:\nIs equipment still powered on? (yes/no/partial):\nAlarms shown:" +
+        steps,
+      defaultPriority: Priority.P1,
+      defaultSeverity: "CRITICAL",
+      defaultComponent: "POWER",
+      defaultTool: "VISUAL",
+    },
+    {
+      issueType: "COOLING",
+      name: "Cooling / temperature",
+      subjectDraft: "[Cooling] <room / row> - <reading or symptom>",
+      descriptionDraft:
+        "Room / row / unit:\nCurrent reading (temperature / humidity):\nAlarms shown:" + steps,
+      defaultPriority: Priority.P2,
+      defaultSeverity: "MAJOR",
+      defaultComponent: "COOLING",
+      defaultTool: "VISUAL",
+    },
+    {
+      issueType: "STORAGE",
+      name: "Storage / backup",
+      subjectDraft: "[Storage] <array / job> - <symptom>",
+      descriptionDraft:
+        "Array / volume / backup job:\nError message or job status:\nData at risk? (yes/no/unknown):" +
+        steps,
+      defaultPriority: Priority.P2,
+      defaultSeverity: "MAJOR",
+      defaultComponent: "STORAGE",
+      defaultTool: "OPSDESK",
+    },
+    {
+      issueType: "OS_SOFTWARE",
+      name: "OS / software",
+      subjectDraft: "[Software] <host / application> - <symptom>",
+      descriptionDraft:
+        "Host / application / version:\nError message (paste or attach a screenshot):\nUsers affected:" +
+        steps,
+      defaultPriority: Priority.P3,
+      defaultSeverity: "MINOR",
+      defaultComponent: "SOFTWARE",
+      defaultTool: "OTHER",
+    },
+    {
+      issueType: "MONITORING",
+      name: "Monitoring / alerting",
+      subjectDraft: "[Monitoring] <alert or dashboard> - <what is wrong>",
+      descriptionDraft:
+        "Alert name / dashboard / host:\nIs it a false alarm, a missing alert, or a broken check?:\nLink or screenshot:" +
+        steps,
+      defaultPriority: Priority.P3,
+      defaultSeverity: "MINOR",
+      defaultTool: "ZABBIX",
+    },
+    {
+      issueType: "ACCESS_REQUEST",
+      name: "Access request",
+      subjectDraft: "[Access] <who> needs <what> at <site>",
+      descriptionDraft:
+        "Person (name, company, ID):\nWhat access (physical area / system / role):\nFrom when until when:\nApproved by:",
+      defaultPriority: Priority.P4,
+      defaultSeverity: "TRIVIAL",
+      defaultComponent: "FACILITY",
+      defaultSubComponent: "FACILITY.DOOR_ACCESS",
+      defaultTool: "OPSDESK",
+    },
+    {
+      issueType: "SERVICE_REQUEST",
+      name: "Service request",
+      subjectDraft: "[Request] <what you need>",
+      descriptionDraft: "What you need:\nWhy / for whom:\nNeeded by (date):",
+      defaultPriority: Priority.P4,
+      defaultSeverity: "TRIVIAL",
+      defaultTool: "OPSDESK",
+    },
+    {
+      issueType: "OTHER",
+      name: "Something else",
+      subjectDraft: "",
+      descriptionDraft: "What is happening:" + steps,
+      defaultPriority: Priority.P3,
+      defaultSeverity: "MINOR",
+      defaultTool: "OTHER",
+    },
+  ];
+  for (const t of templates) {
+    const issueTypeId = issueTypeRows.get(t.issueType);
+    if (!issueTypeId) continue;
+    await prisma.issueTemplate.upsert({
+      where: { issueTypeId },
+      update: {},
+      create: {
+        issueTypeId,
+        name: t.name,
+        subjectDraft: t.subjectDraft || null,
+        descriptionDraft: t.descriptionDraft,
+        defaultPriority: t.defaultPriority,
+        defaultSeverity: t.defaultSeverity,
+        defaultComponent: t.defaultComponent,
+        defaultSubComponent: t.defaultSubComponent,
+        defaultTool: t.defaultTool,
+      },
+    });
   }
 }
 
@@ -531,6 +862,8 @@ async function main() {
       create: { category, groupId },
     });
   }
+
+  await seedIssueReporting(serviceDesk.id);
 
   for (const engineer of [rahul, vikas]) {
     await findOrCreateShift({

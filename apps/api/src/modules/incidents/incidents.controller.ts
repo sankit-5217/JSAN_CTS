@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UploadedFile,
   UseGuards,
@@ -29,6 +30,7 @@ import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { CustomerFeedbackDto } from "./dto/customer-feedback.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
 import { TransitionIncidentDto } from "./dto/transition-incident.dto";
+import { UpdateCcListDto } from "./dto/update-cc-list.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
 import { CUSTOMER_FEEDBACK_ROLES, IncidentCustomerService } from "./incident-customer.service";
 import { IncidentsService, UploadedAttachmentFile } from "./incidents.service";
@@ -58,6 +60,11 @@ const INCIDENT_ATTACHMENT_UPLOAD_ROLES = [
   ...INCIDENT_WRITE_ROLES,
   UserRole.CLIENT_MANAGER_VIEWER,
 ] as const;
+
+// The third customer write: the CC List on their own ticket ("added by
+// either reporter / assignee"). The service's findOneScoped keeps a customer
+// on their own reports only.
+const INCIDENT_CC_LIST_ROLES = [...INCIDENT_WRITE_ROLES, UserRole.CLIENT_MANAGER_VIEWER] as const;
 
 @ApiTags("incidents")
 @ApiBearerAuth()
@@ -110,6 +117,18 @@ export class IncidentsController {
     @CorrelationId() correlationId?: string,
   ) {
     return this.incidentsService.update(id, dto, user, { actorId: user.id, correlationId });
+  }
+
+  @Put(":id/cc-list")
+  @Roles(...INCIDENT_CC_LIST_ROLES)
+  @ApiOperation({ summary: "Replace the ticket's CC List (reporter or staff)" })
+  updateCcList(
+    @Param("id") id: string,
+    @Body() dto: UpdateCcListDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.incidentsService.updateCcList(id, dto, { actorId: user.id, correlationId }, user);
   }
 
   @Get(":id/possible-duplicates")

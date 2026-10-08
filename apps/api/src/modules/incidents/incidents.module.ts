@@ -7,6 +7,8 @@ import { IncidentCustomerService } from "./incident-customer.service";
 import { IncidentsController } from "./incidents.controller";
 import { IncidentsService } from "./incidents.service";
 import { IncidentUserChecksListener } from "./incident-user-checks.listener";
+import { IssueReportingController } from "./issue-reporting.controller";
+import { IssueReportingService } from "./issue-reporting.service";
 
 /**
  * Owner: Dev A (Platform & Ticketing Core).
@@ -28,11 +30,21 @@ import { IncidentUserChecksListener } from "./incident-user-checks.listener";
  * summary (GET :id/progress) and the reporter's "is this fixed?" answer
  * (POST :id/customer-feedback), which notifies the desk but never moves
  * status itself.
+ *
+ * IssueReportingService owns the "Report an issue" template configuration
+ * (pick-list catalog, per-issue-type drafts) and the intake checks a client
+ * report goes through before IncidentsService.create — served under
+ * /issue-reporting by its own controller.
  */
 @Module({
   imports: [AuthModule, StorageModule, SlaModule, InboxModule],
-  controllers: [IncidentsController],
-  providers: [IncidentsService, IncidentCustomerService, IncidentUserChecksListener],
-  exports: [IncidentsService],
+  controllers: [IncidentsController, IssueReportingController],
+  providers: [
+    IncidentsService,
+    IncidentCustomerService,
+    IncidentUserChecksListener,
+    IssueReportingService,
+  ],
+  exports: [IncidentsService, IssueReportingService],
 })
 export class IncidentsModule {}

@@ -1,26 +1,11 @@
-import { useState } from "react";
-import { Link as RouterLink } from "react-router-dom";
-import {
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Divider,
-  Link,
-  Popover,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Box, Button, Card, CardContent, Chip, Divider, Stack, Typography } from "@mui/material";
 import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
 import PhoneOutlinedIcon from "@mui/icons-material/PhoneOutlined";
 import {
-  DUTY_LABEL,
   SITE_STATE_COLOR,
   SITE_STATE_LABEL,
   type PortalContact,
   type PortalSite,
-  type PortalTeamMember,
 } from "./clientPortal";
 
 /**
@@ -53,7 +38,6 @@ export function SitePanel({ site }: { site: PortalSite }) {
         <SiteContacts contacts={site.contacts} />
 
         <Divider sx={{ my: 2 }} />
-
       </CardContent>
     </Card>
   );
@@ -120,56 +104,5 @@ export function SiteContacts({ contacts }: { contacts: PortalContact[] }) {
         </Stack>
       )}
     </Box>
-  );
-}
-
-function TeamMemberChip({ member }: { member: PortalTeamMember }) {
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const busy = member.tickets.length > 0;
-  return (
-    <>
-      <Chip
-        clickable
-        onClick={(e) => setAnchor(e.currentTarget)}
-        color={busy ? "primary" : "default"}
-        variant={busy ? "filled" : "outlined"}
-        label={`${member.name} · ${DUTY_LABEL[member.duty]}${busy ? ` · ${member.tickets.length} of yours` : ""}`}
-      />
-      <Popover
-        open={Boolean(anchor)}
-        anchorEl={anchor}
-        onClose={() => setAnchor(null)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
-      >
-        <Box sx={{ p: 2, maxWidth: 320 }}>
-          <Typography sx={{ fontWeight: 700 }}>{member.name}</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            {DUTY_LABEL[member.duty]} · {member.shiftLabel}
-          </Typography>
-          {busy ? (
-            <Stack spacing={0.75}>
-              <Typography variant="caption" color="text.secondary">
-                Handling your {member.tickets.length === 1 ? "ticket" : "tickets"}:
-              </Typography>
-              {member.tickets.map((t) => (
-                <Link
-                  key={t.id}
-                  component={RouterLink}
-                  to={`/client/tickets/${t.id}`}
-                  variant="body2"
-                  sx={{ overflowWrap: "anywhere" }}
-                >
-                  {t.incidentNo}: {t.shortDescription}
-                </Link>
-              ))}
-            </Stack>
-          ) : (
-            <Typography variant="body2">
-              Not handling any of your open tickets right now.
-            </Typography>
-          )}
-        </Box>
-      </Popover>
-    </>
   );
 }

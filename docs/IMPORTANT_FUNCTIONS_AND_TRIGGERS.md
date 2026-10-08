@@ -19,7 +19,12 @@ This document summarizes the important business functions and automated triggers
 | --- | --- | --- |
 | `create()` | `apps/api/src/modules/incidents/incidents.service.ts` | Creates an incident and starts related workflows. |
 | `createFromAlert()` | `apps/api/src/modules/incidents/incidents.service.ts` | Creates an incident from a normalized alert. |
-| `createFromCustomer()` | `apps/api/src/modules/incidents/incidents.service.ts` | Creates an incident reported by a customer. |
+| `createFromCustomer()` | `apps/api/src/modules/incidents/incidents.service.ts` | Creates an incident from the client portal's "Report an issue" template: checks every pick-list value against the issue catalog, resolves the Assignee Group (default: the group flagged `isDefaultAssignee`) and Assignee, validates the Ref Bug ID, stores description/classification/CC list on the row. |
+| `updateCcList()` | `apps/api/src/modules/incidents/incidents.service.ts` | Reporter or staff replaces a ticket's CC List (audited, `CC_LIST_CHANGED` timeline event); CC addresses are copied on customer-facing status/comment emails. |
+| `getCatalog()` | `apps/api/src/modules/incidents/issue-reporting.service.ts` | Active pick-lists (issue type, priority labels, severity, component → sub component, tool), templates and default group for the report form. |
+| `assertValidSelections()` / `resolveAssignment()` / `resolveRefIncidentNo()` | `apps/api/src/modules/incidents/issue-reporting.service.ts` | Intake checks a client report (and a staff edit of those fields) must pass. |
+| `createOption()` / `updateOption()` / `createTemplate()` / `updateTemplate()` | `apps/api/src/modules/incidents/issue-reporting.service.ts` | Admin edits of the catalog and the per-issue-type templates (audited; retire, never delete). |
+| `setDefaultSupportGroup()` | `apps/api/src/modules/sites/sites.service.ts` | Flags the one group new client reports land in by default. |
 | `update()` | `apps/api/src/modules/incidents/incidents.service.ts` | Updates incident data and emits update events. |
 | `createTransition()` | `apps/api/src/modules/incidents/incidents.service.ts` | Validates and applies incident state transitions. |
 | `getAvailableTransitions()` | `apps/api/src/modules/incidents/incidents.service.ts` | Returns valid next states for an incident. |

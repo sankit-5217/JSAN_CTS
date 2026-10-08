@@ -172,6 +172,46 @@ export class SitesService {
     });
   }
 
+  /**
+   * Flag one group as the "Assignee Group" every new client report lands in
+   * unless the reporter picks another (the form's default, "Service Desk").
+   * Exactly one group can carry the flag: the partial unique index on
+   * is_default_assignee only ever admits a single TRUE row, so the old
+   * default is cleared in the same transaction.
+   */
+  async setDefaultSupportGroup(id: string, actor: ActorContext) {
+    const group = await this.getSupportGroup(id);
+    if (group.isDefaultAssignee) {
+      return group;
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const previous = await tx.supportGroup.findFirst({ where: { isDefaultAssignee: true } });
+      if (previous) {
+        await tx.supportGroup.update({
+          where: { id: previous.id },
+          data: { isDefaultAssignee: null },
+        });
+      }
+      const after = await tx.supportGroup.update({
+        where: { id },
+        data: { isDefaultAssignee: true },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportGroup",
+          entityId: id,
+          action: "SET_DEFAULT_ASSIGNEE",
+          before: { previousDefaultGroupId: previous?.id ?? null },
+          after,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return after;
+    });
+  }
+
   private async getSupportGroup(id: string) {
     const group = await this.prisma.supportGroup.findUnique({ where: { id } });
     if (!group) {

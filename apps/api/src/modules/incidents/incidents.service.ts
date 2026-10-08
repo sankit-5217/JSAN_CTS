@@ -31,10 +31,8 @@ import { InboxService } from "../inbox/inbox.service";
 import { ownIncidentsFilter } from "./incident-visibility";
 import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import { SlaService } from "../sla/sla.service";
-import {
-  ALLOWED_ATTACHMENT_CONTENT_TYPES,
-  MAX_ATTACHMENT_SIZE_BYTES,
-} from "./attachment.constants";
+import { isAllowedAttachment, MAX_ATTACHMENT_SIZE_BYTES } from "./attachment.constants";
+import { IssueReportingService } from "./issue-reporting.service";
 import {
   INCIDENT_CREATED_EVENT,
   INCIDENT_UPDATED_EVENT,
@@ -46,6 +44,7 @@ import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
 import { TransitionIncidentDto } from "./dto/transition-incident.dto";
+import { UpdateCcListDto } from "./dto/update-cc-list.dto";
 import { UpdateIncidentDto } from "./dto/update-incident.dto";
 import {
   findTransitionRule,
@@ -119,6 +118,22 @@ export interface UploadedAttachmentFile {
   buffer: Buffer;
 }
 
+/** What a client report resolved to before the row is written — see
+ *  IssueReportingService.resolveAssignment. Never taken from a body as-is. */
+export interface IncidentIntake {
+  ownerGroupId: string | null;
+  ownerUserId: string | null;
+  templateId?: string;
+}
+
+/** The ticket's CC List as mail parties, minus anyone already addressed. */
+function ccParties(incident: Incident, already: Party[]): Party[] {
+  const taken = new Set(already.map((p) => p.email.toLowerCase()));
+  return (incident.ccEmails ?? [])
+    .filter((email) => !taken.has(email.toLowerCase()))
+    .map((email) => ({ name: email, email }));
+}
+
 /**
  * Owns: incident state machine, assignment, comments (spec §10.3, §12, §15).
  * Must not own vendor polling.
@@ -142,6 +157,7 @@ export class IncidentsService {
     private readonly notifications: NotificationsPublisher,
     private readonly events: EventEmitter2,
     private readonly inbox: InboxService,
+    private readonly issueReporting: IssueReportingService,
   ) {}
 
   async assertSiteAccess(user: AuthenticatedUser, siteId: string): Promise<void> {
@@ -283,10 +299,24 @@ export class IncidentsService {
 
   // `reportedByUserId` is never client-settable — only createFromCustomer()
   // passes it, straight from the authenticated caller's own id, never from
-  // request body input.
-  async create(dto: CreateIncidentDto, actor: ActorContext, reportedByUserId?: string) {
+  // request body input. `intake` is likewise internal: the Assignee Group /
+  // Assignee a client report resolved through IssueReportingService, plus
+  // the template it was drafted from, for the timeline.
+  async create(
+    dto: CreateIncidentDto,
+    actor: ActorContext,
+    reportedByUserId?: string,
+    intake?: IncidentIntake,
+  ) {
     const incident = await this.prisma.$transaction((tx) =>
-      this.createInTx(tx, dto, actor, reportedByUserId),
+      this.createInTx(
+        tx,
+        dto,
+        actor,
+        reportedByUserId,
+        intake ? { source: "CUSTOMER_REPORT", templateId: intake.templateId ?? null } : undefined,
+        intake,
+      ),
     );
     await this.afterCreate(incident, actor);
     return incident;
@@ -364,6 +394,7 @@ export class IncidentsService {
     actor: ActorContext,
     reportedByUserId?: string,
     origin?: Record<string, unknown>,
+    intake?: IncidentIntake,
   ): Promise<Incident> {
     const incidentNo = await this.nextIncidentNo(tx);
     const incident = await tx.incident.create({
@@ -376,6 +407,16 @@ export class IncidentsService {
         urgency: dto.urgency,
         priority: dto.priority,
         shortDescription: dto.shortDescription,
+        description: dto.description,
+        issueType: dto.issueType,
+        severity: dto.severity,
+        component: dto.component,
+        subComponent: dto.subComponent,
+        tool: dto.tool,
+        refIncidentNo: dto.refIncidentNo || undefined,
+        ccEmails: dto.ccEmails ?? [],
+        ownerGroupId: intake?.ownerGroupId ?? undefined,
+        ownerUserId: intake?.ownerUserId ?? undefined,
         reportedByUserId,
       },
     });
@@ -417,31 +458,101 @@ export class IncidentsService {
    * SLA clock on a priority change, so a P3 default here is a real starting
    * point, not a placeholder that needs special-casing later).
    */
+  /**
+   * The client portal's "Report an issue" form. Every pick-list value is
+   * checked against the live issue catalog, the Assignee Group defaults to
+   * the flagged Service Desk group, an Assignee must belong to that group,
+   * and a Ref Bug ID must be a real ticket — all server-side, whatever the
+   * form sent. Status is always NEW; impact/urgency follow the chosen
+   * priority (P3 when none was picked) until the desk reclassifies via
+   * PATCH /incidents/:id. The issue type doubles as `category` so routing's
+   * category-team mapping keeps working for client reports.
+   */
   async createFromCustomer(
     dto: CreateIncidentAsCustomerDto,
     actor: ActorContext,
     user: AuthenticatedUser,
   ): Promise<Incident> {
     await this.assertSiteAccess(user, dto.siteId);
+    await this.issueReporting.assertValidSelections(dto, { requireIssueType: true });
+    const assignment = await this.issueReporting.resolveAssignment(
+      dto.ownerGroupId,
+      dto.ownerUserId,
+    );
+    const refIncidentNo = dto.refIncidentNo
+      ? await this.issueReporting.resolveRefIncidentNo(dto.refIncidentNo)
+      : undefined;
+    const priority = dto.priority ?? Priority.P3;
+    const [impact, urgency] = PRIORITY_IMPACT_URGENCY[priority];
 
     const incident = await this.create(
       {
         siteId: dto.siteId,
-        category: dto.category,
-        impact: "MEDIUM",
-        urgency: "MEDIUM",
-        priority: Priority.P3,
-        shortDescription: dto.shortDescription,
+        category: dto.issueType,
+        impact,
+        urgency,
+        priority,
+        shortDescription: dto.subject,
+        description: dto.description?.trim() || undefined,
+        issueType: dto.issueType,
+        severity: dto.severity,
+        component: dto.component,
+        subComponent: dto.subComponent,
+        tool: dto.tool,
+        refIncidentNo,
+        ccEmails: this.issueReporting.normalizeCcEmails(dto.ccEmails),
       },
       actor,
       user.id,
+      { ...assignment, templateId: dto.templateId },
     );
 
-    if (dto.details) {
-      await this.createComment(incident.id, { body: dto.details, isInternal: false }, actor, user);
+    if (incident.ownerUserId) {
+      await this.notifyAssignment(incident, incident.ownerUserId, actor.actorId);
+    } else if (incident.ownerGroupId) {
+      await this.notifyGroupAssignment(incident, incident.ownerGroupId, actor.actorId);
     }
 
     return incident;
+  }
+
+  /**
+   * "CC List: list of emails added by either reporter / assignee." The
+   * reporter reaches their own ticket through findOneScoped like every
+   * other customer write; staff reach any ticket in their site scope.
+   */
+  async updateCcList(
+    id: string,
+    dto: UpdateCcListDto,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ): Promise<Incident> {
+    const before = await this.findOneScoped(id, user);
+    const ccEmails = this.issueReporting.normalizeCcEmails(dto.ccEmails);
+    return this.prisma.$transaction(async (tx) => {
+      const after = await tx.incident.update({ where: { id }, data: { ccEmails } });
+      await tx.incidentEvent.create({
+        data: {
+          incidentId: id,
+          eventType: "CC_LIST_CHANGED",
+          actorId: actor.actorId,
+          payload: { from: before.ccEmails, to: ccEmails } as Prisma.InputJsonValue,
+        },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Incident",
+          entityId: id,
+          action: "UPDATE",
+          before: { ccEmails: before.ccEmails },
+          after: { ccEmails },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return after;
+    });
   }
 
   async update(id: string, dto: UpdateIncidentDto, user: AuthenticatedUser, actor: ActorContext) {
@@ -463,6 +574,28 @@ export class IncidentsService {
       );
     }
 
+    // The template's pick-lists are validated against the merged result,
+    // so changing the component alone can't leave a mismatched sub
+    // component behind.
+    await this.issueReporting.assertValidSelections({
+      issueType: dto.issueType ?? before.issueType ?? undefined,
+      severity: dto.severity ?? before.severity ?? undefined,
+      component: dto.component ?? before.component ?? undefined,
+      subComponent: dto.subComponent ?? before.subComponent ?? undefined,
+      tool: dto.tool ?? before.tool ?? undefined,
+    });
+    const refIncidentNo =
+      dto.refIncidentNo === undefined
+        ? undefined
+        : dto.refIncidentNo.trim() === ""
+          ? null
+          : await this.issueReporting.resolveRefIncidentNo(dto.refIncidentNo);
+    if (refIncidentNo && refIncidentNo === before.incidentNo) {
+      throw new BadRequestException("A ticket cannot reference itself");
+    }
+    const ccEmails =
+      dto.ccEmails === undefined ? undefined : this.issueReporting.normalizeCcEmails(dto.ccEmails);
+
     const after = await this.prisma.$transaction(async (tx) => {
       const after = await tx.incident.update({
         where: { id },
@@ -475,6 +608,14 @@ export class IncidentsService {
           ownerGroupId: dto.ownerGroupId,
           ownerUserId: dto.ownerUserId,
           priority: dto.priority,
+          description: dto.description,
+          issueType: dto.issueType,
+          severity: dto.severity,
+          component: dto.component,
+          subComponent: dto.subComponent,
+          tool: dto.tool,
+          refIncidentNo,
+          ccEmails,
         },
       });
 
@@ -1336,7 +1477,7 @@ export class IncidentsService {
   ): Promise<Attachment> {
     await this.findOneScoped(incidentId, user);
 
-    if (!ALLOWED_ATTACHMENT_CONTENT_TYPES.includes(file.mimetype)) {
+    if (!isAllowedAttachment(file.mimetype, file.originalname)) {
       throw new BadRequestException(`Content type ${file.mimetype} is not allowed`);
     }
     if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
@@ -1708,6 +1849,9 @@ export class IncidentsService {
       if (to.length === 0) {
         return;
       }
+      // The ticket's CC List rides along on every customer-facing status
+      // mail, after the reporter.
+      const cc = [...(owner && customer ? [customer] : []), ...ccParties(after, to)];
       await this.notifications.enqueue({
         event: {
           kind: "INCIDENT_STATUS_CHANGED",
@@ -1716,7 +1860,7 @@ export class IncidentsService {
           to: after.status,
           comment: reason,
         },
-        recipients: { to, cc: owner && customer ? [customer] : undefined },
+        recipients: { to, cc: cc.length > 0 ? cc : undefined },
       });
     } catch (err) {
       this.logger.warn(
@@ -1761,6 +1905,8 @@ export class IncidentsService {
       if (!recipient?.email) {
         return;
       }
+      const to = [{ name: recipient.displayName, email: recipient.email }];
+      const cc = ccParties(incident, to);
       await this.notifications.enqueue({
         event: {
           kind: "INCIDENT_COMMENT_ADDED",
@@ -1768,7 +1914,7 @@ export class IncidentsService {
           author: { email: author.email },
           body: comment.body,
         },
-        recipients: { to: [{ name: recipient.displayName, email: recipient.email }] },
+        recipients: { to, cc: cc.length > 0 ? cc : undefined },
       });
     } catch (err) {
       this.logger.warn(

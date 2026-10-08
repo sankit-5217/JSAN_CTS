@@ -1,12 +1,16 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { Priority } from "@prisma/client";
 import { IsEnum, IsIn, IsOptional, IsString, IsUUID, Length, ValidateIf } from "class-validator";
-import { IMPACT_URGENCY_VALUES } from "./create-incident.dto";
+import { IMPACT_URGENCY_VALUES, IncidentTemplateFieldsDto } from "./create-incident.dto";
 
 // Deliberately has no `status` field — status only ever changes through
 // POST /incidents/:id/transition (CLAUDE.md: never let the frontend set
 // incident.status directly). This isn't role-gated out, it's absent.
-export class UpdateIncidentDto {
+//
+// Inherits the "Report an issue" template fields (description, issue type,
+// severity, component/sub component, tool, ref bug id, cc list) so the
+// desk can correct a reporter's classification on the ticket page.
+export class UpdateIncidentDto extends IncidentTemplateFieldsDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()

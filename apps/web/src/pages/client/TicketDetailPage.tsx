@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router-dom";
 import {
   Alert,
@@ -23,8 +23,15 @@ import CheckCircleOutlineOutlinedIcon from "@mui/icons-material/CheckCircleOutli
 import EngineeringOutlinedIcon from "@mui/icons-material/EngineeringOutlined";
 import ReportGmailerrorredOutlinedIcon from "@mui/icons-material/ReportGmailerrorredOutlined";
 import type { IncidentStatus, Priority } from "@cts-dc-opsdesk/shared-types";
-import { apiGet, apiPost, apiUpload, getStoredToken } from "../../api/client";
+import { apiGet, apiPost, apiPut, apiUpload, getStoredToken } from "../../api/client";
 import { decodeJwtPayload } from "../../api/jwt";
+import {
+  allSubComponents,
+  CC_MAX,
+  labelFor,
+  parseCcList,
+  type IssueCatalog,
+} from "./issueReporting";
 import {
   isFinished,
   JOURNEY,
@@ -53,6 +60,14 @@ interface Incident {
   category: string;
   shortDescription: string;
   createdAt: string;
+  description: string | null;
+  issueType: string | null;
+  severity: string | null;
+  component: string | null;
+  subComponent: string | null;
+  tool: string | null;
+  refIncidentNo: string | null;
+  ccEmails: string[];
 }
 
 interface Comment {
@@ -101,6 +116,14 @@ export function TicketDetailPage() {
   const [progress, setProgress] = useState<TicketProgress | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  // Labels for the classification the reporter picked; raw values render
+  // if this hasn't loaded.
+  const [catalog, setCatalog] = useState<IssueCatalog | null>(null);
+  useEffect(() => {
+    apiGet<IssueCatalog>("/issue-reporting/catalog")
+      .then(setCatalog)
+      .catch(() => undefined);
+  }, []);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reply, setReply] = useState("");
@@ -296,6 +319,13 @@ export function TicketDetailPage() {
         </CardContent>
       </Card>
 
+      <ReportDetails
+        incident={incident}
+        catalog={catalog}
+        reporterEmail={token ? (decodeJwtPayload(token)?.email ?? "") : ""}
+        onCcSaved={refetch}
+      />
+
       <NextStepPanel
         incident={incident}
         progress={progress}
@@ -450,6 +480,164 @@ export function TicketDetailPage() {
         </Typography>
       )}
     </Box>
+  );
+}
+
+/**
+ * What was reported, as the "Report an issue" sheet had it: the description
+ * and classification (read-only once submitted — the desk corrects those),
+ * and the CC List, which the reporter keeps editable.
+ */
+function ReportDetails({
+  incident,
+  catalog,
+  reporterEmail,
+  onCcSaved,
+}: {
+  incident: Incident;
+  catalog: IssueCatalog | null;
+  reporterEmail: string;
+  onCcSaved: () => Promise<void>;
+}) {
+  const [ccInput, setCcInput] = useState("");
+  const [ccError, setCcError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const saveCc = async (ccEmails: string[]) => {
+    setSaving(true);
+    setCcError(null);
+    try {
+      await apiPut(`/incidents/${incident.id}/cc-list`, { ccEmails });
+      setCcInput("");
+      await onCcSaved();
+    } catch (err) {
+      setCcError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addCc = () => {
+    const { emails, invalid } = parseCcList(ccInput);
+    if (invalid.length > 0) {
+      setCcError(`Not an email address: ${invalid.join(", ")}`);
+      return;
+    }
+    const merged = [...incident.ccEmails];
+    for (const e of emails) if (!merged.includes(e)) merged.push(e);
+    if (merged.length > CC_MAX) {
+      setCcError(`The CC list can hold at most ${CC_MAX} addresses`);
+      return;
+    }
+    if (merged.length !== incident.ccEmails.length) void saveCc(merged);
+  };
+
+  const lbl = (
+    options: { id: string; value: string; label: string }[] | undefined,
+    v: string | null,
+  ) => (v ? (catalog && options ? labelFor(options, v) : v) : "");
+  const rows: [string, string][] = [
+    ["Reporter", reporterEmail],
+    ["Issue type", lbl(catalog?.issueTypes, incident.issueType)],
+    ["Priority", lbl(catalog?.priorities, incident.priority)],
+    ["Severity", lbl(catalog?.severities, incident.severity)],
+    [
+      "Component",
+      [
+        lbl(catalog?.components, incident.component),
+        lbl(catalog ? allSubComponents(catalog) : undefined, incident.subComponent),
+      ]
+        .filter(Boolean)
+        .join(" › "),
+    ],
+    ["Tool", lbl(catalog?.tools, incident.tool)],
+    ["Ref Bug ID", incident.refIncidentNo ?? ""],
+  ].filter(([, v]) => v !== "") as [string, string][];
+
+  return (
+    <Card
+      elevation={0}
+      sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mb: 3 }}
+    >
+      <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
+          Your report
+        </Typography>
+        {incident.description ? (
+          <Typography
+            variant="body2"
+            sx={{
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+              p: 1.5,
+              mb: 1.5,
+              borderRadius: 2,
+              bgcolor: "action.hover",
+            }}
+          >
+            {incident.description}
+          </Typography>
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            No description was added. You can add detail in a message below.
+          </Typography>
+        )}
+        <Box
+          component="dl"
+          sx={{
+            m: 0,
+            display: "grid",
+            gridTemplateColumns: "max-content 1fr",
+            columnGap: 2,
+            rowGap: 0.5,
+            "& dt": { fontWeight: 600, fontSize: 13, color: "text.secondary" },
+            "& dd": { m: 0, fontSize: 13, overflowWrap: "anywhere" },
+          }}
+        >
+          {rows.map(([k, v]) => (
+            <Fragment key={k}>
+              <dt>{k}</dt>
+              <dd>{v}</dd>
+            </Fragment>
+          ))}
+          <dt>CC List</dt>
+          <dd>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+              {incident.ccEmails.length === 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  Nobody yet
+                </Typography>
+              )}
+              {incident.ccEmails.map((email) => (
+                <Chip
+                  key={email}
+                  size="small"
+                  label={email}
+                  disabled={saving}
+                  onDelete={() => void saveCc(incident.ccEmails.filter((e) => e !== email))}
+                />
+              ))}
+            </Stack>
+            <TextField
+              size="small"
+              fullWidth
+              placeholder="Add an email and press Enter"
+              value={ccInput}
+              disabled={saving}
+              onChange={(e) => setCcInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCc();
+                }
+              }}
+              error={Boolean(ccError)}
+              helperText={ccError ?? "They'll be copied on updates to this ticket"}
+            />
+          </dd>
+        </Box>
+      </CardContent>
+    </Card>
   );
 }
 

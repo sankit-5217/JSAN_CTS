@@ -60,6 +60,16 @@ export class SupportGroupsController {
     await this.sitesService.deleteSupportGroup(id, { actorId: user.id, correlationId });
   }
 
+  @Post(":id/default")
+  @Roles(...SUPPORT_GROUP_WRITE_ROLES)
+  setDefault(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.sitesService.setDefaultSupportGroup(id, { actorId: user.id, correlationId });
+  }
+
   @Get(":id/members")
   listMembers(@Param("id") id: string) {
     return this.sitesService.listGroupMembers(id);

@@ -10,6 +10,7 @@ import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { InboxService } from "../inbox/inbox.service";
 import { SlaService } from "../sla/sla.service";
 import { IncidentsService } from "./incidents.service";
+import { IssueReportingService } from "./issue-reporting.service";
 import { OPEN_STATUSES } from "./incident-transitions";
 
 const engineer: AuthenticatedUser = {
@@ -89,6 +90,7 @@ function makeService(
     alertFindMany?: jest.Mock;
     incidentGroupBy?: jest.Mock;
     txUpdateMany?: jest.Mock;
+    issueReporting?: Partial<Record<keyof IssueReportingService, jest.Mock>>;
   } = {},
 ) {
   const txIncident = {
@@ -203,6 +205,16 @@ function makeService(
     notifyUsers: jest.fn().mockResolvedValue(undefined),
   } as unknown as InboxService;
 
+  // The catalog/intake checks are IssueReportingService's own unit tests;
+  // here they pass everything through unless a test says otherwise.
+  const issueReporting = {
+    assertValidSelections: jest.fn().mockResolvedValue(undefined),
+    resolveAssignment: jest.fn().mockResolvedValue({ ownerGroupId: null, ownerUserId: null }),
+    resolveRefIncidentNo: jest.fn().mockImplementation((v: string) => Promise.resolve(v)),
+    normalizeCcEmails: jest.fn().mockImplementation((v?: string[]) => v ?? []),
+    ...overrides.issueReporting,
+  } as unknown as IssueReportingService;
+
   return {
     service: new IncidentsService(
       prisma,
@@ -213,6 +225,7 @@ function makeService(
       notifications,
       events,
       inbox,
+      issueReporting,
     ),
     prisma,
     auditService,
@@ -222,6 +235,7 @@ function makeService(
     notifications,
     events,
     inbox,
+    issueReporting,
     tx,
   };
 }
@@ -310,11 +324,11 @@ describe("IncidentsService.create", () => {
 describe("IncidentsService.createFromCustomer", () => {
   const customerDto = {
     siteId: "site-a",
-    category: "HARDWARE_FAILURE" as const,
-    shortDescription: "Server showing a red fault light",
+    issueType: "HARDWARE_FAILURE",
+    subject: "Server showing a red fault light",
   };
 
-  it("defaults impact/urgency/priority to MEDIUM/MEDIUM/P3 rather than letting the customer set them", async () => {
+  it("defaults to P3 (MEDIUM/MEDIUM) when the reporter picks no priority, and uses the issue type as category", async () => {
     const { service, tx } = makeService();
     const result = await service.createFromCustomer(
       customerDto,
@@ -326,10 +340,29 @@ describe("IncidentsService.createFromCustomer", () => {
     expect(tx.incident.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
+          category: "HARDWARE_FAILURE",
+          issueType: "HARDWARE_FAILURE",
+          shortDescription: "Server showing a red fault light",
           impact: "MEDIUM",
           urgency: "MEDIUM",
           priority: Priority.P3,
+          reportedByUserId: clientViewer.id,
+          ccEmails: [],
         }),
+      }),
+    );
+  });
+
+  it("derives impact/urgency from the priority the reporter picked", async () => {
+    const { service, tx } = makeService();
+    await service.createFromCustomer(
+      { ...customerDto, priority: Priority.P1 },
+      { actorId: clientViewer.id },
+      clientViewer,
+    );
+    expect(tx.incident.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ impact: "HIGH", urgency: "HIGH", priority: Priority.P1 }),
       }),
     );
   });
@@ -342,34 +375,166 @@ describe("IncidentsService.createFromCustomer", () => {
     expect(tx.incident.create).not.toHaveBeenCalled();
   });
 
-  it("posts `details` as a customer-visible (non-internal) first comment when provided", async () => {
-    // The mocked tx.incident.create isn't visible to the separately-mocked
-    // prisma.incident.findUnique that createComment's findOneScoped reads
-    // back through — in real Postgres they're the same row (same
-    // transaction), so this override just reflects that reality for the
-    // mock: the incident createFromCustomer just made was reported by the
-    // same customer now trying to comment on it.
-    const { service, tx } = makeService({
-      incidentFindUnique: jest
-        .fn()
-        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
+  it("checks every pick-list value against the catalog before creating anything", async () => {
+    const { service, tx, issueReporting } = makeService({
+      issueReporting: {
+        assertValidSelections: jest
+          .fn()
+          .mockRejectedValue(new BadRequestException('Severity "NOPE" is not an available option')),
+      },
+    });
+    await expect(
+      service.createFromCustomer(
+        { ...customerDto, severity: "NOPE" },
+        { actorId: clientViewer.id },
+        clientViewer,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(issueReporting.assertValidSelections).toHaveBeenCalledWith(
+      expect.objectContaining({ issueType: "HARDWARE_FAILURE", severity: "NOPE" }),
+      { requireIssueType: true },
+    );
+    expect(tx.incident.create).not.toHaveBeenCalled();
+  });
+
+  it("stores the template fields on the incident row itself (description is not a comment)", async () => {
+    const { service, tx, issueReporting } = makeService({
+      issueReporting: {
+        resolveRefIncidentNo: jest.fn().mockResolvedValue("INC-000042"),
+        normalizeCcEmails: jest.fn().mockReturnValue(["ops@client.example"]),
+      },
     });
     await service.createFromCustomer(
-      { ...customerDto, details: "Started around 2pm." },
+      {
+        ...customerDto,
+        description: "Started around 2pm.",
+        severity: "MAJOR",
+        component: "SERVER",
+        subComponent: "SERVER.PSU",
+        tool: "VISUAL",
+        refIncidentNo: "42",
+        ccEmails: ["Ops@client.example"],
+        templateId: "11111111-1111-4111-8111-111111111111",
+      },
       { actorId: clientViewer.id },
       clientViewer,
     );
-    expect(tx.incidentComment.create).toHaveBeenCalledWith(
+    expect(issueReporting.resolveRefIncidentNo).toHaveBeenCalledWith("42");
+    expect(tx.incident.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ body: "Started around 2pm.", isInternal: false }),
+        data: expect.objectContaining({
+          description: "Started around 2pm.",
+          severity: "MAJOR",
+          component: "SERVER",
+          subComponent: "SERVER.PSU",
+          tool: "VISUAL",
+          refIncidentNo: "INC-000042",
+          ccEmails: ["ops@client.example"],
+        }),
+      }),
+    );
+    expect(tx.incidentComment.create).not.toHaveBeenCalled();
+    // The timeline records where the report came from and which template drafted it.
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "CREATED",
+          payload: expect.objectContaining({
+            source: "CUSTOMER_REPORT",
+            templateId: "11111111-1111-4111-8111-111111111111",
+          }),
+        }),
       }),
     );
   });
 
-  it("creates no comment when `details` is omitted", async () => {
-    const { service, tx } = makeService();
+  it("lands the ticket in the resolved assignee group (the default Service Desk) and tells that group", async () => {
+    const { service, tx, issueReporting, inbox } = makeService({
+      issueReporting: {
+        resolveAssignment: jest
+          .fn()
+          .mockResolvedValue({ ownerGroupId: "grp-desk", ownerUserId: null }),
+      },
+      supportGroupFindUnique: jest.fn().mockResolvedValue({
+        id: "grp-desk",
+        name: "JSAN ServiceDesk",
+        members: [{ user: { id: "desk-1", email: "desk@example.com", displayName: "Desk" } }],
+      }),
+    });
     await service.createFromCustomer(customerDto, { actorId: clientViewer.id }, clientViewer);
-    expect(tx.incidentComment.create).not.toHaveBeenCalled();
+    expect(issueReporting.resolveAssignment).toHaveBeenCalledWith(undefined, undefined);
+    expect(tx.incident.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ ownerGroupId: "grp-desk" }),
+      }),
+    );
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ userIds: ["desk-1"], kind: "INCIDENT_GROUP_ASSIGNED" }),
+    );
+  });
+
+  it("never lets the body set status or reporter — the row is created NEW for the caller", async () => {
+    const { service, tx } = makeService();
+    await service.createFromCustomer(
+      { ...customerDto, status: "CLOSED", reportedByUserId: "someone-else" } as never,
+      { actorId: clientViewer.id },
+      clientViewer,
+    );
+    const data = tx.incident.create.mock.calls[0][0].data;
+    expect(data.status).toBeUndefined();
+    expect(data.reportedByUserId).toBe(clientViewer.id);
+  });
+});
+
+describe("IncidentsService.updateCcList", () => {
+  it("lets the reporter replace the CC list on their own ticket, with a timeline event and audit", async () => {
+    const { service, tx, auditService } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id, ccEmails: [] })),
+      issueReporting: {
+        normalizeCcEmails: jest.fn().mockReturnValue(["a@client.example", "b@client.example"]),
+      },
+    });
+    await service.updateCcList(
+      "incident-1",
+      { ccEmails: ["A@client.example", "b@client.example"] },
+      { actorId: clientViewer.id },
+      clientViewer,
+    );
+    expect(tx.incident.update).toHaveBeenCalledWith({
+      where: { id: "incident-1" },
+      data: { ccEmails: ["a@client.example", "b@client.example"] },
+    });
+    expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "CC_LIST_CHANGED",
+          payload: { from: [], to: ["a@client.example", "b@client.example"] },
+        }),
+      }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "Incident", entityId: "incident-1", action: "UPDATE" }),
+      tx,
+    );
+  });
+
+  it("refuses a customer touching someone else's ticket", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: "other-customer" })),
+    });
+    await expect(
+      service.updateCcList(
+        "incident-1",
+        { ccEmails: ["a@client.example"] },
+        { actorId: clientViewer.id },
+        clientViewer,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.incident.update).not.toHaveBeenCalled();
   });
 });
 

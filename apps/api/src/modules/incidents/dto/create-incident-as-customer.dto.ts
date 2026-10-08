@@ -1,47 +1,111 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsIn, IsOptional, IsString, IsUUID, Length } from "class-validator";
-
-// A deliberately narrow, curated set for the customer-facing "what kind of
-// issue" picker — the full free-text `category` field on CreateIncidentDto
-// is an internal/triage concept, not something a site POC should be
-// choosing from.
-export const CUSTOMER_ISSUE_CATEGORIES = [
-  "HARDWARE_FAILURE",
-  "NETWORK",
-  "POWER",
-  "COOLING",
-  "ACCESS_REQUEST",
-  "OTHER",
-] as const;
-export type CustomerIssueCategory = (typeof CUSTOMER_ISSUE_CATEGORIES)[number];
+import { Priority } from "@prisma/client";
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Matches,
+} from "class-validator";
+import { CATALOG_VALUE_PATTERN } from "./issue-catalog.dto";
+import { MAX_CC_EMAILS } from "./update-cc-list.dto";
 
 /**
- * What a site POC (CLIENT_MANAGER_VIEWER) submits to self-report an issue.
- * Deliberately excludes priority/impact/urgency/ciId — those are triage
- * calls the internal team makes, not something a customer sets (see
- * IncidentsService.createFromCustomer, which fills in a safe default and
- * lets Service Desk reclassify via the normal PATCH /incidents/:id path).
+ * The client portal's "Report an issue" template (one property per field on
+ * the form). Every pick-list value is checked against the live issue
+ * catalog (IssueReportingService) — the set of allowed values is DB
+ * configuration, not this file.
+ *
+ * Not here on purpose: `status` (always NEW — state changes only ever go
+ * through POST /incidents/:id/transition) and `reporter` (the caller's own
+ * identity, taken from the JWT, never the body).
  */
 export class CreateIncidentAsCustomerDto {
   @ApiProperty({ description: "Site the issue is at — must be one the caller has access to" })
   @IsUUID()
   siteId!: string;
 
-  @ApiProperty({ enum: CUSTOMER_ISSUE_CATEGORIES, example: "HARDWARE_FAILURE" })
-  @IsIn(CUSTOMER_ISSUE_CATEGORIES)
-  category!: CustomerIssueCategory;
+  @ApiPropertyOptional({
+    description: "Template the form was drafted from (recorded on the timeline)",
+  })
+  @IsOptional()
+  @IsUUID()
+  templateId?: string;
 
-  @ApiProperty({ example: "Server in Rack 3 is showing a red fault light" })
+  @ApiProperty({ description: "ISSUE_TYPE catalog value", example: "HARDWARE_FAILURE" })
+  @IsString()
+  @Matches(CATALOG_VALUE_PATTERN)
+  issueType!: string;
+
+  @ApiProperty({ description: "Subject", example: "Server in Rack 3 is showing a red fault light" })
   @IsString()
   @Length(2, 256)
-  shortDescription!: string;
+  subject!: string;
+
+  @ApiPropertyOptional({ description: "Description (the template's drafted body, completed)" })
+  @IsOptional()
+  @IsString()
+  @Length(1, 8000)
+  description?: string;
+
+  @ApiPropertyOptional({ enum: Priority, description: "Defaults to P3 when omitted" })
+  @IsOptional()
+  @IsEnum(Priority)
+  priority?: Priority;
+
+  @ApiPropertyOptional({ description: "SEVERITY catalog value" })
+  @IsOptional()
+  @IsString()
+  @Matches(CATALOG_VALUE_PATTERN)
+  severity?: string;
+
+  @ApiPropertyOptional({ description: "COMPONENT catalog value" })
+  @IsOptional()
+  @IsString()
+  @Matches(CATALOG_VALUE_PATTERN)
+  component?: string;
+
+  @ApiPropertyOptional({ description: "SUB_COMPONENT catalog value, under `component`" })
+  @IsOptional()
+  @IsString()
+  @Matches(CATALOG_VALUE_PATTERN)
+  subComponent?: string;
+
+  @ApiPropertyOptional({ description: "TOOL catalog value" })
+  @IsOptional()
+  @IsString()
+  @Matches(CATALOG_VALUE_PATTERN)
+  tool?: string;
 
   @ApiPropertyOptional({
-    example: "Started around 2pm, other equipment in the rack seems fine.",
-    description: "Posted as the ticket's first customer-visible comment, if provided.",
+    description: "Assignee Group. Defaults to the support group flagged as default (Service Desk).",
+  })
+  @IsOptional()
+  @IsUUID()
+  ownerGroupId?: string;
+
+  @ApiPropertyOptional({ description: "Assignee — must be a member of the assignee group" })
+  @IsOptional()
+  @IsUUID()
+  ownerUserId?: string;
+
+  @ApiPropertyOptional({ type: [String], description: "CC List" })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_CC_EMAILS)
+  @IsEmail({}, { each: true })
+  ccEmails?: string[];
+
+  @ApiPropertyOptional({
+    description: "Ref Bug ID: the ticket this duplicates or is blocked by",
+    example: "INC-000123",
   })
   @IsOptional()
   @IsString()
-  @Length(1, 4000)
-  details?: string;
+  @Length(3, 32)
+  refIncidentNo?: string;
 }

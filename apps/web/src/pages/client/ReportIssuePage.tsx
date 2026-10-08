@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -7,13 +7,29 @@ import {
   Card,
   CardContent,
   Chip,
+  Grid,
   MenuItem,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
 import AttachFileOutlinedIcon from "@mui/icons-material/AttachFileOutlined";
-import { apiGet, apiPost, apiUpload } from "../../api/client";
+import { apiGet, apiPost, apiUpload, getStoredToken } from "../../api/client";
+import { decodeJwtPayload } from "../../api/jwt";
+import {
+  applyTemplate,
+  CC_MAX,
+  DESCRIPTION_MAX,
+  draftProblems,
+  EMPTY_DRAFT,
+  parseCcList,
+  SUBJECT_MAX,
+  subComponentsFor,
+  templateForIssueType,
+  toRequestBody,
+  type IssueCatalog,
+  type ReportDraft,
+} from "./issueReporting";
 
 interface Site {
   id: string;
@@ -21,87 +37,148 @@ interface Site {
   name: string;
 }
 
+interface SupportGroup {
+  id: string;
+  name: string;
+  isDefaultAssignee: boolean | null;
+}
+
+interface GroupMember {
+  id: string;
+  displayName: string;
+  email: string;
+}
+
 interface CreatedIncident {
   id: string;
 }
 
-// Mirrors CUSTOMER_ISSUE_CATEGORIES in
-// apps/api/src/modules/incidents/dto/create-incident-as-customer.dto.ts —
-// a deliberately small, plain-language set. The full free-text `category`
-// field on the internal create form is a triage concept, not something a
-// site POC should have to guess at.
-const ISSUE_CATEGORIES = [
-  { value: "HARDWARE_FAILURE", label: "Hardware fault (server, disk, PSU...)" },
-  { value: "NETWORK", label: "Network / connectivity" },
-  { value: "POWER", label: "Power" },
-  { value: "COOLING", label: "Cooling / temperature" },
-  { value: "ACCESS_REQUEST", label: "Access request" },
-  { value: "OTHER", label: "Something else" },
-];
-
-// What the customer is seeing, in their words. Folded into the first
-// comment as context, never mapped to impact/urgency: that's triage.
-const EFFECTS = [
-  "Nothing is down yet, but something looks wrong",
-  "Some things are slow or degraded",
-  "A service or system is down",
-];
-
-const DETAILS_MAX = 4000;
+/**
+ * One row of the template: a bold label cell and the control beside it,
+ * laid out like the issue-reporting sheet this page mirrors.
+ */
+function FieldRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Stack direction="row" alignItems="flex-start" spacing={1.5}>
+      <Typography sx={{ width: 128, flexShrink: 0, fontWeight: 700, fontSize: 14, pt: 1.25 }}>
+        {label}
+      </Typography>
+      <Box sx={{ flex: 1, minWidth: 0 }}>{children}</Box>
+    </Stack>
+  );
+}
 
 /**
- * The client portal's one write: a site POC describing a problem in their
- * own words. No priority/impact/urgency picker on purpose — that's a
- * triage call Service Desk makes after intake (see
- * IncidentsService.createFromCustomer), not something a customer should
- * have to guess correctly.
+ * The client portal's "Report an issue" page, laid out as the issue
+ * reporting template: Template / Subject / Description / Attachments down
+ * the left, the classification sheet (Reporter, Assignee Group, Assignee,
+ * CC List, Status, Ref Bug ID, Issue Type, Priority, Severity, Component,
+ * Sub Component, Tool) down the right. Every pick-list comes from the
+ * issue catalog the admin maintains; nothing here is hard-coded.
+ *
+ * Status is shown, not picked: a new report is always "New" (the backend
+ * state machine owns status). Reporter is the signed-in account.
  */
 export function ReportIssuePage() {
   const navigate = useNavigate();
+  const token = getStoredToken();
+  const reporterEmail = token ? (decodeJwtPayload(token)?.email ?? "") : "";
+
+  const [catalog, setCatalog] = useState<IssueCatalog | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
+  const [groups, setGroups] = useState<SupportGroup[]>([]);
+  const [members, setMembers] = useState<GroupMember[]>([]);
   const [siteId, setSiteId] = useState("");
-  const [category, setCategory] = useState(ISSUE_CATEGORIES[0].value);
-  const [shortDescription, setShortDescription] = useState("");
-  const [details, setDetails] = useState("");
-  const [startedWhen, setStartedWhen] = useState("");
-  const [effect, setEffect] = useState("");
+  const [draft, setDraft] = useState<ReportDraft>(EMPTY_DRAFT);
+  const [ccInput, setCcInput] = useState("");
+  const [ccWarning, setCcWarning] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    apiGet<{ items: Site[] } | Site[]>("/sites")
-      .then((res) => {
-        const items = Array.isArray(res) ? res : res.items;
+    Promise.all([
+      apiGet<IssueCatalog>("/issue-reporting/catalog"),
+      apiGet<{ items: Site[] } | Site[]>("/sites"),
+      apiGet<SupportGroup[]>("/support-groups"),
+    ])
+      .then(([cat, siteRes, groupRes]) => {
+        const items = Array.isArray(siteRes) ? siteRes : siteRes.items;
+        setCatalog(cat);
         setSites(items);
-        if (items.length === 1) {
-          setSiteId(items[0].id);
-        }
+        setGroups(groupRes);
+        if (items.length === 1) setSiteId(items[0].id);
+        // "Service Desk is default": pre-select the flagged group.
+        setDraft((d) => ({ ...d, ownerGroupId: cat.defaultAssigneeGroupId ?? "" }));
       })
-      .catch((err: Error) => setError(err.message));
+      .catch((err: Error) => setLoadError(err.message));
   }, []);
 
-  const canSubmit = siteId && category && shortDescription.trim().length >= 2 && !submitting;
+  // Assignee options follow the chosen Assignee Group.
+  useEffect(() => {
+    if (!draft.ownerGroupId) {
+      setMembers([]);
+      return;
+    }
+    let cancelled = false;
+    apiGet<GroupMember[]>(`/support-groups/${draft.ownerGroupId}/members`)
+      .then((res) => !cancelled && setMembers(res))
+      .catch(() => !cancelled && setMembers([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [draft.ownerGroupId]);
 
-  const composedDetails = [
-    details.trim(),
-    startedWhen.trim() && `Started: ${startedWhen.trim()}`,
-    effect && `Effect: ${effect}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const subComponents = useMemo(
+    () => (catalog ? subComponentsFor(catalog, draft.component) : []),
+    [catalog, draft.component],
+  );
+
+  const set = <K extends keyof ReportDraft>(key: K, value: ReportDraft[K]) =>
+    setDraft((d) => ({ ...d, [key]: value }));
+
+  const pickTemplate = (templateId: string) => {
+    if (!catalog) return;
+    const template = catalog.templates.find((t) => t.id === templateId) ?? null;
+    setDraft((d) => applyTemplate(d, template, catalog));
+  };
+
+  // Picking an issue type directly pulls in its template too ("we will
+  // have one for each issue type"), so the drafts stay in step.
+  const pickIssueType = (issueType: string) => {
+    if (!catalog) return;
+    const template = templateForIssueType(catalog, issueType);
+    setDraft((d) => ({ ...applyTemplate(d, template, catalog), issueType }));
+  };
+
+  const addCc = () => {
+    const { emails, invalid } = parseCcList(ccInput);
+    const merged = [...draft.ccEmails];
+    for (const e of emails) if (!merged.includes(e)) merged.push(e);
+    set("ccEmails", merged.slice(0, CC_MAX));
+    setCcInput(invalid.join(", "));
+    setCcWarning(
+      invalid.length > 0
+        ? `Not an email address: ${invalid.join(", ")}`
+        : merged.length > CC_MAX
+          ? `Only the first ${CC_MAX} addresses were kept`
+          : null,
+    );
+  };
+
+  const problems = draftProblems(draft, siteId);
+  const canSubmit = problems.length === 0 && !submitting && catalog !== null;
 
   const handleSubmit = async () => {
     setError(null);
     setSubmitting(true);
     let incident: CreatedIncident;
     try {
-      incident = await apiPost<CreatedIncident>("/incidents/customer-report", {
-        siteId,
-        category,
-        shortDescription: shortDescription.trim(),
-        details: composedDetails.slice(0, DETAILS_MAX) || undefined,
-      });
+      incident = await apiPost<CreatedIncident>(
+        "/incidents/customer-report",
+        toRequestBody(draft, siteId),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
@@ -120,149 +197,432 @@ export function ReportIssuePage() {
     navigate(`/client/tickets/${incident.id}`, { state: { justCreated: true, failedUploads } });
   };
 
+  if (loadError) {
+    return <Alert severity="error">Could not load the report form: {loadError}</Alert>;
+  }
+  if (!catalog) {
+    return <Typography color="text.secondary">Loading the report form...</Typography>;
+  }
+
+  const selectSx = { "& .MuiInputBase-root": { bgcolor: "background.paper" } };
+  const noTemplates = catalog.templates.length === 0;
+  const selectedGroup = groups.find((g) => g.id === draft.ownerGroupId);
+
   return (
     <Box>
       <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
         Report an issue
       </Typography>
       <Typography color="text.secondary" sx={{ mb: 3 }}>
-        Tell us what's happening. The service desk will set the priority, assign an engineer and
-        keep you updated on the ticket.
+        Pick a template to start from a draft, fill in what you can, and attach any logs,
+        screenshots or videos. The service desk picks it up from there.
       </Typography>
 
       <Card elevation={0} sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
-        <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+        <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
             </Alert>
           )}
 
-          <Stack spacing={2.5}>
-            {sites.length > 1 && (
-              <TextField
-                select
-                label="Site"
-                value={siteId}
-                onChange={(e) => setSiteId(e.target.value)}
-                fullWidth
-              >
-                {sites.map((s) => (
-                  <MenuItem key={s.id} value={s.id}>
-                    {s.code} — {s.name}
-                  </MenuItem>
-                ))}
-              </TextField>
-            )}
-            {sites.length === 1 && (
-              <Typography variant="body2" color="text.secondary">
-                Site: {sites[0].code} — {sites[0].name}
-              </Typography>
-            )}
+          <Grid container spacing={3}>
+            {/* Left: what happened */}
+            <Grid item xs={12} md={7}>
+              <Stack spacing={2}>
+                <FieldRow label="Site">
+                  {sites.length > 1 ? (
+                    <TextField
+                      select
+                      size="small"
+                      fullWidth
+                      value={siteId}
+                      onChange={(e) => setSiteId(e.target.value)}
+                      sx={selectSx}
+                    >
+                      {sites.map((s) => (
+                        <MenuItem key={s.id} value={s.id}>
+                          {s.code} — {s.name}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  ) : (
+                    <Typography sx={{ pt: 1.25 }}>
+                      {sites[0] ? `${sites[0].code} — ${sites[0].name}` : "No site assigned"}
+                    </Typography>
+                  )}
+                </FieldRow>
 
-            <TextField
-              select
-              label="What kind of issue is it?"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              fullWidth
-            >
-              {ISSUE_CATEGORIES.map((c) => (
-                <MenuItem key={c.value} value={c.value}>
-                  {c.label}
-                </MenuItem>
-              ))}
-            </TextField>
+                <FieldRow label="Template">
+                  <TextField
+                    select
+                    size="small"
+                    fullWidth
+                    value={draft.templateId}
+                    onChange={(e) => pickTemplate(e.target.value)}
+                    helperText={
+                      noTemplates
+                        ? "No templates configured yet — pick an issue type on the right"
+                        : "One per issue type: fills a draft subject, description and defaults"
+                    }
+                    sx={selectSx}
+                  >
+                    <MenuItem value="">
+                      <em>No template</em>
+                    </MenuItem>
+                    {catalog.templates.map((t) => (
+                      <MenuItem key={t.id} value={t.id}>
+                        {t.name}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </FieldRow>
 
-            <TextField
-              label="Short summary"
-              placeholder="e.g. Server in Rack 3 is showing a red fault light"
-              value={shortDescription}
-              onChange={(e) => setShortDescription(e.target.value)}
-              fullWidth
-            />
+                <FieldRow label="Subject">
+                  <TextField
+                    size="small"
+                    fullWidth
+                    placeholder="e.g. Server in Rack 3 is showing a red fault light"
+                    value={draft.subject}
+                    onChange={(e) => set("subject", e.target.value)}
+                    inputProps={{ maxLength: SUBJECT_MAX }}
+                    error={draft.subject.length > SUBJECT_MAX}
+                  />
+                </FieldRow>
 
-            <TextField
-              label="More detail (optional)"
-              placeholder="Which rack or device, what you can see (lights, alarms, error messages), what you've already tried"
-              value={details}
-              onChange={(e) => setDetails(e.target.value)}
-              multiline
-              minRows={4}
-              fullWidth
-            />
+                <FieldRow label="Description:">
+                  <TextField
+                    fullWidth
+                    multiline
+                    minRows={14}
+                    placeholder="Which rack or device, what you can see (lights, alarms, error messages), when it started, what you've already tried"
+                    value={draft.description}
+                    onChange={(e) => set("description", e.target.value)}
+                    inputProps={{ maxLength: DESCRIPTION_MAX }}
+                    helperText={`${draft.description.length} / ${DESCRIPTION_MAX}`}
+                    sx={{ "& textarea": { fontFamily: "inherit" } }}
+                  />
+                </FieldRow>
 
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-              <TextField
-                label="When did it start? (optional)"
-                placeholder="e.g. around 2pm today"
-                value={startedWhen}
-                onChange={(e) => setStartedWhen(e.target.value)}
-                fullWidth
-              />
-              <TextField
-                select
-                label="How is it affecting you? (optional)"
-                value={effect}
-                onChange={(e) => setEffect(e.target.value)}
-                fullWidth
-              >
-                <MenuItem value="">
-                  <em>Not sure</em>
-                </MenuItem>
-                {EFFECTS.map((e) => (
-                  <MenuItem key={e} value={e}>
-                    {e}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </Stack>
+                <FieldRow label="Attachments">
+                  <Box>
+                    <Button
+                      component="label"
+                      variant="outlined"
+                      size="small"
+                      startIcon={<AttachFileOutlinedIcon />}
+                      sx={{ textTransform: "none" }}
+                    >
+                      log file / screenshots / videos
+                      <input
+                        type="file"
+                        hidden
+                        multiple
+                        onChange={(e) => {
+                          const picked = Array.from(e.target.files ?? []);
+                          setFiles((prev) => [...prev, ...picked]);
+                          e.target.value = "";
+                        }}
+                      />
+                    </Button>
+                    {files.length > 0 && (
+                      <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
+                        {files.map((f, i) => (
+                          <Chip
+                            key={`${f.name}-${i}`}
+                            size="small"
+                            label={`${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`}
+                            onDelete={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+                          />
+                        ))}
+                      </Stack>
+                    )}
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mt: 0.5 }}
+                    >
+                      Up to 100 MB each. Stored securely with the ticket; only people on the ticket
+                      can open them.
+                    </Typography>
+                  </Box>
+                </FieldRow>
+              </Stack>
+            </Grid>
 
-            <Box>
-              <Button
-                component="label"
-                variant="outlined"
-                startIcon={<AttachFileOutlinedIcon />}
-                sx={{ textTransform: "none" }}
-              >
-                Add photos or files
-                <input
-                  type="file"
-                  hidden
-                  multiple
-                  onChange={(e) => {
-                    const picked = Array.from(e.target.files ?? []);
-                    setFiles((prev) => [...prev, ...picked]);
-                    e.target.value = "";
-                  }}
-                />
-              </Button>
-              {files.length > 0 && (
-                <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
-                  {files.map((f, i) => (
-                    <Chip
-                      key={`${f.name}-${i}`}
-                      label={f.name}
-                      onDelete={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+            {/* Right: the classification sheet */}
+            <Grid item xs={12} md={5}>
+              <Stack spacing={1.5}>
+                <FieldRow label="Reporter">
+                  <TextField
+                    size="small"
+                    fullWidth
+                    value={reporterEmail}
+                    InputProps={{ readOnly: true }}
+                    helperText="From your sign-in"
+                  />
+                </FieldRow>
+
+                <FieldRow label="Assignee Group">
+                  <TextField
+                    select
+                    size="small"
+                    fullWidth
+                    value={draft.ownerGroupId}
+                    onChange={(e) =>
+                      setDraft((d) => ({ ...d, ownerGroupId: e.target.value, ownerUserId: "" }))
+                    }
+                    sx={selectSx}
+                  >
+                    <MenuItem value="">
+                      <em>Let the service desk decide</em>
+                    </MenuItem>
+                    {groups.map((g) => (
+                      <MenuItem key={g.id} value={g.id}>
+                        {g.name}
+                        {g.isDefaultAssignee ? " (default)" : ""}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </FieldRow>
+
+                <FieldRow label="Assignee">
+                  <TextField
+                    select
+                    size="small"
+                    fullWidth
+                    value={draft.ownerUserId}
+                    onChange={(e) => set("ownerUserId", e.target.value)}
+                    disabled={!draft.ownerGroupId}
+                    helperText={
+                      !draft.ownerGroupId
+                        ? "Pick an assignee group first"
+                        : members.length === 0
+                          ? `${selectedGroup?.name ?? "This group"} will assign someone`
+                          : "Optional — the team usually sets this"
+                    }
+                    sx={selectSx}
+                  >
+                    <MenuItem value="">
+                      <em>Unassigned</em>
+                    </MenuItem>
+                    {members.map((m) => (
+                      <MenuItem key={m.id} value={m.id}>
+                        {m.displayName} ({m.email})
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </FieldRow>
+
+                <FieldRow label="CC List">
+                  <Box>
+                    <TextField
+                      size="small"
+                      fullWidth
+                      placeholder="email, email…  then Enter"
+                      value={ccInput}
+                      onChange={(e) => setCcInput(e.target.value)}
+                      onBlur={() => ccInput.trim() && addCc()}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === ",") {
+                          e.preventDefault();
+                          addCc();
+                        }
+                      }}
+                      error={Boolean(ccWarning)}
+                      helperText={ccWarning ?? "People to copy on updates"}
                     />
-                  ))}
-                </Stack>
-              )}
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", mt: 0.5 }}
-              >
-                A photo of fault lights or a device label often saves a round trip.
-              </Typography>
-            </Box>
+                    {draft.ccEmails.length > 0 && (
+                      <Stack
+                        direction="row"
+                        spacing={0.5}
+                        sx={{ mt: 0.5 }}
+                        flexWrap="wrap"
+                        useFlexGap
+                      >
+                        {draft.ccEmails.map((email) => (
+                          <Chip
+                            key={email}
+                            size="small"
+                            label={email}
+                            onDelete={() =>
+                              set(
+                                "ccEmails",
+                                draft.ccEmails.filter((e) => e !== email),
+                              )
+                            }
+                          />
+                        ))}
+                      </Stack>
+                    )}
+                  </Box>
+                </FieldRow>
 
+                <FieldRow label="Status">
+                  <TextField
+                    size="small"
+                    fullWidth
+                    value="New"
+                    InputProps={{ readOnly: true }}
+                    helperText="Set by the service desk as work progresses"
+                  />
+                </FieldRow>
+
+                <FieldRow label="Ref Bug ID">
+                  <TextField
+                    size="small"
+                    fullWidth
+                    placeholder="<Bug Number>  e.g. INC-000123"
+                    value={draft.refIncidentNo}
+                    onChange={(e) => set("refIncidentNo", e.target.value)}
+                    helperText="If this duplicates or is blocked by another ticket"
+                  />
+                </FieldRow>
+
+                <FieldRow label="Issue Type">
+                  <TextField
+                    select
+                    size="small"
+                    fullWidth
+                    value={draft.issueType}
+                    onChange={(e) => pickIssueType(e.target.value)}
+                    sx={selectSx}
+                  >
+                    {catalog.issueTypes.map((o) => (
+                      <MenuItem key={o.id} value={o.value}>
+                        {o.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </FieldRow>
+
+                <FieldRow label="Priority:">
+                  <TextField
+                    select
+                    size="small"
+                    fullWidth
+                    value={draft.priority}
+                    onChange={(e) => set("priority", e.target.value as ReportDraft["priority"])}
+                    helperText="The service desk may adjust this after triage"
+                    sx={selectSx}
+                  >
+                    <MenuItem value="">
+                      <em>Not sure</em>
+                    </MenuItem>
+                    {catalog.priorities.map((o) => (
+                      <MenuItem key={o.id} value={o.value}>
+                        {o.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </FieldRow>
+
+                <FieldRow label="Severity:">
+                  <TextField
+                    select
+                    size="small"
+                    fullWidth
+                    value={draft.severity}
+                    onChange={(e) => set("severity", e.target.value)}
+                    sx={selectSx}
+                  >
+                    <MenuItem value="">
+                      <em>Not sure</em>
+                    </MenuItem>
+                    {catalog.severities.map((o) => (
+                      <MenuItem key={o.id} value={o.value}>
+                        {o.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </FieldRow>
+
+                <FieldRow label="Component">
+                  <TextField
+                    select
+                    size="small"
+                    fullWidth
+                    value={draft.component}
+                    onChange={(e) =>
+                      setDraft((d) => ({ ...d, component: e.target.value, subComponent: "" }))
+                    }
+                    sx={selectSx}
+                  >
+                    <MenuItem value="">
+                      <em>Not sure</em>
+                    </MenuItem>
+                    {catalog.components.map((o) => (
+                      <MenuItem key={o.id} value={o.value}>
+                        {o.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </FieldRow>
+
+                <FieldRow label="Sub Component">
+                  <TextField
+                    select
+                    size="small"
+                    fullWidth
+                    value={draft.subComponent}
+                    onChange={(e) => set("subComponent", e.target.value)}
+                    disabled={!draft.component || subComponents.length === 0}
+                    helperText={
+                      !draft.component
+                        ? "Pick a component first"
+                        : subComponents.length === 0
+                          ? "No sub components for this component"
+                          : undefined
+                    }
+                    sx={selectSx}
+                  >
+                    <MenuItem value="">
+                      <em>Not sure</em>
+                    </MenuItem>
+                    {subComponents.map((o) => (
+                      <MenuItem key={o.id} value={o.value}>
+                        {o.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </FieldRow>
+
+                <FieldRow label="Tool">
+                  <TextField
+                    select
+                    size="small"
+                    fullWidth
+                    value={draft.tool}
+                    onChange={(e) => set("tool", e.target.value)}
+                    helperText="Where you saw the problem"
+                    sx={selectSx}
+                  >
+                    <MenuItem value="">
+                      <em>Not sure</em>
+                    </MenuItem>
+                    {catalog.tools.map((o) => (
+                      <MenuItem key={o.id} value={o.value}>
+                        {o.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </FieldRow>
+              </Stack>
+            </Grid>
+          </Grid>
+
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={2}
+            alignItems={{ sm: "center" }}
+            sx={{ mt: 3 }}
+          >
             <Button
               variant="contained"
               size="large"
               disabled={!canSubmit}
               onClick={handleSubmit}
-              sx={{ alignSelf: "flex-start", textTransform: "none", fontWeight: 600, px: 4 }}
+              sx={{ textTransform: "none", fontWeight: 600, px: 4 }}
             >
               {submitting
                 ? files.length > 0
@@ -270,6 +630,11 @@ export function ReportIssuePage() {
                   : "Submitting..."
                 : "Submit"}
             </Button>
+            {problems.length > 0 && !submitting && (
+              <Typography variant="body2" color="text.secondary">
+                {problems[0]}
+              </Typography>
+            )}
           </Stack>
         </CardContent>
       </Card>
