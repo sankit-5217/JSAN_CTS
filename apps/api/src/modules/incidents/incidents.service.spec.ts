@@ -2118,12 +2118,7 @@ describe("IncidentsService.autoAssign", () => {
 
     expect(result).toMatchObject({ status: IncidentStatus.ASSIGNED, ownerUserId: "eng-1" });
     expect(tx.incident.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: "incident-1",
-        status: IncidentStatus.NEW,
-        ownerUserId: null,
-        ownerGroupId: null,
-      },
+      where: { id: "incident-1", status: IncidentStatus.NEW, ownerUserId: null },
       data: { status: IncidentStatus.ASSIGNED, ownerUserId: "eng-1" },
     });
     expect(tx.incidentEvent.create).toHaveBeenCalledWith(
@@ -2157,12 +2152,24 @@ describe("IncidentsService.autoAssign", () => {
     expect(tx.incident.updateMany).not.toHaveBeenCalled();
   });
 
-  it("does nothing when someone already owns it", async () => {
+  it("does nothing when an engineer already owns it", async () => {
     const { service, tx } = makeService({
-      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerGroupId: "group-1" })),
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerUserId: "eng-9" })),
     });
     await expect(service.autoAssign("incident-1", "eng-1")).resolves.toBeNull();
     expect(tx.incident.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("still assigns a ticket that only a group owns (a client report in the default Service Desk group)", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerGroupId: "grp-desk" })),
+    });
+    const result = await service.autoAssign("incident-1", "eng-1", "corr-1", "eng-1");
+    expect(result).toMatchObject({ status: IncidentStatus.ASSIGNED, ownerUserId: "eng-1" });
+    expect(tx.incident.updateMany).toHaveBeenCalledWith({
+      where: { id: "incident-1", status: IncidentStatus.NEW, ownerUserId: null },
+      data: { status: IncidentStatus.ASSIGNED, ownerUserId: "eng-1" },
+    });
   });
 
   it("backs off without side effects when the desk assigned it concurrently", async () => {

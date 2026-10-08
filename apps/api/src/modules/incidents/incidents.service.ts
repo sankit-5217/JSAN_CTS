@@ -872,8 +872,10 @@ export class IncidentsService {
    * NEW -> ASSIGNED has no SLA hook, same as the human path.
    *
    * Returns null (and changes nothing) when the incident is no longer NEW
-   * and unowned — e.g. the desk assigned it first. The conditional
-   * updateMany makes that check atomic with the write.
+   * or an engineer already owns it — e.g. the desk assigned it first. A
+   * group owner alone (a client report's default Assignee Group) doesn't
+   * block it; the category team, when there is one, replaces that group.
+   * The conditional updateMany makes that check atomic with the write.
    */
   async autoAssign(
     id: string,
@@ -885,7 +887,10 @@ export class IncidentsService {
     const actorId = acceptedBy ?? null;
     const source = acceptedBy ? "ROUTING_OFFER" : "SKILL_ROUTING";
     const incident = await this.findOne(id);
-    if (incident.status !== IncidentStatus.NEW || incident.ownerUserId || incident.ownerGroupId) {
+    // A group on its own (e.g. the default Service Desk group a client
+    // report lands in) doesn't make the ticket "taken": only an engineer
+    // does. Skill routing therefore still offers group-owned NEW tickets.
+    if (incident.status !== IncidentStatus.NEW || incident.ownerUserId) {
       return null;
     }
 
@@ -900,7 +905,7 @@ export class IncidentsService {
 
     const after = await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.incident.updateMany({
-        where: { id, status: IncidentStatus.NEW, ownerUserId: null, ownerGroupId: null },
+        where: { id, status: IncidentStatus.NEW, ownerUserId: null },
         data: {
           status: IncidentStatus.ASSIGNED,
           ownerUserId,

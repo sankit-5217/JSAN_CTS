@@ -103,7 +103,7 @@ export function ClientHomePage() {
   }, [incidents, answered]);
 
   return (
-    <Box>
+    <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
       <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
         {greetingName ? `Hello, ${greetingName}` : "Welcome"}
       </Typography>

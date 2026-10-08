@@ -99,7 +99,7 @@ export function MyTicketsPage() {
   }, [incidents, filter, answered]);
 
   return (
-    <Box>
+    <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
       <Stack
         direction="row"
         alignItems="flex-end"

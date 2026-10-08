@@ -209,7 +209,7 @@ export function ReportIssuePage() {
   const selectedGroup = groups.find((g) => g.id === draft.ownerGroupId);
 
   return (
-    <Box>
+    <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
       <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
         Report an issue
       </Typography>
@@ -218,7 +218,17 @@ export function ReportIssuePage() {
         screenshots or videos. The service desk picks it up from there.
       </Typography>
 
-      <Card elevation={0} sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
+      <Card
+        elevation={0}
+        sx={{
+          display: "flex",
+          flex: 1,
+          flexDirection: "column",
+          borderRadius: 3,
+          border: "1px solid",
+          borderColor: "divider",
+        }}
+      >
         <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>

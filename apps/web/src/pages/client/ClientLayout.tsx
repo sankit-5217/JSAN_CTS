@@ -47,9 +47,14 @@ export function ClientLayout() {
 
   const token = getStoredToken();
   const user = token ? decodeJwtPayload(token) : null;
+  const isFullScreenPage =
+    location.pathname === "/client/home" ||
+    location.pathname === "/client/report" ||
+    location.pathname === "/client/tickets" ||
+    location.pathname.startsWith("/client/tickets/");
 
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "#f5f7fa" }}>
+    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column", bgcolor: "#f5f7fa" }}>
       <AppBar
         position="static"
         color="inherit"
@@ -113,7 +118,18 @@ export function ClientLayout() {
         </Toolbar>
       </AppBar>
 
-      <Box component="main" sx={{ maxWidth: 880, mx: "auto", p: { xs: 2, sm: 4 } }}>
+      <Box
+        component="main"
+        sx={{
+          width: "100%",
+          maxWidth: isFullScreenPage ? "none" : 880,
+          mx: "auto",
+          flex: isFullScreenPage ? 1 : undefined,
+          p: isFullScreenPage ? { xs: 1.5, sm: 3 } : { xs: 2, sm: 4 },
+          display: isFullScreenPage ? "flex" : undefined,
+          flexDirection: isFullScreenPage ? "column" : undefined,
+        }}
+      >
         <Outlet />
       </Box>
     </Box>

@@ -243,7 +243,7 @@ export function TicketDetailPage() {
   const activity = portal && !finished ? describeActivity(portal.activity, relativeTime) : null;
 
   return (
-    <Box>
+    <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
       <Link component={RouterLink} to="/client/tickets" sx={{ fontSize: 14 }}>
         ← My tickets
       </Link>

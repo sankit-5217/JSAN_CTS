@@ -59,7 +59,8 @@ type OfferWithUser = RoutingOffer & { user: { displayName: string; email: string
 /**
  * Offer/accept routing. When a site's policy is on, a new incident is
  * offered to the top-ranked engineer (RoutingService.rank). The incident
- * stays NEW and unowned while the offer is open. The engineer accepts
+ * stays NEW with no engineer while the offer is open (a client report
+ * keeps its default Assignee Group meanwhile). The engineer accepts
  * (-> ASSIGNED to them via IncidentsService.autoAssign) or declines; if
  * they decline or the offer expires, it goes to the next-ranked engineer
  * who hasn't been offered it yet. When nobody is left, the service desk
@@ -104,10 +105,11 @@ export class RoutingOffersService {
     }
   }
 
-  /** The ticket was assigned or moved on another way: close any open offer. */
+  /** The ticket was assigned to an engineer or moved on another way: close
+   *  any open offer. A group-only assignment leaves the offer running. */
   @OnEvent(INCIDENT_UPDATED_EVENT, { async: true })
   async onIncidentUpdated(event: IncidentUpdatedEvent): Promise<void> {
-    if (event.status === IncidentStatus.NEW && !event.ownerUserId && !event.ownerGroupId) {
+    if (event.status === IncidentStatus.NEW && !event.ownerUserId) {
       return;
     }
     try {
@@ -536,8 +538,10 @@ function offerColumns(offer: RoutingOffer): RoutingOffer {
   return copy as RoutingOffer;
 }
 
+/** Still NEW with no engineer. A group owner alone (the default Assignee
+ *  Group a client report lands in) keeps the ticket routable. */
 function isUnowned(incident: Incident): boolean {
-  return incident.status === IncidentStatus.NEW && !incident.ownerUserId && !incident.ownerGroupId;
+  return incident.status === IncidentStatus.NEW && !incident.ownerUserId;
 }
 
 function errorText(err: unknown): string {
