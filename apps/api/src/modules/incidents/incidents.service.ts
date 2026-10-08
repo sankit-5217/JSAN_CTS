@@ -529,7 +529,7 @@ export class IncidentsService {
   ): Promise<Incident> {
     const before = await this.findOneScoped(id, user);
     const ccEmails = this.issueReporting.normalizeCcEmails(dto.ccEmails);
-    return this.prisma.$transaction(async (tx) => {
+    const after = await this.prisma.$transaction(async (tx) => {
       const after = await tx.incident.update({ where: { id }, data: { ccEmails } });
       await tx.incidentEvent.create({
         data: {
@@ -553,6 +553,14 @@ export class IncidentsService {
       );
       return after;
     });
+    // The desk changing the list is news to the reporter and to whoever
+    // was just added; the reporter editing their own list is not.
+    if (user.role !== UserRole.CLIENT_MANAGER_VIEWER) {
+      await this.notifyCustomerUpdate(after, [
+        `CC list is now: ${ccEmails.length > 0 ? ccEmails.join(", ") : "empty"}`,
+      ]);
+    }
+    return after;
   }
 
   async update(id: string, dto: UpdateIncidentDto, user: AuthenticatedUser, actor: ActorContext) {
@@ -665,9 +673,117 @@ export class IncidentsService {
     } else if (ownerChanged && after.ownerGroupId && !after.ownerUserId) {
       await this.notifyGroupAssignment(after, after.ownerGroupId, actor.actorId);
     }
+    // The reporter and the CC list hear about desk-side edits that matter
+    // to them (who is handling it, priority, subject, classification, the
+    // CC list itself) — internal fields like impact/urgency/CI stay quiet.
+    await this.notifyCustomerUpdate(after, await this.describeCustomerChanges(before, after));
     this.emitUpdated(after, actor);
 
     return after;
+  }
+
+  /** Plain-language lines for the customer-facing "ticket updated" mail. */
+  private async describeCustomerChanges(before: Incident, after: Incident): Promise<string[]> {
+    const changes: string[] = [];
+    if (after.ownerUserId !== before.ownerUserId) {
+      if (after.ownerUserId) {
+        const owner = await this.prisma.user.findUnique({
+          where: { id: after.ownerUserId },
+          select: { displayName: true },
+        });
+        changes.push(`Now handled by ${owner?.displayName ?? "an engineer"}`);
+      } else {
+        changes.push("No engineer is assigned at the moment");
+      }
+    }
+    if (after.ownerGroupId !== before.ownerGroupId && after.ownerGroupId) {
+      const group = await this.prisma.supportGroup.findUnique({
+        where: { id: after.ownerGroupId },
+        select: { name: true },
+      });
+      if (group) {
+        changes.push(`Assigned to the ${group.name} team`);
+      }
+    }
+    if (after.priority !== before.priority) {
+      changes.push(`Priority changed from ${before.priority} to ${after.priority}`);
+    }
+    if (after.shortDescription !== before.shortDescription) {
+      changes.push(`Subject is now: ${after.shortDescription}`);
+    }
+    if ((after.description ?? "") !== (before.description ?? "")) {
+      changes.push("Description updated");
+    }
+    const classification = (
+      [
+        ["Issue type", "issueType"],
+        ["Severity", "severity"],
+        ["Component", "component"],
+        ["Sub component", "subComponent"],
+        ["Tool", "tool"],
+      ] as const
+    )
+      .filter(([, key]) => (after[key] ?? "") !== (before[key] ?? ""))
+      .map(([label, key]) => `${label}: ${after[key] ?? "none"}`);
+    if (classification.length > 0) {
+      changes.push(`Classification updated (${classification.join(", ")})`);
+    }
+    if ((after.refIncidentNo ?? "") !== (before.refIncidentNo ?? "")) {
+      changes.push(
+        after.refIncidentNo ? `Linked to ticket ${after.refIncidentNo}` : "Ticket link removed",
+      );
+    }
+    const ccAfter = after.ccEmails ?? [];
+    const ccBefore = before.ccEmails ?? [];
+    if (ccAfter.length !== ccBefore.length || ccAfter.some((e, i) => e !== ccBefore[i])) {
+      changes.push(`CC list is now: ${ccAfter.length > 0 ? ccAfter.join(", ") : "empty"}`);
+    }
+    return changes;
+  }
+
+  /**
+   * Customer-facing "ticket updated" mail: to the reporter, CC the ticket's
+   * CC list (or straight to the CC list when the ticket has no reporter on
+   * record). Best-effort like every other notification here. The CC list is
+   * read from the row as it is *now*, so an edit to the list reaches the
+   * new addresses with this very mail.
+   */
+  private async notifyCustomerUpdate(incident: Incident, changes: string[]): Promise<void> {
+    if (changes.length === 0) {
+      return;
+    }
+    try {
+      const reporter = incident.reportedByUserId
+        ? await this.prisma.user.findUnique({ where: { id: incident.reportedByUserId } })
+        : null;
+      const to: Party[] = reporter?.email
+        ? [{ name: reporter.displayName, email: reporter.email }]
+        : [];
+      const cc = ccParties(incident, to);
+      const recipients =
+        to.length > 0
+          ? { to, cc: cc.length > 0 ? cc : undefined }
+          : cc.length > 0
+            ? { to: cc }
+            : null;
+      if (!recipients) {
+        return;
+      }
+      await this.notifications.enqueue(
+        {
+          event: { kind: "INCIDENT_UPDATED", entity: this.toEntityRef(incident), changes },
+          recipients,
+        },
+        // Two colons only (see notifyAlertRecoveredEmail): one mail per saved edit.
+        `INCIDENT_UPDATED:${incident.id}:${incident.updatedAt?.getTime() ?? Date.now()}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `ticket-updated notification skipped for incident ${incident.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   // --- Status transitions (spec §15) ----------------------------------
@@ -1589,6 +1705,10 @@ export class IncidentsService {
   ): Promise<void> {
     await this.findOneScoped(incidentId, user);
     const before = await this.findLiveAttachment(incidentId, attachmentId);
+    // A customer can take back their own evidence, never the desk's.
+    if (user.role === UserRole.CLIENT_MANAGER_VIEWER && before.uploadedById !== user.id) {
+      throw new ForbiddenException("You can only remove files you attached yourself");
+    }
 
     await this.prisma.$transaction(async (tx) => {
       const after = await tx.attachment.update({

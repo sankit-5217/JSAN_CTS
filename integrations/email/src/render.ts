@@ -97,6 +97,14 @@ function renderBody(event: NotificationEvent): Rendered {
         phrase: `new comment from ${event.author.name ?? event.author.email}`,
         lines: [`${addr(event.author)} commented on ${event.entity.key}:`, event.body],
       };
+    case "INCIDENT_UPDATED":
+      return {
+        phrase: "ticket updated",
+        lines: [
+          `The service desk updated ${event.entity.key}:`,
+          ...event.changes.map((change) => `- ${change}`),
+        ],
+      };
     case "SLA_WARNING":
       return {
         phrase: `${event.slaKind} SLA due in ${minutesPhrase(event.minutesRemaining)}`,

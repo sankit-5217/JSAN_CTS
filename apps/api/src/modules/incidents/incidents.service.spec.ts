@@ -539,6 +539,75 @@ describe("IncidentsService.updateCcList", () => {
 });
 
 describe("IncidentsService.update", () => {
+  it("emails the reporter with the ticket's CC list when the desk changes something customer-visible", async () => {
+    const before = baseIncident({
+      ownerUserId: engineer.id,
+      reportedByUserId: "customer-1",
+      ccEmails: ["ops-lead@client.example"],
+      priority: Priority.P2,
+    });
+    const { service, notifications } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(before),
+      // Like Postgres: an undefined column in the PATCH data leaves the
+      // stored value (reporter, CC list) alone.
+      txIncident: {
+        update: jest.fn().mockImplementation(({ data }) =>
+          Promise.resolve({
+            ...before,
+            ...Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)),
+          }),
+        ),
+      },
+      userFindUnique: jest
+        .fn()
+        .mockImplementation(({ where }) =>
+          Promise.resolve(
+            where.id === "customer-1"
+              ? { id: "customer-1", email: "customer@example.com", displayName: "Site POC" }
+              : { id: where.id, email: "eng@example.com", displayName: "Rahul" },
+          ),
+        ),
+    });
+    await service.update(
+      "incident-1",
+      { priority: Priority.P1, priorityChangeReason: "Site down", ownerUserId: "eng-2" },
+      serviceDesk,
+      { actorId: serviceDesk.id },
+    );
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "INCIDENT_UPDATED",
+          changes: ["Now handled by Rahul", "Priority changed from P2 to P1"],
+        }),
+        recipients: {
+          to: [{ name: "Site POC", email: "customer@example.com" }],
+          cc: [{ name: "ops-lead@client.example", email: "ops-lead@client.example" }],
+        },
+      }),
+      expect.stringMatching(/^INCIDENT_UPDATED:incident-1:\d+$/),
+    );
+  });
+
+  it("sends no customer update when only internal fields change", async () => {
+    const { service, notifications } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(
+        baseIncident({
+          ownerUserId: engineer.id,
+          reportedByUserId: "customer-1",
+          ccEmails: ["ops-lead@client.example"],
+        }),
+      ),
+    });
+    await service.update("incident-1", { impact: "LOW", urgency: "LOW" }, engineer, {
+      actorId: engineer.id,
+    });
+    expect(notifications.enqueue).not.toHaveBeenCalledWith(
+      expect.objectContaining({ event: expect.objectContaining({ kind: "INCIDENT_UPDATED" }) }),
+      expect.anything(),
+    );
+  });
+
   it("calls SlaService.onPriorityChanged when priority actually changes", async () => {
     const { service, tx, slaService } = makeService({
       incidentFindUnique: jest
@@ -1819,6 +1888,58 @@ describe("IncidentsService attachments", () => {
       tx,
     );
     expect(storageService.putObject).not.toHaveBeenCalled();
+  });
+
+  it("deleteAttachment lets the reporter remove a file they uploaded, on their own ticket", async () => {
+    const { service, prisma, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
+    });
+    (prisma.attachment.findUnique as jest.Mock).mockResolvedValue({
+      id: "attachment-1",
+      entityType: "INCIDENT",
+      entityId: "incident-1",
+      objectKey: "incidents/incident-1/photo.png",
+      contentType: "image/png",
+      uploadedById: clientViewer.id,
+      deletedAt: null,
+    });
+    await service.deleteAttachment(
+      "incident-1",
+      "attachment-1",
+      { actorId: clientViewer.id },
+      clientViewer,
+    );
+    expect(tx.attachment.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "attachment-1" } }),
+    );
+  });
+
+  it("deleteAttachment refuses a reporter removing a file the desk uploaded", async () => {
+    const { service, prisma, tx } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
+    });
+    (prisma.attachment.findUnique as jest.Mock).mockResolvedValue({
+      id: "attachment-1",
+      entityType: "INCIDENT",
+      entityId: "incident-1",
+      objectKey: "incidents/incident-1/desk-notes.pdf",
+      contentType: "application/pdf",
+      uploadedById: engineer.id,
+      deletedAt: null,
+    });
+    await expect(
+      service.deleteAttachment(
+        "incident-1",
+        "attachment-1",
+        { actorId: clientViewer.id },
+        clientViewer,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.attachment.update).not.toHaveBeenCalled();
   });
 
   it("deleteAttachment 404s an already-deleted attachment (can't remove it twice)", async () => {

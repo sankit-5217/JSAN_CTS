@@ -17,6 +17,21 @@ function incident(overrides: Partial<EntityRef> = {}): EntityRef {
 const OPTS = { portalBaseUrl: "https://opsdesk.jsan.example/" };
 
 describe("renderNotification", () => {
+  it("renders a customer-facing ticket update as one line per change", () => {
+    const mail = renderNotification(
+      {
+        kind: "INCIDENT_UPDATED",
+        entity: incident(),
+        changes: ["Now handled by Rahul", "Priority changed from P2 to P1"],
+      },
+      { to: [JANE], cc: [LEAD] },
+    );
+    expect(mail.subject).toBe("[SITE01] INC-1042 — ticket updated");
+    expect(mail.text).toContain("The service desk updated INC-1042:");
+    expect(mail.text).toContain("- Now handled by Rahul");
+    expect(mail.text).toContain("- Priority changed from P2 to P1");
+  });
+
   it("renders a new ticket notification, with and without a reporter", () => {
     const withReporter: NotificationEvent = {
       kind: "INCIDENT_CREATED",

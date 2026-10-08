@@ -53,10 +53,10 @@ export const INCIDENT_WRITE_ROLES = [
 const INCIDENT_COMMENT_ROLES = [...INCIDENT_WRITE_ROLES, UserRole.CLIENT_MANAGER_VIEWER] as const;
 
 // The second customer write: attaching evidence (a photo of a fault light,
-// a screenshot) to their own report. Upload only — deleting an attachment
-// stays internal-only (INCIDENT_WRITE_ROLES), same reasoning as comments
-// never letting the customer mark something internal.
-const INCIDENT_ATTACHMENT_UPLOAD_ROLES = [
+// a screenshot) to their own report — and taking it back. A customer may
+// remove only files they uploaded themselves (the service enforces the
+// uploader check); staff may remove any attachment on the ticket.
+const INCIDENT_ATTACHMENT_ROLES = [
   ...INCIDENT_WRITE_ROLES,
   UserRole.CLIENT_MANAGER_VIEWER,
 ] as const;
@@ -208,7 +208,7 @@ export class IncidentsController {
   }
 
   @Post(":id/attachments")
-  @Roles(...INCIDENT_ATTACHMENT_UPLOAD_ROLES)
+  @Roles(...INCIDENT_ATTACHMENT_ROLES)
   @ApiConsumes("multipart/form-data")
   @UseInterceptors(FileInterceptor("file"))
   uploadAttachment(
@@ -240,7 +240,7 @@ export class IncidentsController {
   }
 
   @Delete(":id/attachments/:attachmentId")
-  @Roles(...INCIDENT_WRITE_ROLES)
+  @Roles(...INCIDENT_ATTACHMENT_ROLES)
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteAttachment(
     @Param("id") id: string,

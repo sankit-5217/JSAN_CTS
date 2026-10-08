@@ -52,6 +52,15 @@ export type NotificationEvent =
     }
   | { kind: "INCIDENT_COMMENT_ADDED"; entity: EntityRef; author: Party; body: string }
   | {
+      /** Customer-facing: the service desk changed something the reporter
+       *  (and the ticket's CC list) should know about — who is handling it,
+       *  priority, subject, classification, the CC list itself. One plain
+       *  sentence per change. */
+      kind: "INCIDENT_UPDATED";
+      entity: EntityRef;
+      changes: string[];
+    }
+  | {
       kind: "SLA_WARNING";
       entity: EntityRef;
       slaKind: SlaKind;

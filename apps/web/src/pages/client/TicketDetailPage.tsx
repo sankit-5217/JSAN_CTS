@@ -23,7 +23,7 @@ import CheckCircleOutlineOutlinedIcon from "@mui/icons-material/CheckCircleOutli
 import EngineeringOutlinedIcon from "@mui/icons-material/EngineeringOutlined";
 import ReportGmailerrorredOutlinedIcon from "@mui/icons-material/ReportGmailerrorredOutlined";
 import type { IncidentStatus, Priority } from "@cts-dc-opsdesk/shared-types";
-import { apiGet, apiPost, apiPut, apiUpload, getStoredToken } from "../../api/client";
+import { apiDelete, apiGet, apiPost, apiPut, apiUpload, getStoredToken } from "../../api/client";
 import { decodeJwtPayload } from "../../api/jwt";
 import {
   allSubComponents,
@@ -81,6 +81,7 @@ interface Attachment {
   id: string;
   objectKey: string;
   sizeBytes: number;
+  uploadedById: string | null;
   createdAt: string;
 }
 
@@ -211,6 +212,19 @@ export function TicketDetailPage() {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setUploading(false);
+    }
+  };
+
+  // Only files the reporter attached themselves get a Delete (the backend
+  // enforces the same rule); a soft delete, the desk keeps the audit trail.
+  const removeAttachment = async (attachment: Attachment) => {
+    if (!window.confirm(`Remove ${attachmentName(attachment)} from this ticket?`)) return;
+    setActionError(null);
+    try {
+      await apiDelete(`/incidents/${id}/attachments/${attachment.id}`);
+      await refetch();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -446,17 +460,24 @@ export function TicketDetailPage() {
           </Typography>
         )}
         {attachments.map((a) => (
-          <Stack key={a.id} direction="row" spacing={2} alignItems="center">
+          <Stack key={a.id} direction="row" spacing={1} alignItems="center">
             <Typography variant="body2" sx={{ flex: 1, overflowWrap: "anywhere" }}>
-              {a.objectKey
-                .split("/")
-                .pop()
-                ?.replace(/^[0-9a-f-]{36}-/, "")}{" "}
-              ({(a.sizeBytes / 1024).toFixed(1)} KB)
+              {attachmentName(a)} ({(a.sizeBytes / 1024).toFixed(1)} KB)
+              {a.uploadedById === myUserId && (
+                <Typography component="span" variant="caption" color="text.secondary">
+                  {" "}
+                  · added by you
+                </Typography>
+              )}
             </Typography>
             <Button size="small" onClick={() => downloadAttachment(a.id)}>
               Download
             </Button>
+            {a.uploadedById === myUserId && (
+              <Button size="small" color="error" onClick={() => void removeAttachment(a)}>
+                Delete
+              </Button>
+            )}
           </Stack>
         ))}
       </Stack>
@@ -638,6 +659,16 @@ function ReportDetails({
         </Box>
       </CardContent>
     </Card>
+  );
+}
+
+/** The original file name, without the uuid prefix the object key carries. */
+function attachmentName(a: Attachment): string {
+  return (
+    a.objectKey
+      .split("/")
+      .pop()
+      ?.replace(/^[0-9a-f-]{36}-/, "") ?? a.objectKey
   );
 }
 
