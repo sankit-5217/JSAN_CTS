@@ -22,6 +22,16 @@ export const ISSUE_REPORTING_ADMIN_ROLES = [
   UserRole.DELIVERY_OPS_MANAGER,
 ] as const;
 
+// Who may open the Issue reporting configuration page at all: the admins
+// above plus the Service Desk (read-only). Engineers and the other roles
+// never see the configuration — they only see its effect on tickets. The
+// form's own GET /catalog stays open to every signed-in user (the client
+// portal and the incident page render from it).
+export const ISSUE_REPORTING_VIEW_ROLES = [
+  ...ISSUE_REPORTING_ADMIN_ROLES,
+  UserRole.SERVICE_DESK_NOC,
+] as const;
+
 /**
  * Configuration behind the "Report an issue" form. Reads are open to every
  * signed-in user (the client portal renders the form from GET /catalog);
@@ -42,6 +52,7 @@ export class IssueReportingController {
   }
 
   @Get("options")
+  @Roles(...ISSUE_REPORTING_VIEW_ROLES)
   @ApiOperation({ summary: "Every catalog option, including retired ones (admin list)" })
   listOptions(@Query("includeInactive") includeInactive?: string) {
     return this.service.listOptions(includeInactive === "true" || includeInactive === "1");
@@ -69,6 +80,7 @@ export class IssueReportingController {
   }
 
   @Get("templates")
+  @Roles(...ISSUE_REPORTING_VIEW_ROLES)
   listTemplates(@Query("includeInactive") includeInactive?: string) {
     return this.service.listTemplates(includeInactive === "true" || includeInactive === "1");
   }

@@ -98,6 +98,8 @@ interface NavItem {
   label: string;
   to: string;
   icon: ReactNode;
+  /** Only shown to these roles (display only — the API enforces access). */
+  roles?: string[];
 }
 
 interface NavGroup {
@@ -142,6 +144,9 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Issue reporting",
         to: "/issue-reporting",
         icon: <ReportProblemOutlinedIcon fontSize="small" />,
+        // Mirrors ISSUE_REPORTING_VIEW_ROLES on the API: admins and the
+        // service desk configure the client's report form; engineers don't.
+        roles: ["SUPER_ADMIN", "DELIVERY_OPS_MANAGER", "SERVICE_DESK_NOC"],
       },
       {
         label: "Team & Shifts",
@@ -188,7 +193,10 @@ const NAV_GROUPS: NavGroup[] = [
 
 function visibleNavGroups(): NavGroup[] {
   const role = getCurrentUserRole();
-  return NAV_GROUPS.filter((g) => !g.roles || (role !== null && g.roles.includes(role)));
+  const allowed = (roles?: string[]) => !roles || (role !== null && roles.includes(role));
+  return NAV_GROUPS.filter((g) => allowed(g.roles))
+    .map((g) => ({ ...g, items: g.items.filter((item) => allowed(item.roles)) }))
+    .filter((g) => g.items.length > 0);
 }
 
 /** Exact match for "/" (else every route would highlight it too); prefix match otherwise. */

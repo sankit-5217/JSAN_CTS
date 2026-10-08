@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Navigate } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -18,9 +19,11 @@ import {
 import { apiGet, apiPatch, apiPost } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
 
-// Mirrors ISSUE_REPORTING_ADMIN_ROLES / SUPPORT_GROUP_WRITE_ROLES on the
-// backend — UI-only gate; the API re-checks regardless.
+// Mirrors ISSUE_REPORTING_ADMIN_ROLES / ISSUE_REPORTING_VIEW_ROLES on the
+// backend — UI-only gate; the API re-checks regardless. Admins edit, the
+// service desk reads, nobody else (engineers included) opens the page.
 const ADMIN_ROLES = ["SUPER_ADMIN", "DELIVERY_OPS_MANAGER"];
+const VIEW_ROLES = [...ADMIN_ROLES, "SERVICE_DESK_NOC"];
 
 type Kind = "ISSUE_TYPE" | "PRIORITY" | "SEVERITY" | "COMPONENT" | "SUB_COMPONENT" | "TOOL";
 
@@ -80,7 +83,9 @@ const VALUE_PATTERN = /^[A-Z0-9][A-Z0-9_.-]{0,63}$/;
  * is DB configuration the form reads live — nothing is hard-coded.
  */
 export function IssueReportingPage() {
-  const canWrite = ADMIN_ROLES.includes(getCurrentUserRole() ?? "");
+  const role = getCurrentUserRole() ?? "";
+  const canWrite = ADMIN_ROLES.includes(role);
+  const canView = VIEW_ROLES.includes(role);
   const [options, setOptions] = useState<CatalogOption[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [groups, setGroups] = useState<SupportGroup[]>([]);
@@ -126,6 +131,12 @@ export function IssueReportingPage() {
       .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
   const components = useMemo(() => byKind("COMPONENT"), [options]); // eslint-disable-line react-hooks/exhaustive-deps
   const defaultGroup = groups.find((g) => g.isDefaultAssignee) ?? null;
+
+  // After the hooks above (rules of hooks): anyone outside the view roles
+  // is sent back to the Command Center instead of seeing the configuration.
+  if (!canView) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <Box>
