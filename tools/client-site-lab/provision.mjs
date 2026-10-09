@@ -11,6 +11,7 @@
 //   opsdesk-webhook-token odk_ token for the webhook (created here if missing)
 // Env overrides: ZABBIX_URL, OPSDESK_API, OPSDESK_ADMIN_EMAIL, OPSDESK_ADMIN_PASSWORD, WSL_DISTRO.
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -319,6 +320,9 @@ var ev = {
 Object.keys(ev).forEach(function (k) {
   if (typeof ev[k] === 'string' && (ev[k] === '' || ev[k].charAt(0) === '{')) { delete ev[k]; }
 });
+// {EVENT.TIMESTAMP} can come back unresolved (e.g. on some action operations); OpsDesk
+// requires a timestamp, so fall back to "now" in Unix seconds.
+if (!/^[0-9]+$/.test(ev.timestamp || '')) { ev.timestamp = String(Math.floor(Date.now() / 1000)); }
 var req = new HttpRequest();
 req.addHeader('Content-Type: application/json');
 req.addHeader('Authorization: Bearer ' + p.token);
@@ -374,17 +378,56 @@ async function ensureWebhook(odkToken) {
   return r.mediatypeids[0];
 }
 
-async function ensureAdminMedia(mediatypeid) {
-  const [admin] = await zbx("user.get", { filter: { username: ["Admin"] }, output: ["userid"], selectMedias: "extend" });
-  const medias = (admin.medias ?? []).map(({ mediatypeid: mt, sendto, active, severity, period }) => ({
-    mediatypeid: mt, sendto, active, severity, period,
-  }));
-  if (!medias.some((x) => x.mediatypeid === mediatypeid)) {
-    medias.push({ mediatypeid, sendto: "opsdesk", active: 0, severity: 63, period: "1-7,00:00-24:00" });
-    await zbx("user.update", { userid: admin.userid, medias });
-    log("Admin user given the OpsDesk media");
+/**
+ * A dedicated, frontend-less Zabbix user that only receives the OpsDesk media.
+ * It must NOT be the user behind the API token: Zabbix never sends an update
+ * notification to the user who made the update, so an acknowledge done from
+ * OpsDesk (as the token's user) would never be echoed back to OpsDesk.
+ */
+async function ensureWebhookUser(mediatypeid) {
+  const USER = "opsdesk-webhook";
+  const GROUP_NAME = "OpsDesk webhook";
+  const hostgroups = await zbx("hostgroup.get", { output: ["groupid"] });
+  const hostgroup_rights = hostgroups.map((g) => ({ id: g.groupid, permission: 2 })); // read
+  let [grp] = await zbx("usergroup.get", { filter: { name: [GROUP_NAME] }, output: ["usrgrpid"] });
+  if (grp) {
+    await zbx("usergroup.update", { usrgrpid: grp.usrgrpid, hostgroup_rights });
+  } else {
+    const r = await zbx("usergroup.create", { name: GROUP_NAME, gui_access: 3, hostgroup_rights }); // 3 = no frontend
+    grp = { usrgrpid: r.usrgrpids[0] };
+    log(`user group "${GROUP_NAME}" created (read-only, no frontend)`);
   }
-  return admin.userid;
+  const [role] = await zbx("role.get", { filter: { name: ["User role"] }, output: ["roleid"] });
+  const medias = [{ mediatypeid, sendto: "opsdesk", active: 0, severity: 63, period: "1-7,00:00-24:00" }];
+  let [user] = await zbx("user.get", { filter: { username: [USER] }, output: ["userid"] });
+  if (user) {
+    await zbx("user.update", { userid: user.userid, usrgrps: [{ usrgrpid: grp.usrgrpid }], medias });
+  } else {
+    const r = await zbx("user.create", {
+      username: USER,
+      name: "OpsDesk",
+      surname: "webhook",
+      passwd: `${randomBytes(18).toString("base64url")}aA1!`,
+      roleid: role.roleid,
+      usrgrps: [{ usrgrpid: grp.usrgrpid }],
+      medias,
+    });
+    user = { userid: r.userids[0] };
+    log(`user ${USER} created (receives the OpsDesk media only)`);
+  }
+  // Earlier versions of this script put the media on Admin; take it off again.
+  const [admin] = await zbx("user.get", { filter: { username: ["Admin"] }, output: ["userid"], selectMedias: "extend" });
+  const adminMedias = admin.medias ?? [];
+  if (adminMedias.some((m) => m.mediatypeid === mediatypeid)) {
+    await zbx("user.update", {
+      userid: admin.userid,
+      medias: adminMedias
+        .filter((m) => m.mediatypeid !== mediatypeid)
+        .map(({ mediatypeid: mt, sendto, active, severity, period }) => ({ mediatypeid: mt, sendto, active, severity, period })),
+    });
+    log("OpsDesk media removed from Admin");
+  }
+  return user.userid;
 }
 
 async function ensureAction(mediatypeid, userid) {
@@ -484,7 +527,7 @@ for (const dev of DEVICES) {
   created.push(hostid);
 }
 const mediatypeid = await ensureWebhook(odkToken);
-const userid = await ensureAdminMedia(mediatypeid);
+const userid = await ensureWebhookUser(mediatypeid);
 await ensureAction(mediatypeid, userid);
 
 // The proxy picks up its config within ProxyConfigFrequency (10 s).

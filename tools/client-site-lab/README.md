@@ -52,10 +52,16 @@ node tools\client-site-lab\provision.mjs
 | Zabbix  | Template `OpsDesk UPS-MIB by SNMP` (RFC 1628, vendor-neutral, 15 items, 6 triggers)   |
 | Zabbix  | 5 hosts in group `Client SITE02`, monitored by the proxy, tagged `site` and `ci`      |
 | Zabbix  | Media type `OpsDesk` (webhook) and action `Send problems to OpsDesk`                  |
+| Zabbix  | User `opsdesk-webhook` (read-only, no frontend) that receives the OpsDesk media       |
 | OpsDesk | 5 CMDB items in SITE02, and an `odk_` token for the webhook (`secrets/`)              |
 
 The webhook sends problems, recoveries and acknowledgements for any event
 carrying a `site` tag to `POST /api/v1/alerts/sources/zabbix`.
+
+The webhook goes to a dedicated `opsdesk-webhook` user on purpose. Zabbix
+never sends an update notification to the user who made the update, and
+acknowledgements from OpsDesk are made as the API token's user. If that user
+also received the webhook, OpsDesk acks would never be echoed back.
 
 ## Break things
 

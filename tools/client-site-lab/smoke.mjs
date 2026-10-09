@@ -89,7 +89,19 @@ let w = await waitFor(
   150,
 );
 record("U1", "UPS on battery -> OpsDesk HIGH alert", w.value?.severity === "HIGH", w.value ? `after ${w.after}s, ${w.value.severity}` : `none after ${w.after}s`);
-record("U2", "On-battery alert does NOT open a ticket", w.value && !w.value.correlatedIncidentId, w.value?.correlatedIncidentId ?? "no incident");
+{
+  // HIGH must not open a ticket. It may still be linked to an incident that was
+  // already open on the UPS (alert correlation), e.g. one left by an earlier run.
+  const linked = w.value?.correlatedIncidentId;
+  const inc = linked ? (await api(ADMIN, "GET", `/incidents/${linked}`)).body : null;
+  const preExisting = inc && Date.parse(inc.createdAt) < start;
+  record(
+    "U2",
+    "On-battery alert does NOT open a new ticket",
+    Boolean(w.value) && (!linked || preExisting),
+    !linked ? "no incident" : `linked to already-open ${inc?.incidentNo ?? linked}`,
+  );
+}
 
 // --- Battery low -> CRITICAL alert + auto incident ---------------------
 start = Date.now();
