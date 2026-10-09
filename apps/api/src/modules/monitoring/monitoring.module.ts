@@ -3,6 +3,8 @@ import { AlertsModule } from "../alerts/alerts.module";
 import { AuthModule } from "../auth/auth.module";
 import { MonitoringController } from "./monitoring.controller";
 import { MonitoringService } from "./monitoring.service";
+import { ZabbixController } from "./zabbix/zabbix.controller";
+import { ZabbixService } from "./zabbix/zabbix.service";
 
 /**
  * Owner: Dev B (Integrations, Hardware & Governance).
@@ -17,6 +19,9 @@ import { MonitoringService } from "./monitoring.service";
  * GET /monitoring/health-snapshots/:ciCode — current snapshot for a CI.
  * POST /monitoring/collector-heartbeat — site collector liveness ping (spec §26),
  * stored as an append-only COLLECTOR_HEARTBEAT audit event per site.
+ * Zabbix (zabbix/): admin-editable connection (ZabbixConnection, token
+ * encrypted at rest) plus live, site-scoped reads of hosts / problems / latest
+ * values / history and an audited problem acknowledge — proxied, never stored.
  * TODO: if Dev A treats HealthSnapshot as cmdb's to write, the upsert moves
  * behind CmdbService — the ingest contract stays.
  *
@@ -31,8 +36,8 @@ import { MonitoringService } from "./monitoring.service";
  */
 @Module({
   imports: [AuthModule, AlertsModule],
-  controllers: [MonitoringController],
-  providers: [MonitoringService],
+  controllers: [MonitoringController, ZabbixController],
+  providers: [MonitoringService, ZabbixService],
   exports: [MonitoringService],
 })
 export class MonitoringModule {}

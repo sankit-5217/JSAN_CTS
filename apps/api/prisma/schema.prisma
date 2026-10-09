@@ -765,6 +765,29 @@ model HealthSnapshot {
   @@map("health_snapshots")
 }
 
+/// Connection to a Zabbix server's JSON-RPC API (monitoring module). OpsDesk
+/// reads hosts, problems, latest values and history from it live — nothing it
+/// returns is persisted here (spec §3.2). One row per named connection; v1 uses
+/// the seeded "default" row, editable by admins on the Zabbix settings page.
+model ZabbixConnection {
+  id               String    @id @default(uuid())
+  name             String    @unique @db.VarChar(64)
+  // e.g. http://127.0.0.1/zabbix/api_jsonrpc.php
+  apiUrl           String    @map("api_url") @db.VarChar(500)
+  enabled          Boolean   @default(true)
+  requestTimeoutMs Int       @default(10000) @map("request_timeout_ms")
+  // Zabbix API token, AES-256-GCM encrypted with INTEGRATION_SECRETS_KEY
+  // (common/crypto/secret-cipher.ts). Never returned by any endpoint; only the
+  // last 4 characters are kept in clear so admins can tell which token is set.
+  tokenCiphertext  String?   @map("token_ciphertext")
+  tokenLast4       String?   @map("token_last4") @db.VarChar(4)
+  tokenUpdatedAt   DateTime? @map("token_updated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@map("zabbix_connections")
+}
+
 model Warranty {
   id        String         @id @default(uuid())
   ciId      String         @map("ci_id")

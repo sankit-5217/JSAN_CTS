@@ -81,6 +81,25 @@ async function findOrCreateShift(data: Prisma.EngineerShiftUncheckedCreateInput)
  * an admin's later edits in the UI survive a re-seed (update: {} never
  * overwrites a label or draft).
  */
+/**
+ * Zabbix connection, pre-filled with the local Zabbix-in-WSL URL so the
+ * settings page opens ready to edit. No token is seeded (it is a secret and is
+ * entered on the page). Upsert with `update: {}` never overwrites an admin's
+ * edits on re-seed. ZABBIX_API_URL overrides the default for other machines.
+ */
+async function seedZabbixConnection() {
+  await prisma.zabbixConnection.upsert({
+    where: { name: "default" },
+    update: {},
+    create: {
+      name: "default",
+      apiUrl: process.env.ZABBIX_API_URL ?? "http://127.0.0.1/zabbix/api_jsonrpc.php",
+      enabled: true,
+      requestTimeoutMs: 10000,
+    },
+  });
+}
+
 async function seedIssueReporting(serviceDeskUserId: string) {
   const serviceDeskGroup = await prisma.supportGroup.upsert({
     where: { name: "JSAN ServiceDesk" },
@@ -864,6 +883,7 @@ async function main() {
   }
 
   await seedIssueReporting(serviceDesk.id);
+  await seedZabbixConnection();
 
   for (const engineer of [rahul, vikas]) {
     await findOrCreateShift({

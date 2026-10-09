@@ -35,6 +35,8 @@ import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
 import VolumeUpOutlinedIcon from "@mui/icons-material/VolumeUpOutlined";
+import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
+import SettingsInputComponentOutlinedIcon from "@mui/icons-material/SettingsInputComponentOutlined";
 import { AccountMenu, roleMeta } from "./components/AccountMenu";
 import { NotificationBell } from "./components/NotificationBell";
 import { SoundControl } from "./notifications/SoundControl";
@@ -79,6 +81,10 @@ import { SupportGroupsPage } from "./pages/SupportGroupsPage";
 import { IssueReportingPage } from "./pages/IssueReportingPage";
 import { VendorCaseDetailPage } from "./pages/VendorCaseDetailPage";
 import { VendorsPage } from "./pages/VendorsPage";
+import { ZabbixHostPage } from "./pages/ZabbixHostPage";
+import { ZabbixPage } from "./pages/ZabbixPage";
+import { ZabbixSettingsPage } from "./pages/ZabbixSettingsPage";
+import { ZABBIX_ADMIN_ROLES, ZABBIX_VIEW_ROLES } from "./api/zabbix";
 
 const DRAWER_WIDTH = 248;
 
@@ -159,6 +165,12 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Monitoring",
     items: [
       {
+        label: "Zabbix",
+        to: "/zabbix",
+        icon: <MonitorHeartOutlinedIcon fontSize="small" />,
+        roles: ZABBIX_VIEW_ROLES,
+      },
+      {
         label: "Alerts",
         to: "/alerts",
         icon: <NotificationsActiveOutlinedIcon fontSize="small" />,
@@ -168,6 +180,12 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Alert insights",
         to: "/alert-insights",
         icon: <InsightsOutlinedIcon fontSize="small" />,
+      },
+      {
+        label: "Zabbix settings",
+        to: "/zabbix/settings",
+        icon: <SettingsInputComponentOutlinedIcon fontSize="small" />,
+        roles: ZABBIX_ADMIN_ROLES,
       },
     ],
   },
@@ -449,6 +467,9 @@ export function App() {
         <Route path="/alerts/:id" element={<AlertDetailPage />} />
         <Route path="/alert-rules" element={<AlertRulesPage />} />
         <Route path="/alert-insights" element={<MonitoringPage />} />
+        <Route path="/zabbix" element={<ZabbixPage />} />
+        <Route path="/zabbix/settings" element={<ZabbixSettingsPage />} />
+        <Route path="/zabbix/hosts/:hostId" element={<ZabbixHostPage />} />
         <Route path="/changes" element={<ChangesPage />} />
         <Route path="/changes/:id" element={<ChangeDetailPage />} />
         <Route path="/vendors" element={<VendorsPage />} />
