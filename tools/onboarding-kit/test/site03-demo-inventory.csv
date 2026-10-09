@@ -1,0 +1,5 @@
+host,name,type,address,port,snmp_version,snmp_community,v3_user,v3_auth_protocol,v3_auth_pass,v3_priv_protocol,v3_priv_pass,v3_context,manufacturer,model,criticality,location
+# TEST ONLY — demo credentials for the simulated devices started by demo-client-devices.sh.
+SITE03-UPS-001,SITE03 UPS (Smart-UPS SRT 5000),ups,127.0.0.51,1161,3,,site03-monitor,SHA256,Demo-Auth-Key-2026,AES128,Demo-Priv-Key-2026,public,APC,Smart-UPS SRT 5000,CRITICAL,Comms room
+SITE03-SW-001,SITE03 Core switch,switch,127.0.0.52,1161,2c,site03-ro,,,,,,,Cisco,Catalyst 2960-X,HIGH,Comms room
+SITE03-ISP-001,SITE03 ISP-A link,isp-link,127.0.0.53,,,,,,,,,,Airtel,100 Mbps ILL,HIGH,
