@@ -1,0 +1,21 @@
+1.3.6.1.2.1.1.1.0|4|APC Web/SNMP Management Card (MB:v4.1.0 PF:v6.9.6 PN:apc_hw05_aos_696.bin)
+1.3.6.1.2.1.1.2.0|6|1.3.6.1.4.1.318.1.3.27
+1.3.6.1.2.1.1.3.0|67:numeric|rate=100,initial=864000000,cumulative=1
+1.3.6.1.2.1.1.4.0|4|Client IT desk <it@client-site02.example>
+1.3.6.1.2.1.1.5.0|4|SITE02-UPS-001
+1.3.6.1.2.1.1.6.0|4|Client office SITE02 / comms room rack A
+1.3.6.1.2.1.33.1.1.1.0|4|APC
+1.3.6.1.2.1.33.1.1.2.0|4|Smart-UPS SRT 5000
+1.3.6.1.2.1.33.1.1.3.0|4|UPS 16.5 (ID1015)
+1.3.6.1.2.1.33.1.1.4.0|4|AOS 6.9.6
+1.3.6.1.2.1.33.1.2.1.0|2:writecache|value=2
+1.3.6.1.2.1.33.1.2.2.0|2:writecache|value=0
+1.3.6.1.2.1.33.1.2.3.0|2:writecache|value=47
+1.3.6.1.2.1.33.1.2.4.0|2:writecache|value=100
+1.3.6.1.2.1.33.1.2.5.0|2:writecache|value=2184
+1.3.6.1.2.1.33.1.2.7.0|2:writecache|value=27
+1.3.6.1.2.1.33.1.3.3.1.2.1|2:writecache|value=500
+1.3.6.1.2.1.33.1.3.3.1.3.1|2:writecache|value=231
+1.3.6.1.2.1.33.1.4.1.0|2:writecache|value=3
+1.3.6.1.2.1.33.1.4.4.1.2.1|2:writecache|value=230
+1.3.6.1.2.1.33.1.4.4.1.5.1|2:writecache|value=38
