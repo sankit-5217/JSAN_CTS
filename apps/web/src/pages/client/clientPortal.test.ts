@@ -4,7 +4,6 @@ import { describeActivity, describeClock, type PortalTicket } from "./clientPort
 const since = () => "12m ago";
 const activity = (overrides: Partial<PortalTicket["activity"]> = {}): PortalTicket["activity"] => ({
   engineer: "Rahul",
-  duty: "ON_SHIFT",
   workingNow: null,
   ...overrides,
 });
@@ -19,16 +18,9 @@ describe("describeActivity", () => {
     ).toBe("Meera is working on this now (started 12m ago)");
   });
 
-  it("says whether the assigned engineer is on duty", () => {
-    expect(describeActivity(activity(), since)).toBe("Rahul is on shift now");
-    expect(describeActivity(activity({ duty: "ON_CALL" }), since)).toBe("Rahul is on call now");
-    expect(describeActivity(activity({ duty: "OFF_DUTY" }), since)).toBe(
-      "Rahul is off shift right now; the on-duty team is covering",
-    );
-  });
-
-  it("says nothing for an unassigned ticket", () => {
-    expect(describeActivity(activity({ engineer: null, duty: null }), since)).toBeNull();
+  it("says nothing about shifts when nobody is working on it right now", () => {
+    expect(describeActivity(activity(), since)).toBeNull();
+    expect(describeActivity(activity({ engineer: null }), since)).toBeNull();
   });
 });
 

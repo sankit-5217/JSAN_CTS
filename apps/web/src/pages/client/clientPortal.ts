@@ -17,21 +17,12 @@ export interface SlaStatus {
 }
 
 export type SiteState = "NO_OPEN_ISSUES" | "ISSUE_IN_PROGRESS" | "MAJOR_INCIDENT";
-export type DutyState = "ON_SHIFT" | "ON_CALL";
-
 export interface PortalContact {
   name: string;
   role: string;
   phone: string | null;
   email: string | null;
   isOnCall: boolean;
-}
-
-export interface PortalTeamMember {
-  name: string;
-  duty: DutyState;
-  shiftLabel: string;
-  tickets: { id: string; incidentNo: string; shortDescription: string }[];
 }
 
 export interface PortalSite {
@@ -41,7 +32,6 @@ export interface PortalSite {
   state: SiteState;
   openIssues: number;
   contacts: PortalContact[];
-  team: PortalTeamMember[];
 }
 
 export interface PortalTicket {
@@ -50,7 +40,6 @@ export interface PortalTicket {
   sla: SlaStatus | null;
   activity: {
     engineer: string | null;
-    duty: DutyState | "OFF_DUTY" | null;
     workingNow: { engineer: string; since: string } | null;
   };
 }
@@ -91,12 +80,6 @@ export const SITE_STATE_COLOR: Record<SiteState, ChipColor> = {
   MAJOR_INCIDENT: "error",
 };
 
-export const DUTY_LABEL: Record<DutyState | "OFF_DUTY", string> = {
-  ON_SHIFT: "On shift",
-  ON_CALL: "On call",
-  OFF_DUTY: "Off shift",
-};
-
 /** "today, 4:30 PM" / "Thu 2 Oct, 4:30 PM": a target time a customer can
  *  read at a glance without doing date arithmetic. */
 export function formatDue(iso: string, now = new Date()): string {
@@ -122,7 +105,8 @@ export function describeClock(kind: "response" | "resolution", clock: SlaClock):
   return clock.dueAt ? `${verb} by ${formatDue(clock.dueAt)}` : "No target set";
 }
 
-/** The live "who's on it" line under a ticket, or null when unassigned. */
+/** The live "working on it now" line under a ticket, or null. Clients
+ *  aren't told who is on shift (switched off 2026-10-13). */
 export function describeActivity(
   activity: PortalTicket["activity"],
   since: (iso: string) => string,
@@ -130,12 +114,7 @@ export function describeActivity(
   if (activity.workingNow) {
     return `${activity.workingNow.engineer} is working on this now (started ${since(activity.workingNow.since)})`;
   }
-  if (!activity.engineer || !activity.duty) {
-    return null;
-  }
-  return activity.duty === "OFF_DUTY"
-    ? `${activity.engineer} is off shift right now; the on-duty team is covering`
-    : `${activity.engineer} is ${DUTY_LABEL[activity.duty].toLowerCase()} now`;
+  return null;
 }
 
 // The roster and SLA badges change on their own as shifts roll over and

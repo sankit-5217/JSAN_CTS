@@ -10,7 +10,7 @@ import {
 
 /**
  * One site as the customer sees it: whether anything is open there, how to
- * reach the service desk by phone or email, and who is on duty right now.
+ * reach the service desk by phone or email.
  */
 export function SitePanel({ site }: { site: PortalSite }) {
   return (
@@ -36,8 +36,6 @@ export function SitePanel({ site }: { site: PortalSite }) {
         <Divider sx={{ my: 2 }} />
 
         <SiteContacts contacts={site.contacts} />
-
-        <Divider sx={{ my: 2 }} />
       </CardContent>
     </Card>
   );
