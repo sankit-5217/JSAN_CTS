@@ -11,13 +11,15 @@ import {
   MenuItem,
   Paper,
   Stack,
+  Switch,
   Tab,
   Tabs,
   TextField,
   Typography,
 } from "@mui/material";
-import { apiGet, apiPatch, apiPost } from "../api/client";
+import { apiGet, apiPatch, apiPost, apiPut } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
+import { TEMPLATE_STATUS_LABEL, type TemplateStatus } from "./client/issueStatus";
 
 // Mirrors ISSUE_REPORTING_ADMIN_ROLES / ISSUE_REPORTING_VIEW_ROLES on the
 // backend — UI-only gate; the API re-checks regardless. Admins edit, the
@@ -25,24 +27,45 @@ import { getCurrentUserRole } from "../api/jwt";
 const ADMIN_ROLES = ["SUPER_ADMIN", "DELIVERY_OPS_MANAGER"];
 const VIEW_ROLES = [...ADMIN_ROLES, "SERVICE_DESK_NOC"];
 
-type Kind = "ISSUE_TYPE" | "PRIORITY" | "SEVERITY" | "COMPONENT" | "SUB_COMPONENT" | "TOOL";
+// TOOL still exists in the catalog for older tickets, but the template no
+// longer has a Tool field (Tools is a component now), so it isn't edited here.
+type Kind = "ISSUE_TYPE" | "PRIORITY" | "SEVERITY" | "COMPONENT" | "SUB_COMPONENT";
 
 const KINDS: { kind: Kind; label: string; hint: string }[] = [
-  { kind: "ISSUE_TYPE", label: "Issue type", hint: "One template can be drafted per issue type." },
+  {
+    kind: "ISSUE_TYPE",
+    label: "Issue type",
+    hint: "Issue types and templates are one list: each issue type gets its own template below (Bug, Process request, Change request…).",
+  },
   {
     kind: "PRIORITY",
     label: "Priority",
     hint: "Re-labels the fixed P1-P4 priorities the SLA policies key on.",
   },
   { kind: "SEVERITY", label: "Severity", hint: "How bad it is, in the reporter's words." },
-  { kind: "COMPONENT", label: "Component", hint: "The part of the estate affected." },
+  {
+    kind: "COMPONENT",
+    label: "Component",
+    hint: "The part of the estate affected (Hardware, Software, NW, Others, Tools).",
+  },
   {
     kind: "SUB_COMPONENT",
     label: "Sub component",
-    hint: "Shown on the form once its component is picked.",
+    hint: "Shown on the form once its component is picked, grouped here by component.",
   },
-  { kind: "TOOL", label: "Tool", hint: "Where the reporter noticed the problem." },
 ];
+
+/** How each template status maps onto the ticket workflow — read-only. */
+const STATUS_NOTES: Record<TemplateStatus, string> = {
+  NEW: "Just raised, nobody assigned yet",
+  ASSIGNED: "Assigned to a group or engineer (also shown for a reopened ticket)",
+  IN_PROGRESS: "Acknowledged or being worked on",
+  PENDING_3RD_PARTY: "Waiting on a vendor; pauses the SLA if the policy says so",
+  ASSIGNED_TO_REQUESTER: "Waiting on the client's reply; pauses the SLA if the policy says so",
+  FIXED: "Resolved (also shown once closed)",
+  BLOCKED_BY: "Can't continue until another ticket moves; needs its ticket number",
+  DUPLICATE_OF: "Closed as a duplicate of another ticket; needs its ticket number",
+};
 
 interface CatalogOption {
   id: string;
@@ -72,6 +95,7 @@ interface SupportGroup {
   id: string;
   name: string;
   isDefaultAssignee: boolean | null;
+  isClientSelectable: boolean;
 }
 
 const VALUE_PATTERN = /^[A-Z0-9][A-Z0-9_.-]{0,63}$/;
@@ -93,6 +117,9 @@ export function IssueReportingPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [kind, setKind] = useState<Kind>("ISSUE_TYPE");
+  // Retired values (e.g. the placeholders the user's lists replaced) are
+  // hidden unless asked for, so the live lists read like the form.
+  const [showRetired, setShowRetired] = useState(false);
 
   const reload = useCallback(() => {
     setError(null);
@@ -125,11 +152,13 @@ export function IssueReportingPage() {
     }
   };
 
-  const byKind = (k: Kind) =>
+  const byKind = (k: Kind, includeRetired = showRetired) =>
     options
-      .filter((o) => o.kind === k)
+      .filter((o) => o.kind === k && (includeRetired || o.isActive))
       .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
-  const components = useMemo(() => byKind("COMPONENT"), [options]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Every component (retired too) so a sub component can always name its parent.
+  const components = useMemo(() => byKind("COMPONENT", true), [options]); // eslint-disable-line react-hooks/exhaustive-deps
+  const retiredCount = options.filter((o) => o.kind !== ("TOOL" as string) && !o.isActive).length;
   const defaultGroup = groups.find((g) => g.isDefaultAssignee) ?? null;
 
   // After the hooks above (rules of hooks): anyone outside the view roles
@@ -144,9 +173,10 @@ export function IssueReportingPage() {
         Issue reporting
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        What a client sees on "Report an issue": the dropdown values, the template drafted for each
-        issue type, and the group new reports are assigned to. Retire a value rather than deleting
-        it — existing tickets keep referring to it.
+        The issue template clients fill in on "Report an issue" — and that clients, the service desk
+        and engineers keep editing on the ticket afterwards (everything but the description): the
+        dropdown values, the template for each issue type, and the assignee groups. Retire a value
+        rather than deleting it — existing tickets keep referring to it.
       </Typography>
 
       {error && (
@@ -172,11 +202,12 @@ export function IssueReportingPage() {
 
       <Paper sx={{ p: 2, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
-          Default assignee group
+          Assignee groups
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-          The "Assignee Group" a new client report lands in unless the reporter picks another (the
-          template's "Service Desk is default"). Members are managed under Support groups.
+          The default is the "Assignee Group" a new client report lands in unless the reporter picks
+          another. Clients can only pick the groups switched on below; the service desk and
+          engineers can pick any group. Members are managed under Support groups.
         </Typography>
         <DefaultGroupPicker
           groups={groups}
@@ -186,12 +217,88 @@ export function IssueReportingPage() {
             run(() => apiPost(`/support-groups/${id}/default`), "Default assignee group updated")
           }
         />
+        <Typography variant="subtitle2" sx={{ mt: 2, mb: 0.5 }}>
+          Offered to clients
+        </Typography>
+        <Stack direction="row" flexWrap="wrap" useFlexGap columnGap={2}>
+          {groups.map((g) => (
+            <FormControlLabel
+              key={g.id}
+              control={
+                <Switch
+                  size="small"
+                  checked={g.isClientSelectable || Boolean(g.isDefaultAssignee)}
+                  disabled={!canWrite || Boolean(g.isDefaultAssignee)}
+                  onChange={(e) =>
+                    run(
+                      () =>
+                        apiPut(`/support-groups/${g.id}/client-selectable`, {
+                          isClientSelectable: e.target.checked,
+                        }),
+                      e.target.checked
+                        ? `Clients can now pick ${g.name}`
+                        : `${g.name} is no longer offered to clients`,
+                    )
+                  }
+                />
+              }
+              label={g.isDefaultAssignee ? `${g.name} (default, always offered)` : g.name}
+            />
+          ))}
+          {groups.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              No support groups yet — create them under Support groups.
+            </Typography>
+          )}
+        </Stack>
       </Paper>
 
       <Paper sx={{ p: 2, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
-          Dropdown values
+          Status
         </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          Fixed by the ticket workflow, not a dropdown you edit: these are the statuses the template
+          shows. Only the service desk and engineers change them (on the ticket page); clients see
+          the status read-only.
+        </Typography>
+        <Box
+          component="dl"
+          sx={{
+            m: 0,
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", sm: "max-content 1fr" },
+            columnGap: 2,
+            rowGap: 0.5,
+            "& dt": { fontWeight: 600, fontSize: 14 },
+            "& dd": { m: 0, fontSize: 14, color: "text.secondary", mb: { xs: 1, sm: 0 } },
+          }}
+        >
+          {(Object.keys(TEMPLATE_STATUS_LABEL) as TemplateStatus[]).map((st) => (
+            <Box key={st} sx={{ display: "contents" }}>
+              <dt>{TEMPLATE_STATUS_LABEL[st]}</dt>
+              <dd>{STATUS_NOTES[st]}</dd>
+            </Box>
+          ))}
+        </Box>
+      </Paper>
+
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap">
+          <Typography variant="h6" gutterBottom>
+            Dropdown values
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={showRetired}
+                onChange={(e) => setShowRetired(e.target.checked)}
+              />
+            }
+            label={`Show retired values${retiredCount ? ` (${retiredCount})` : ""}`}
+          />
+        </Stack>
         <Tabs
           value={kind}
           onChange={(_, v: Kind) => setKind(v)}
@@ -208,19 +315,53 @@ export function IssueReportingPage() {
         </Typography>
 
         <Stack spacing={1} sx={{ mb: 2 }}>
-          {byKind(kind).map((o) => (
-            <OptionRow
-              key={o.id}
-              option={o}
-              parentLabel={
-                o.parentId ? (components.find((c) => c.id === o.parentId)?.label ?? "?") : null
-              }
-              canWrite={canWrite}
-              onSave={(patch) =>
-                run(() => apiPatch(`/issue-reporting/options/${o.id}`, patch), `Saved ${o.label}`)
-              }
-            />
-          ))}
+          {kind === "SUB_COMPONENT"
+            ? components
+                .filter((c) => showRetired || c.isActive)
+                .map((c) => {
+                  const subs = byKind("SUB_COMPONENT").filter((o) => o.parentId === c.id);
+                  if (subs.length === 0) return null;
+                  return (
+                    <Box key={c.id}>
+                      <Typography variant="subtitle2" sx={{ mt: 1, mb: 0.5 }}>
+                        {c.label}
+                        {!c.isActive && (
+                          <Chip size="small" label="retired" sx={{ ml: 1, height: 18 }} />
+                        )}
+                      </Typography>
+                      <Stack spacing={1}>
+                        {subs.map((o) => (
+                          <OptionRow
+                            key={o.id}
+                            option={o}
+                            parentLabel={null}
+                            canWrite={canWrite}
+                            onSave={(patch) =>
+                              run(
+                                () => apiPatch(`/issue-reporting/options/${o.id}`, patch),
+                                `Saved ${o.label}`,
+                              )
+                            }
+                          />
+                        ))}
+                      </Stack>
+                    </Box>
+                  );
+                })
+            : byKind(kind).map((o) => (
+                <OptionRow
+                  key={o.id}
+                  option={o}
+                  parentLabel={null}
+                  canWrite={canWrite}
+                  onSave={(patch) =>
+                    run(
+                      () => apiPatch(`/issue-reporting/options/${o.id}`, patch),
+                      `Saved ${o.label}`,
+                    )
+                  }
+                />
+              ))}
           {byKind(kind).length === 0 && (
             <Typography variant="body2" color="text.secondary">
               No values yet — the form shows this dropdown empty until one is added.
@@ -231,7 +372,7 @@ export function IssueReportingPage() {
         {canWrite && (
           <NewOptionForm
             kind={kind}
-            components={components}
+            components={components.filter((c) => c.isActive)}
             onCreate={(body) =>
               run(() => apiPost("/issue-reporting/options", body), `Added ${body.label}`)
             }
@@ -245,7 +386,8 @@ export function IssueReportingPage() {
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Picking a template on the form fills a draft subject and description plus default
-          priority, severity, component and tool — all of which the reporter can still change.
+          priority, severity and component — all of which the reporter can still change. Add a new
+          issue type above to get another template here.
         </Typography>
         <Stack spacing={2}>
           {byKind("ISSUE_TYPE").map((issueType) => (
@@ -519,7 +661,6 @@ interface TemplateForm {
   defaultSeverity: string;
   defaultComponent: string;
   defaultSubComponent: string;
-  defaultTool: string;
   isActive: boolean;
 }
 
@@ -532,7 +673,6 @@ function formFrom(template: Template | null, issueTypeLabel: string): TemplateFo
     defaultSeverity: template?.defaultSeverity ?? "",
     defaultComponent: template?.defaultComponent ?? "",
     defaultSubComponent: template?.defaultSubComponent ?? "",
-    defaultTool: template?.defaultTool ?? "",
     isActive: template?.isActive ?? true,
   };
 }
@@ -601,10 +741,11 @@ function TemplateEditor({
       defaultSeverity: form.defaultSeverity,
       defaultComponent: form.defaultComponent,
       defaultSubComponent: form.defaultSubComponent,
-      defaultTool: form.defaultTool,
     };
     if (template) {
       body.isActive = form.isActive;
+      // The template has no Tool field any more: clear one left from before.
+      if (template.defaultTool) body.defaultTool = "";
     } else {
       // Create: empty strings aren't accepted as "none", omit them.
       for (const k of Object.keys(body)) if (body[k] === "") delete body[k];
@@ -650,7 +791,7 @@ function TemplateEditor({
               size="small"
               fullWidth
               label="Subject draft"
-              placeholder="[Hardware] <device> - <symptom>"
+              placeholder="[Bug] <system / device> - <what is wrong>"
               value={form.subjectDraft}
               onChange={(e) => set("subjectDraft", e.target.value)}
               disabled={!canWrite}
@@ -663,7 +804,7 @@ function TemplateEditor({
               multiline
               minRows={4}
               label="Description draft"
-              placeholder={"Device:\nWhat you can see:\nWhen did it start?"}
+              placeholder={"What is wrong:\nSteps to reproduce:\nExpected result:"}
               value={form.descriptionDraft}
               onChange={(e) => set("descriptionDraft", e.target.value)}
               disabled={!canWrite}
@@ -708,9 +849,6 @@ function TemplateEditor({
               form.defaultComponent ? active("SUB_COMPONENT", form.defaultComponent) : [],
               !form.defaultComponent,
             )}
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            {pick("Default tool", "defaultTool", active("TOOL"))}
           </Grid>
           {template && (
             <Grid item xs={6} sm={3}>
