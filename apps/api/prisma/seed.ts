@@ -670,10 +670,9 @@ async function main() {
   });
 
   // Omnichannel routing demo: two named SITE01 engineers with distinct
-  // skills, each owning a team, so an alert or ticket routes to the right
-  // person end to end:
-  //   Rahul: Windows + Servers    -> Windows & Servers team
-  //   Vikas: Storage + Backup     -> Storage & Backup team
+  // skills, so an alert or ticket routes to the right person by skill:
+  //   Rahul: Windows + Servers
+  //   Vikas: Storage + Backup
   // A "database.down" alert on the demo database server opens a DATABASE
   // incident (the database.down alert rule below), which needs Storage +
   // Backup, so it's offered to Vikas once SITE01's auto-routing is
@@ -739,36 +738,9 @@ async function main() {
     });
   }
 
-  const [serversTeam, storageTeam] = await Promise.all(
-    ["Windows & Servers team", "Storage & Backup team"].map((name) =>
-      prisma.supportGroup.upsert({ where: { name }, update: {}, create: { name } }),
-    ),
-  );
-  const teamMembers: [string, string][] = [
-    [serversTeam.id, rahul.id],
-    [storageTeam.id, vikas.id],
-  ];
-  for (const [groupId, userId] of teamMembers) {
-    await prisma.supportGroupMember.upsert({
-      where: { groupId_userId: { groupId, userId } },
-      update: {},
-      create: { groupId, userId },
-    });
-  }
-  const categoryTeams: [string, string][] = [
-    ["SERVER_FAILURE", serversTeam.id],
-    ["WINDOWS_OS", serversTeam.id],
-    ["DATABASE", storageTeam.id],
-    ["BACKUP_FAILURE", storageTeam.id],
-    ["STORAGE_FAILURE", storageTeam.id],
-  ];
-  for (const [category, groupId] of categoryTeams) {
-    await prisma.categoryTeam.upsert({
-      where: { category },
-      update: {},
-      create: { category, groupId },
-    });
-  }
+  // Only two support groups exist: JSAN ServiceDesk and Infra team (both
+  // in seedIssueReporting). The user removed every other group on
+  // 2026-10-13, so no demo category teams are seeded.
 
   await seedIssueReporting(serviceDesk.id);
   await seedZabbixConnection();
@@ -956,12 +928,12 @@ async function main() {
       `${siteEngineer1.email} (SITE_ENGINEER, ${site1.code} only), ` +
       `${siteEngineer2.email} (SITE_ENGINEER, ${site1.code} only), ` +
       `${rahul.email} (Windows + Servers) and ${vikas.email} (Storage + Backup) ` +
-      `(SITE_ENGINEER, ${site1.code}, each owning a team), ` +
+      `(SITE_ENGINEER, ${site1.code}), ` +
       `${clientViewer.email} (CLIENT_MANAGER_VIEWER, ${site1.code} only), ` +
       `1 rack and 4 CIs (1 CI-to-CI relation, 3 health snapshots), ` +
       `4 SLA policies (P1-P4) and 1 support calendar per site, ` +
       `6 skills, 8 engineer-skill assignments, 9 category requirements, 10 demo shifts, ` +
-      `2 demo teams with 5 category -> team mappings, a database.down alert rule, ` +
+      `2 support groups (JSAN ServiceDesk, Infra team), a database.down alert rule, ` +
       `1 incident (INC-SEED-001, IN_PROGRESS, 5 timeline events, 1 comment, 1 worklog, 1 SLA instance).`,
   );
 }
