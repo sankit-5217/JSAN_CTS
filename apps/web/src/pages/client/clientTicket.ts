@@ -15,6 +15,8 @@ export const STATUS_LABEL: Record<IncidentStatus, string> = {
   CLOSED: "Closed",
   REOPENED: "Reopened",
   CANCELLED: "Cancelled",
+  BLOCKED: "Blocked by another ticket",
+  DUPLICATE: "Duplicate of another ticket",
 };
 
 export const STATUS_COLOR: Record<
@@ -31,6 +33,8 @@ export const STATUS_COLOR: Record<
   CLOSED: "default",
   REOPENED: "warning",
   CANCELLED: "default",
+  BLOCKED: "warning",
+  DUPLICATE: "default",
 };
 
 export const PRIORITY_LABEL: Record<Priority, string> = {
@@ -52,7 +56,7 @@ export function needsYou(inc: { id: string; status: IncidentStatus }, answered: 
 }
 
 export function isFinished(status: IncidentStatus): boolean {
-  return status === "CLOSED" || status === "CANCELLED";
+  return status === "CLOSED" || status === "CANCELLED" || status === "DUPLICATE";
 }
 
 /** GET /incidents/:id/progress (IncidentCustomerService.getProgress). */

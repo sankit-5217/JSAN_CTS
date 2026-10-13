@@ -48,7 +48,6 @@ export interface ReportDraft {
   severity: string;
   component: string;
   subComponent: string;
-  tool: string;
   ownerGroupId: string;
   ownerUserId: string;
   ccEmails: string[];
@@ -64,7 +63,6 @@ export const EMPTY_DRAFT: ReportDraft = {
   severity: "",
   component: "",
   subComponent: "",
-  tool: "",
   ownerGroupId: "",
   ownerUserId: "",
   ccEmails: [],
@@ -135,8 +133,25 @@ export function applyTemplate(
     subComponent: subComponentsFor(catalog, component).some((s) => s.value === subComponent)
       ? subComponent
       : "",
-    tool: template.defaultTool ?? draft.tool,
   };
+}
+
+/**
+ * The template picker on a ticket that already exists: it switches the
+ * issue type (one template per type) and nothing else — the subject and
+ * classification are already the reporter's own, and the description is
+ * frozen.
+ */
+export function pickTemplateOnTicket(
+  draft: ReportDraft,
+  templateId: string,
+  catalog: IssueCatalog,
+): ReportDraft {
+  const template = catalog.templates.find((t) => t.id === templateId);
+  const issueType = template
+    ? (catalog.issueTypes.find((t) => t.id === template.issueTypeId)?.value ?? draft.issueType)
+    : draft.issueType;
+  return { ...draft, templateId, issueType };
 }
 
 /** The template that drafts a given issue type, if one is configured. */
@@ -203,7 +218,6 @@ export function toRequestBody(draft: ReportDraft, siteId: string) {
     severity: opt(draft.severity),
     component: opt(draft.component),
     subComponent: opt(draft.subComponent),
-    tool: opt(draft.tool),
     ownerGroupId: opt(draft.ownerGroupId),
     ownerUserId: opt(draft.ownerUserId),
     ccEmails: draft.ccEmails.length > 0 ? draft.ccEmails : undefined,
@@ -211,4 +225,84 @@ export function toRequestBody(draft: ReportDraft, siteId: string) {
       ? normalizeRefIncidentNo(draft.refIncidentNo)
       : undefined,
   };
+}
+
+/** The template fields of an incident as GET /incidents/:id returns them. */
+export interface TicketFields {
+  shortDescription: string;
+  description: string | null;
+  issueType: string | null;
+  priority: Priority;
+  severity: string | null;
+  component: string | null;
+  subComponent: string | null;
+  ownerGroupId: string | null;
+  ownerUserId: string | null;
+  ccEmails: string[];
+  refIncidentNo: string | null;
+}
+
+/** An existing ticket loaded into the template form. */
+export function draftFromTicket(ticket: TicketFields, catalog: IssueCatalog | null): ReportDraft {
+  const template =
+    catalog && ticket.issueType ? templateForIssueType(catalog, ticket.issueType) : null;
+  return {
+    templateId: template?.id ?? "",
+    issueType: ticket.issueType ?? "",
+    subject: ticket.shortDescription,
+    description: ticket.description ?? "",
+    priority: ticket.priority,
+    severity: ticket.severity ?? "",
+    component: ticket.component ?? "",
+    subComponent: ticket.subComponent ?? "",
+    ownerGroupId: ticket.ownerGroupId ?? "",
+    ownerUserId: ticket.ownerUserId ?? "",
+    ccEmails: [...(ticket.ccEmails ?? [])],
+    refIncidentNo: ticket.refIncidentNo ?? "",
+  };
+}
+
+/** Why an edited ticket can't be saved yet. */
+export function editProblems(draft: ReportDraft): string[] {
+  const problems: string[] = [];
+  if (!draft.issueType) problems.push("Pick an issue type (or a template)");
+  if (draft.subject.trim().length < 2) problems.push("Give the issue a subject");
+  if (draft.subject.length > SUBJECT_MAX)
+    problems.push(`Subject is over ${SUBJECT_MAX} characters`);
+  if (draft.subComponent && !draft.component) problems.push("A sub component needs its component");
+  if (draft.ownerUserId && !draft.ownerGroupId) problems.push("Pick an assignee group first");
+  if (draft.ccEmails.length > CC_MAX) problems.push(`CC list can hold at most ${CC_MAX} addresses`);
+  return problems;
+}
+
+/**
+ * Only what changed, as PATCH /incidents/:id/report expects it ("" clears
+ * an optional field). Description and status are never sent: the first is
+ * frozen, the second is staff-only.
+ */
+export function reportEditBody(ticket: TicketFields, draft: ReportDraft): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  const changed = (a: string | null | undefined, b: string) => (a ?? "") !== b;
+  if (changed(ticket.issueType, draft.issueType)) body.issueType = draft.issueType;
+  if (ticket.shortDescription !== draft.subject.trim()) body.subject = draft.subject.trim();
+  if (draft.priority && ticket.priority !== draft.priority) body.priority = draft.priority;
+  if (changed(ticket.severity, draft.severity)) body.severity = draft.severity;
+  if (changed(ticket.component, draft.component)) body.component = draft.component;
+  if (changed(ticket.subComponent, draft.subComponent)) body.subComponent = draft.subComponent;
+  if (draft.ownerGroupId && changed(ticket.ownerGroupId, draft.ownerGroupId))
+    body.ownerGroupId = draft.ownerGroupId;
+  if (changed(ticket.ownerUserId, draft.ownerUserId)) body.ownerUserId = draft.ownerUserId;
+  const cc = ticket.ccEmails ?? [];
+  if (cc.length !== draft.ccEmails.length || cc.some((e, i) => e !== draft.ccEmails[i]))
+    body.ccEmails = draft.ccEmails;
+  const ref = draft.refIncidentNo.trim() ? normalizeRefIncidentNo(draft.refIncidentNo) : "";
+  if (changed(ticket.refIncidentNo, ref)) body.refIncidentNo = ref;
+  return body;
+}
+
+/** The Assignee Groups a client may pick (the backend enforces the same). */
+export function clientGroups<
+  T extends { isClientSelectable?: boolean; isDefaultAssignee: boolean | null },
+>(groups: T[]): T[] {
+  return groups.filter((g) => g.isClientSelectable || g.isDefaultAssignee);
 }

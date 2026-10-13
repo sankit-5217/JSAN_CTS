@@ -74,6 +74,10 @@ enum IncidentStatus {
   CLOSED
   REOPENED
   CANCELLED
+  // "Blocked by" / "Duplicate of" on the issue template's Status list; both
+  // need the Ref Bug ID of the other ticket (incident-transitions.ts).
+  BLOCKED
+  DUPLICATE
 }
 
 enum Priority {
@@ -357,6 +361,9 @@ model SupportGroup {
   // SitesService.setDefaultSupportGroup). Nullable-unique so the partial
   // index only ever holds a single TRUE row.
   isDefaultAssignee Boolean? @map("is_default_assignee")
+  // Offered as an "Assignee Group" on the client portal's issue template.
+  // Staff pick from every group; a client only from these (and the default).
+  isClientSelectable Boolean @default(false) @map("is_client_selectable")
   createdAt         DateTime @default(now()) @map("created_at")
 
   incidents     Incident[]
@@ -888,7 +895,8 @@ model IncidentComment {
   isInternal Boolean  @default(true) @map("is_internal") // internal engineer note vs customer-visible
   createdAt  DateTime @default(now()) @map("created_at")
 
-  incident Incident @relation(fields: [incidentId], references: [id])
+  incident    Incident     @relation(fields: [incidentId], references: [id])
+  attachments Attachment[]
 
   @@index([incidentId])
   @@map("incident_comments")
@@ -1291,10 +1299,16 @@ model Attachment {
   // append-only records (worklogs correct, they don't get edited in place).
   deletedAt    DateTime? @map("deleted_at")
   deletedById  String?   @map("deleted_by_id")
+  // Set when the file was sent with a message on an incident's
+  // conversation; it then shows inside that message and inherits the
+  // message's visibility (an internal note's files stay staff-only).
+  commentId    String?   @map("comment_id")
 
-  uploadedBy User? @relation(fields: [uploadedById], references: [id])
-  deletedBy  User? @relation("AttachmentDeletedBy", fields: [deletedById], references: [id])
+  uploadedBy User?            @relation(fields: [uploadedById], references: [id])
+  deletedBy  User?            @relation("AttachmentDeletedBy", fields: [deletedById], references: [id])
+  comment    IncidentComment? @relation(fields: [commentId], references: [id])
 
   @@index([entityType, entityId])
+  @@index([commentId])
   @@map("attachments")
 }

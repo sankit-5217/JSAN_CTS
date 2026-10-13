@@ -21,6 +21,8 @@ export interface TransitionDto {
   ownerUserId?: string;
   resolutionCategory?: string;
   rootCauseSummary?: string;
+  /** The other ticket, for BLOCKED ("blocked by") and DUPLICATE ("duplicate of"). */
+  refIncidentNo?: string;
 }
 
 export interface TransitionRule {
@@ -68,7 +70,16 @@ export const OPEN_STATUSES: IncidentStatus[] = [
   IncidentStatus.PENDING_VENDOR,
   IncidentStatus.PENDING_CUSTOMER,
   IncidentStatus.REOPENED,
+  IncidentStatus.BLOCKED,
 ];
+
+/** BLOCKED and DUPLICATE point at another ticket: the one in the request,
+ *  or the Ref Bug ID already on this one. The service checks it exists. */
+function requireRefIncident(incident: Incident, dto: TransitionDto): string | undefined {
+  return dto.refIncidentNo?.trim() || incident.refIncidentNo
+    ? undefined
+    : "refIncidentNo (the other ticket's number) is required";
+}
 
 export function isOwnerOrElevated(userId: string, userRole: UserRole, incident: Incident): boolean {
   return incident.ownerUserId === userId || ELEVATED_ROLES.includes(userRole);
@@ -168,6 +179,49 @@ export const TRANSITION_RULES: TransitionRule[] = [
     to: IncidentStatus.IN_PROGRESS,
     allowedRoles: [UserRole.SITE_ENGINEER, UserRole.INFRASTRUCTURE_LEAD, UserRole.SUPER_ADMIN],
     requiresOwnerOrElevated: true,
+  },
+  {
+    // "Blocked by" on the issue template: work can't continue until the
+    // referenced ticket moves. The SLA clock keeps running (the blocker is
+    // ours, not the customer's or a vendor's).
+    from: [
+      IncidentStatus.ASSIGNED,
+      IncidentStatus.ACKNOWLEDGED,
+      IncidentStatus.IN_PROGRESS,
+      IncidentStatus.REOPENED,
+    ],
+    to: IncidentStatus.BLOCKED,
+    allowedRoles: [
+      UserRole.SERVICE_DESK_NOC,
+      UserRole.SITE_ENGINEER,
+      UserRole.INFRASTRUCTURE_LEAD,
+      UserRole.SUPER_ADMIN,
+    ],
+    validate: requireRefIncident,
+  },
+  {
+    from: [IncidentStatus.BLOCKED],
+    to: IncidentStatus.IN_PROGRESS,
+    allowedRoles: [
+      UserRole.SITE_ENGINEER,
+      UserRole.SERVICE_DESK_NOC,
+      UserRole.INFRASTRUCTURE_LEAD,
+      UserRole.SUPER_ADMIN,
+    ],
+    requiresOwnerOrElevated: true,
+  },
+  {
+    // "Duplicate of": terminal, like CANCELLED, but says which ticket the
+    // work continues on.
+    from: OPEN_STATUSES,
+    to: IncidentStatus.DUPLICATE,
+    allowedRoles: [
+      UserRole.SERVICE_DESK_NOC,
+      UserRole.SITE_ENGINEER,
+      UserRole.INFRASTRUCTURE_LEAD,
+      UserRole.SUPER_ADMIN,
+    ],
+    validate: requireRefIncident,
   },
   {
     from: OPEN_STATUSES,

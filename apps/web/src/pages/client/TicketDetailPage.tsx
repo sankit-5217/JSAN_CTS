@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router-dom";
 import {
   Alert,
@@ -23,15 +23,26 @@ import CheckCircleOutlineOutlinedIcon from "@mui/icons-material/CheckCircleOutli
 import EngineeringOutlinedIcon from "@mui/icons-material/EngineeringOutlined";
 import ReportGmailerrorredOutlinedIcon from "@mui/icons-material/ReportGmailerrorredOutlined";
 import type { IncidentStatus, Priority } from "@cts-dc-opsdesk/shared-types";
-import { apiDelete, apiGet, apiPost, apiPut, apiUpload, getStoredToken } from "../../api/client";
+import { apiDelete, apiGet, apiPatch, apiPost, getStoredToken } from "../../api/client";
 import { decodeJwtPayload } from "../../api/jwt";
 import {
-  allSubComponents,
-  CC_MAX,
-  labelFor,
-  parseCcList,
+  clientGroups,
+  draftFromTicket,
+  editProblems,
+  reportEditBody,
   type IssueCatalog,
+  type ReportDraft,
+  type TicketFields,
 } from "./issueReporting";
+import { IssueTemplateForm, type TemplateGroup } from "./IssueTemplateForm";
+import { templateStatusText } from "./issueStatus";
+import {
+  attachmentName,
+  sendMessage,
+  type ConversationMessage,
+  type TicketAttachment,
+} from "./conversation";
+import { MessageBubble, StagedFiles } from "./MessageBubble";
 import {
   isFinished,
   JOURNEY,
@@ -52,38 +63,18 @@ import {
 } from "./clientPortal";
 import { SiteContacts } from "./SitePanel";
 
-interface Incident {
+interface Incident extends TicketFields {
   id: string;
   incidentNo: string;
   status: IncidentStatus;
   priority: Priority;
   category: string;
-  shortDescription: string;
-  createdAt: string;
-  description: string | null;
-  issueType: string | null;
-  severity: string | null;
-  component: string | null;
-  subComponent: string | null;
-  tool: string | null;
-  refIncidentNo: string | null;
-  ccEmails: string[];
-}
-
-interface Comment {
-  id: string;
-  authorId: string;
-  body: string;
   createdAt: string;
 }
 
-interface Attachment {
-  id: string;
-  objectKey: string;
-  sizeBytes: number;
-  uploadedById: string | null;
-  createdAt: string;
-}
+type Comment = ConversationMessage;
+type Attachment = TicketAttachment;
+type SupportGroup = TemplateGroup & { isClientSelectable: boolean };
 
 type ThreadItem =
   | { type: "comment"; at: string; comment: Comment }
@@ -98,11 +89,12 @@ const POLL_INTERVAL_MS = 15_000;
  * it, where it is in the journey, what (if anything) we need from them, the
  * conversation with the service desk, and a reply box.
  *
- * Comments are server-filtered to customer-visible ones
- * (IncidentsService.listComments) and the progress summary never carries
- * staff-only detail, so there's nothing to hide client-side. "Who said this"
- * is the caller's own id (sub) vs. anyone else: every comment this role can
- * see is either theirs or the service desk's.
+ * The report itself is the issue template again (IssueTemplateForm in
+ * edit mode): every field stays editable except Description (frozen once
+ * raised) and Status (the service desk's). Comments are server-filtered to
+ * customer-visible ones (IncidentsService.listComments) and carry the
+ * sender's name and the files sent with them; the progress summary never
+ * carries staff-only detail, so there's nothing to hide client-side.
  */
 export function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -120,16 +112,20 @@ export function TicketDetailPage() {
   // Labels for the classification the reporter picked; raw values render
   // if this hasn't loaded.
   const [catalog, setCatalog] = useState<IssueCatalog | null>(null);
+  const [groups, setGroups] = useState<SupportGroup[]>([]);
   useEffect(() => {
     apiGet<IssueCatalog>("/issue-reporting/catalog")
       .then(setCatalog)
+      .catch(() => undefined);
+    apiGet<SupportGroup[]>("/support-groups")
+      .then((res) => setGroups(clientGroups(res)))
       .catch(() => undefined);
   }, []);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reply, setReply] = useState("");
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
   // SLA status, live activity and site contacts are extras: the ticket
   // itself still renders if the overview hasn't loaded or fails.
@@ -186,32 +182,25 @@ export function TicketDetailPage() {
     [comments, myUserId],
   );
 
+  // The message and its files go together: the files show inside it.
   const sendReply = async () => {
-    if (!id || !reply.trim()) return;
+    if (!id || (!reply.trim() && replyFiles.length === 0)) return;
     setSending(true);
     setActionError(null);
     try {
-      await apiPost(`/incidents/${id}/comments`, { body: reply.trim() });
+      const { failedUploads } = await sendMessage(id, reply, replyFiles);
       setReply("");
+      setReplyFiles([]);
+      if (failedUploads.length > 0) {
+        setActionError(
+          `Your message was sent, but these files didn't upload: ${failedUploads.join(", ")}`,
+        );
+      }
       await refetch();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setSending(false);
-    }
-  };
-
-  const uploadFile = async (file: File) => {
-    if (!id) return;
-    setActionError(null);
-    setUploading(true);
-    try {
-      await apiUpload(`/incidents/${id}/attachments`, file);
-      await refetch();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -289,7 +278,7 @@ export function TicketDetailPage() {
             <Chip
               size="small"
               color={STATUS_COLOR[incident.status]}
-              label={STATUS_LABEL[incident.status]}
+              label={templateStatusText(incident.status, incident.refIncidentNo)}
             />
             <Chip size="small" variant="outlined" label={PRIORITY_LABEL[incident.priority]} />
           </Stack>
@@ -333,12 +322,19 @@ export function TicketDetailPage() {
         </CardContent>
       </Card>
 
-      <ReportDetails
-        incident={incident}
-        catalog={catalog}
-        reporterEmail={token ? (decodeJwtPayload(token)?.email ?? "") : ""}
-        onCcSaved={refetch}
-      />
+      {catalog ? (
+        <TicketReportEditor
+          incident={incident}
+          catalog={catalog}
+          groups={groups}
+          reporter={token ? (decodeJwtPayload(token)?.email ?? "") : ""}
+          onSaved={refetch}
+        />
+      ) : (
+        <Typography color="text.secondary" sx={{ mb: 3 }}>
+          Loading your report...
+        </Typography>
+      )}
 
       <NextStepPanel
         incident={incident}
@@ -374,8 +370,9 @@ export function TicketDetailPage() {
           ) : (
             <MessageBubble
               key={item.comment.id}
-              comment={item.comment}
+              message={item.comment}
               mine={item.comment.authorId === myUserId}
+              onDownload={(attachmentId) => void downloadAttachment(attachmentId)}
             />
           ),
         )}
@@ -419,26 +416,31 @@ export function TicketDetailPage() {
           >
             <Button
               variant="contained"
-              disabled={!reply.trim() || sending}
+              disabled={(!reply.trim() && replyFiles.length === 0) || sending}
               onClick={sendReply}
               sx={{ textTransform: "none", fontWeight: 600, px: 4 }}
             >
-              {sending ? "Sending..." : "Send"}
+              {sending
+                ? replyFiles.length > 0
+                  ? "Sending and uploading..."
+                  : "Sending..."
+                : "Send"}
             </Button>
             <Button
               component="label"
               variant="outlined"
-              disabled={uploading}
+              disabled={sending}
               startIcon={<AttachFileOutlinedIcon />}
               sx={{ textTransform: "none" }}
             >
-              {uploading ? "Uploading..." : "Attach a photo or file"}
+              Attach photos or files
               <input
                 type="file"
                 hidden
+                multiple
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void uploadFile(file);
+                  const picked = Array.from(e.target.files ?? []);
+                  setReplyFiles((prev) => [...prev, ...picked]);
                   e.target.value = "";
                 }}
               />
@@ -447,6 +449,10 @@ export function TicketDetailPage() {
               Ctrl+Enter to send
             </Typography>
           </Stack>
+          <StagedFiles
+            files={replyFiles}
+            onRemove={(i) => setReplyFiles((prev) => prev.filter((_, j) => j !== i))}
+          />
         </CardContent>
       </Card>
 
@@ -505,170 +511,131 @@ export function TicketDetailPage() {
 }
 
 /**
- * What was reported, as the "Report an issue" sheet had it: the description
- * and classification (read-only once submitted — the desk corrects those),
- * and the CC List, which the reporter keeps editable.
+ * The ticket's report, as the issue template: the reporter edits any field
+ * but Description (frozen) and Status (the desk's), then saves. While
+ * nothing has been touched it follows the ticket as the page refreshes;
+ * once edited it holds the reporter's changes until saved or discarded.
  */
-function ReportDetails({
+function TicketReportEditor({
   incident,
   catalog,
-  reporterEmail,
-  onCcSaved,
+  groups,
+  reporter,
+  onSaved,
 }: {
   incident: Incident;
-  catalog: IssueCatalog | null;
-  reporterEmail: string;
-  onCcSaved: () => Promise<void>;
+  catalog: IssueCatalog;
+  groups: SupportGroup[];
+  reporter: string;
+  onSaved: () => Promise<void>;
 }) {
-  const [ccInput, setCcInput] = useState("");
-  const [ccError, setCcError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ReportDraft>(() => draftFromTicket(incident, catalog));
+  const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
-  const saveCc = async (ccEmails: string[]) => {
+  useEffect(() => {
+    if (!dirty) setDraft(draftFromTicket(incident, catalog));
+  }, [incident, catalog, dirty]);
+
+  const update = (fn: (d: ReportDraft) => ReportDraft) => {
+    setDirty(true);
+    setSaved(false);
+    setDraft(fn);
+  };
+
+  const locked = isFinished(incident.status);
+  const body = reportEditBody(incident, draft);
+  const changed = Object.keys(body).length > 0;
+  const problems = editProblems(draft);
+
+  const save = async () => {
     setSaving(true);
-    setCcError(null);
+    setError(null);
     try {
-      await apiPut(`/incidents/${incident.id}/cc-list`, { ccEmails });
-      setCcInput("");
-      await onCcSaved();
+      await apiPatch(`/incidents/${incident.id}/report`, body);
+      await onSaved();
+      setDirty(false);
+      setSaved(true);
     } catch (err) {
-      setCcError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
   };
-
-  const addCc = () => {
-    const { emails, invalid } = parseCcList(ccInput);
-    if (invalid.length > 0) {
-      setCcError(`Not an email address: ${invalid.join(", ")}`);
-      return;
-    }
-    const merged = [...incident.ccEmails];
-    for (const e of emails) if (!merged.includes(e)) merged.push(e);
-    if (merged.length > CC_MAX) {
-      setCcError(`The CC list can hold at most ${CC_MAX} addresses`);
-      return;
-    }
-    if (merged.length !== incident.ccEmails.length) void saveCc(merged);
-  };
-
-  const lbl = (
-    options: { id: string; value: string; label: string }[] | undefined,
-    v: string | null,
-  ) => (v ? (catalog && options ? labelFor(options, v) : v) : "");
-  const rows: [string, string][] = [
-    ["Reporter", reporterEmail],
-    ["Issue type", lbl(catalog?.issueTypes, incident.issueType)],
-    ["Priority", lbl(catalog?.priorities, incident.priority)],
-    ["Severity", lbl(catalog?.severities, incident.severity)],
-    [
-      "Component",
-      [
-        lbl(catalog?.components, incident.component),
-        lbl(catalog ? allSubComponents(catalog) : undefined, incident.subComponent),
-      ]
-        .filter(Boolean)
-        .join(" › "),
-    ],
-    ["Tool", lbl(catalog?.tools, incident.tool)],
-    ["Ref Bug ID", incident.refIncidentNo ?? ""],
-  ].filter(([, v]) => v !== "") as [string, string][];
 
   return (
     <Card
       elevation={0}
       sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mb: 3 }}
     >
-      <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
+      <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
           Your report
         </Typography>
-        {incident.description ? (
-          <Typography
-            variant="body2"
-            sx={{
-              whiteSpace: "pre-wrap",
-              overflowWrap: "anywhere",
-              p: 1.5,
-              mb: 1.5,
-              borderRadius: 2,
-              bgcolor: "action.hover",
-            }}
-          >
-            {incident.description}
-          </Typography>
-        ) : (
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            No description was added. You can add detail in a message below.
-          </Typography>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+            {error}
+          </Alert>
         )}
-        <Box
-          component="dl"
-          sx={{
-            m: 0,
-            display: "grid",
-            gridTemplateColumns: "max-content 1fr",
-            columnGap: 2,
-            rowGap: 0.5,
-            "& dt": { fontWeight: 600, fontSize: 13, color: "text.secondary" },
-            "& dd": { m: 0, fontSize: 13, overflowWrap: "anywhere" },
-          }}
-        >
-          {rows.map(([k, v]) => (
-            <Fragment key={k}>
-              <dt>{k}</dt>
-              <dd>{v}</dd>
-            </Fragment>
-          ))}
-          <dt>CC List</dt>
-          <dd>
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
-              {incident.ccEmails.length === 0 && (
-                <Typography variant="caption" color="text.secondary">
-                  Nobody yet
-                </Typography>
-              )}
-              {incident.ccEmails.map((email) => (
-                <Chip
-                  key={email}
-                  size="small"
-                  label={email}
-                  disabled={saving}
-                  onDelete={() => void saveCc(incident.ccEmails.filter((e) => e !== email))}
-                />
-              ))}
-            </Stack>
+        <IssueTemplateForm
+          mode="edit"
+          catalog={catalog}
+          draft={draft}
+          update={update}
+          groups={groups}
+          reporter={reporter}
+          locked={locked}
+          status={
             <TextField
               size="small"
               fullWidth
-              placeholder="Add an email and press Enter"
-              value={ccInput}
-              disabled={saving}
-              onChange={(e) => setCcInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addCc();
-                }
-              }}
-              error={Boolean(ccError)}
-              helperText={ccError ?? "They'll be copied on updates to this ticket"}
+              value={templateStatusText(incident.status, incident.refIncidentNo)}
+              InputProps={{ readOnly: true }}
+              helperText="Set by the service desk as work progresses"
             />
-          </dd>
-        </Box>
+          }
+        />
+        {!locked && (
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1.5}
+            alignItems={{ sm: "center" }}
+            sx={{ mt: 2.5 }}
+          >
+            <Button
+              variant="contained"
+              disabled={!changed || problems.length > 0 || saving}
+              onClick={() => void save()}
+              sx={{ textTransform: "none", fontWeight: 600, px: 4 }}
+            >
+              {saving ? "Saving..." : "Save changes"}
+            </Button>
+            {dirty && (
+              <Button
+                disabled={saving}
+                onClick={() => {
+                  setDirty(false);
+                  setError(null);
+                }}
+                sx={{ textTransform: "none" }}
+              >
+                Discard
+              </Button>
+            )}
+            <Typography variant="body2" color="text.secondary">
+              {problems[0] ??
+                (saved && !dirty
+                  ? "Saved. The service desk has been told."
+                  : changed
+                    ? "You have unsaved changes"
+                    : "")}
+            </Typography>
+          </Stack>
+        )}
       </CardContent>
     </Card>
-  );
-}
-
-/** The original file name, without the uuid prefix the object key carries. */
-function attachmentName(a: Attachment): string {
-  return (
-    a.objectKey
-      .split("/")
-      .pop()
-      ?.replace(/^[0-9a-f-]{36}-/, "") ?? a.objectKey
   );
 }
 
@@ -707,34 +674,6 @@ function SlaPanel({ sla }: { sla: SlaStatus }) {
           </Typography>
         </Box>
       ))}
-    </Box>
-  );
-}
-
-function MessageBubble({ comment, mine }: { comment: Comment; mine: boolean }) {
-  return (
-    <Box
-      sx={{
-        alignSelf: mine ? "flex-end" : "flex-start",
-        maxWidth: { xs: "92%", sm: "80%" },
-        bgcolor: mine ? "primary.main" : "background.paper",
-        color: mine ? "primary.contrastText" : "text.primary",
-        border: mine ? "none" : "1px solid",
-        borderColor: "divider",
-        borderRadius: 3,
-        px: 2,
-        py: 1.25,
-      }}
-    >
-      <Typography
-        variant="caption"
-        sx={{ opacity: 0.8, display: "block", mb: 0.25, fontWeight: 600 }}
-      >
-        {mine ? "You" : "Service desk"} · {new Date(comment.createdAt).toLocaleString()}
-      </Typography>
-      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-        {comment.body}
-      </Typography>
     </Box>
   );
 }

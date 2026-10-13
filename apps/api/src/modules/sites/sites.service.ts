@@ -212,6 +212,33 @@ export class SitesService {
     });
   }
 
+  /** Whether clients may pick this group as Assignee Group on their tickets. */
+  async setSupportGroupClientSelectable(id: string, value: boolean, actor: ActorContext) {
+    const before = await this.getSupportGroup(id);
+    if (before.isClientSelectable === value) {
+      return before;
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const after = await tx.supportGroup.update({
+        where: { id },
+        data: { isClientSelectable: value },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportGroup",
+          entityId: id,
+          action: "SET_CLIENT_SELECTABLE",
+          before: { isClientSelectable: before.isClientSelectable },
+          after: { isClientSelectable: after.isClientSelectable },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return after;
+    });
+  }
+
   private async getSupportGroup(id: string) {
     const group = await this.prisma.supportGroup.findUnique({ where: { id } });
     if (!group) {

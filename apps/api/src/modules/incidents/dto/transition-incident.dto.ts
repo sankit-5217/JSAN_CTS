@@ -1,6 +1,7 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { IncidentStatus } from "@prisma/client";
-import { IsEnum, IsOptional, IsString, IsUUID, Length } from "class-validator";
+import { IsEnum, IsIn, IsOptional, IsString, IsUUID, Length } from "class-validator";
+import { TEMPLATE_STATUSES, TemplateStatus } from "../incident-status-display";
 
 // Field requirements per transition are validated in incident-transitions.ts
 // against the incoming status pair, not here — this DTO only shapes/types
@@ -40,4 +41,45 @@ export class TransitionIncidentDto {
   @IsString()
   @Length(2, 2000)
   rootCauseSummary?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      "The other ticket (INC-000123) for BLOCKED / DUPLICATE; defaults to the ticket's Ref Bug ID",
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 32)
+  refIncidentNo?: string;
+}
+
+/** POST /incidents/:id/status — pick one of the issue template's statuses. */
+export class SetTemplateStatusDto {
+  @ApiProperty({ enum: TEMPLATE_STATUSES })
+  @IsIn(TEMPLATE_STATUSES)
+  status!: TemplateStatus;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  @Length(2, 512)
+  reason?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  @Length(2, 128)
+  resolutionCategory?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  @Length(2, 2000)
+  rootCauseSummary?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  @Length(1, 32)
+  refIncidentNo?: string;
 }

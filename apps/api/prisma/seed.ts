@@ -101,10 +101,16 @@ async function seedZabbixConnection() {
 }
 
 async function seedIssueReporting(serviceDeskUserId: string) {
+  // The two Assignee Groups a client can pick on the issue template.
   const serviceDeskGroup = await prisma.supportGroup.upsert({
     where: { name: "JSAN ServiceDesk" },
     update: {},
-    create: { name: "JSAN ServiceDesk" },
+    create: { name: "JSAN ServiceDesk", isClientSelectable: true },
+  });
+  await prisma.supportGroup.upsert({
+    where: { name: "Infra team" },
+    update: {},
+    create: { name: "Infra team", isClientSelectable: true },
   });
   const currentDefault = await prisma.supportGroup.findFirst({
     where: { isDefaultAssignee: true },
@@ -134,17 +140,13 @@ async function seedIssueReporting(serviceDeskUserId: string) {
       create: { kind, value, label, sortOrder, parentId },
     });
 
+  // Issue types and templates are the same list, one template each.
   const issueTypes: [string, string][] = [
-    ["HARDWARE_FAILURE", "Hardware fault (server, disk, PSU...)"],
-    ["NETWORK", "Network / connectivity"],
-    ["POWER", "Power"],
-    ["COOLING", "Cooling / temperature"],
-    ["STORAGE", "Storage / backup"],
-    ["OS_SOFTWARE", "OS / software"],
-    ["MONITORING", "Monitoring / alerting"],
-    ["ACCESS_REQUEST", "Access request"],
-    ["SERVICE_REQUEST", "Service request"],
-    ["OTHER", "Something else"],
+    ["BUG", "Bug"],
+    ["PROCESS_REQUEST", "Process request"],
+    ["CHANGE_REQUEST", "Change request"],
+    ["FEATURE_REQUEST", "Feature request"],
+    ["OTHER_REQUEST", "Other request"],
   ];
   const issueTypeRows = new Map<string, string>();
   for (const [i, [value, label]] of issueTypes.entries()) {
@@ -175,76 +177,53 @@ async function seedIssueReporting(serviceDeskUserId: string) {
 
   const components: [string, string, [string, string][]][] = [
     [
-      "SERVER",
-      "Server",
+      "HW",
+      "Hardware",
       [
-        ["CPU", "CPU"],
-        ["MEMORY", "Memory"],
-        ["DISK", "Disk / drive"],
-        ["RAID_CONTROLLER", "RAID controller"],
-        ["PSU", "Power supply"],
-        ["FAN", "Fan"],
-        ["NIC", "Network card"],
-        ["BMC", "iDRAC / iLO"],
-      ],
-    ],
-    [
-      "STORAGE",
-      "Storage",
-      [
-        ["ARRAY", "Storage array"],
-        ["CONTROLLER", "Controller"],
-        ["DISK_SHELF", "Disk shelf"],
-        ["BACKUP_JOB", "Backup job"],
-      ],
-    ],
-    [
-      "NETWORK",
-      "Network",
-      [
-        ["SWITCH", "Switch"],
-        ["ROUTER", "Router"],
+        ["SERVER", "HW-Server"],
         ["FIREWALL", "Firewall"],
-        ["CABLING", "Cabling / patching"],
-        ["WIFI", "Wi-Fi"],
-      ],
-    ],
-    [
-      "POWER",
-      "Power",
-      [
-        ["UPS", "UPS"],
         ["PDU", "PDU"],
-        ["RACK_FEED", "Rack power feed"],
-        ["GENERATOR", "Generator"],
+        ["UPS", "UPS"],
+        ["OTHERS", "Others"],
       ],
     ],
     [
-      "COOLING",
-      "Cooling",
+      "SW",
+      "Software",
       [
-        ["CRAC_UNIT", "CRAC / CRAH unit"],
-        ["CHILLER", "Chiller"],
-        ["SENSOR", "Temperature / humidity sensor"],
+        ["SW1", "SW1"],
+        ["SW2", "SW2"],
+        ["SW3", "SW3"],
+        ["OS", "OS"],
+        ["FIRMWARE", "Firmware"],
       ],
     ],
     [
-      "FACILITY",
-      "Facility",
+      "NW",
+      "NW",
       [
-        ["DOOR_ACCESS", "Door access"],
-        ["FIRE_SUPPRESSION", "Fire suppression"],
+        ["ISP", "ISP"],
+        ["FW", "FW"],
+        ["WIFI", "Wifi"],
+      ],
+    ],
+    [
+      "OTHERS",
+      "Others",
+      [
+        ["POWER", "Power"],
+        ["AC", "AC"],
         ["CCTV", "CCTV"],
       ],
     ],
     [
-      "SOFTWARE",
-      "Software",
+      "TOOLS",
+      "Tools",
       [
-        ["OS", "Operating system"],
-        ["HYPERVISOR", "Hypervisor"],
-        ["DATABASE", "Database"],
-        ["APPLICATION", "Application"],
+        ["DRIVEFLUX", "DriveFlux"],
+        ["DISKSQUAD", "DiskSquad"],
+        ["ANYDESK", "Anydesk"],
+        ["OTHERS", "Others"],
       ],
     ],
   ];
@@ -261,23 +240,6 @@ async function seedIssueReporting(serviceDeskUserId: string) {
     }
   }
 
-  const tools: [string, string][] = [
-    ["ZABBIX", "Zabbix"],
-    ["PROMETHEUS", "Prometheus / Alertmanager"],
-    ["GRAFANA", "Grafana"],
-    ["LOKI", "Loki (logs)"],
-    ["IDRAC", "Dell iDRAC"],
-    ["ILO", "HPE iLO"],
-    ["OPSDESK", "OpsDesk portal"],
-    ["VISUAL", "Visual inspection on site"],
-    ["OTHER", "Other"],
-  ];
-  for (const [i, [value, label]] of tools.entries()) {
-    await option(IssueCatalogKind.TOOL, value, label, i);
-  }
-
-  const steps =
-    "\n\nSteps to reproduce / what you did:\n1. \n\nExpected:\n\nActual:\n\nWhen did it start?\n\nAlready tried:\n";
   const templates: {
     issueType: string;
     name: string;
@@ -290,116 +252,42 @@ async function seedIssueReporting(serviceDeskUserId: string) {
     defaultTool?: string;
   }[] = [
     {
-      issueType: "HARDWARE_FAILURE",
-      name: "Hardware fault",
-      subjectDraft: "[Hardware] <device / rack> - <symptom>",
+      issueType: "BUG",
+      name: "Bug",
+      subjectDraft: "[Bug] <system / device> - <what is wrong>",
       descriptionDraft:
-        "Device (service tag / CI code):\nRack and position:\nWhat you can see (LEDs, alarms, error on screen):" +
-        steps,
-      defaultPriority: Priority.P2,
-      defaultSeverity: "MAJOR",
-      defaultComponent: "SERVER",
-      defaultTool: "VISUAL",
-    },
-    {
-      issueType: "NETWORK",
-      name: "Network / connectivity",
-      subjectDraft: "[Network] <what is unreachable> from <where>",
-      descriptionDraft:
-        "Affected devices / VLAN / IPs:\nReachable from elsewhere? (yes/no):\nRecent change you know of:" +
-        steps,
-      defaultPriority: Priority.P2,
-      defaultSeverity: "MAJOR",
-      defaultComponent: "NETWORK",
-      defaultTool: "OPSDESK",
-    },
-    {
-      issueType: "POWER",
-      name: "Power",
-      subjectDraft: "[Power] <rack / feed / UPS> - <symptom>",
-      descriptionDraft:
-        "Rack / feed / UPS affected:\nIs equipment still powered on? (yes/no/partial):\nAlarms shown:" +
-        steps,
-      defaultPriority: Priority.P1,
-      defaultSeverity: "CRITICAL",
-      defaultComponent: "POWER",
-      defaultTool: "VISUAL",
-    },
-    {
-      issueType: "COOLING",
-      name: "Cooling / temperature",
-      subjectDraft: "[Cooling] <room / row> - <reading or symptom>",
-      descriptionDraft:
-        "Room / row / unit:\nCurrent reading (temperature / humidity):\nAlarms shown:" + steps,
-      defaultPriority: Priority.P2,
-      defaultSeverity: "MAJOR",
-      defaultComponent: "COOLING",
-      defaultTool: "VISUAL",
-    },
-    {
-      issueType: "STORAGE",
-      name: "Storage / backup",
-      subjectDraft: "[Storage] <array / job> - <symptom>",
-      descriptionDraft:
-        "Array / volume / backup job:\nError message or job status:\nData at risk? (yes/no/unknown):" +
-        steps,
-      defaultPriority: Priority.P2,
-      defaultSeverity: "MAJOR",
-      defaultComponent: "STORAGE",
-      defaultTool: "OPSDESK",
-    },
-    {
-      issueType: "OS_SOFTWARE",
-      name: "OS / software",
-      subjectDraft: "[Software] <host / application> - <symptom>",
-      descriptionDraft:
-        "Host / application / version:\nError message (paste or attach a screenshot):\nUsers affected:" +
-        steps,
+        "What is wrong:\n\nSteps to reproduce:\n1. \n\nExpected result:\n\nActual result:\n\nWhen did it start?\n\nAlready tried:\n",
       defaultPriority: Priority.P3,
-      defaultSeverity: "MINOR",
-      defaultComponent: "SOFTWARE",
-      defaultTool: "OTHER",
     },
     {
-      issueType: "MONITORING",
-      name: "Monitoring / alerting",
-      subjectDraft: "[Monitoring] <alert or dashboard> - <what is wrong>",
+      issueType: "PROCESS_REQUEST",
+      name: "Process request",
+      subjectDraft: "[Process] <process> - <what you need>",
       descriptionDraft:
-        "Alert name / dashboard / host:\nIs it a false alarm, a missing alert, or a broken check?:\nLink or screenshot:" +
-        steps,
+        "Which process:\n\nWhat you need done:\n\nNeeded by (date / time):\n\nApprovals (if any):\n",
       defaultPriority: Priority.P3,
-      defaultSeverity: "MINOR",
-      defaultTool: "ZABBIX",
     },
     {
-      issueType: "ACCESS_REQUEST",
-      name: "Access request",
-      subjectDraft: "[Access] <who> needs <what> at <site>",
+      issueType: "CHANGE_REQUEST",
+      name: "Change request",
+      subjectDraft: "[Change] <system / device> - <change>",
       descriptionDraft:
-        "Person (name, company, ID):\nWhat access (physical area / system / role):\nFrom when until when:\nApproved by:",
-      defaultPriority: Priority.P4,
-      defaultSeverity: "TRIVIAL",
-      defaultComponent: "FACILITY",
-      defaultSubComponent: "FACILITY.DOOR_ACCESS",
-      defaultTool: "OPSDESK",
-    },
-    {
-      issueType: "SERVICE_REQUEST",
-      name: "Service request",
-      subjectDraft: "[Request] <what you need>",
-      descriptionDraft: "What you need:\nWhy / for whom:\nNeeded by (date):",
-      defaultPriority: Priority.P4,
-      defaultSeverity: "TRIVIAL",
-      defaultTool: "OPSDESK",
-    },
-    {
-      issueType: "OTHER",
-      name: "Something else",
-      subjectDraft: "",
-      descriptionDraft: "What is happening:" + steps,
+        "What should change:\n\nWhy (business reason):\n\nAffected systems / devices:\n\nPreferred maintenance window:\n\nRollback plan:\n",
       defaultPriority: Priority.P3,
-      defaultSeverity: "MINOR",
-      defaultTool: "OTHER",
+    },
+    {
+      issueType: "FEATURE_REQUEST",
+      name: "Feature request",
+      subjectDraft: "[Feature] <what you would like>",
+      descriptionDraft: "What you would like:\n\nWhy it helps:\n\nWho will use it:\n",
+      defaultPriority: Priority.P3,
+    },
+    {
+      issueType: "OTHER_REQUEST",
+      name: "Other request",
+      subjectDraft: "[Request] <short summary>",
+      descriptionDraft: "What you need:\n\nAny details that help:\n",
+      defaultPriority: Priority.P3,
     },
   ];
   for (const t of templates) {

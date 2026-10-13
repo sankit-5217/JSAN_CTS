@@ -10,6 +10,22 @@ describe("Incidents API (e2e)", () => {
     t = await createTestApp();
     await resetSchema(t.prisma);
     fx = await seedFixture(t.prisma);
+    // A reporter's priority change re-targets the SLA, which needs a policy.
+    await t.prisma.slaPolicy.create({
+      data: {
+        name: "E2E P2 policy",
+        priority: "P2",
+        ackTargetMinutes: 15,
+        resolveTargetMinutes: 240,
+        effectiveFrom: new Date(Date.now() - 86_400_000),
+      },
+    });
+    // The client "Report an issue" form validates against the DB catalog.
+    for (const [i, value] of ["BUG", "CHANGE_REQUEST"].entries()) {
+      await t.prisma.issueCatalogOption.create({
+        data: { kind: "ISSUE_TYPE", value, label: value, sortOrder: i },
+      });
+    }
   });
   afterAll(async () => {
     await resetSchema(t.prisma);
@@ -91,8 +107,8 @@ describe("Incidents API (e2e)", () => {
       .set("authorization", `Bearer ${viewer}`)
       .send({
         siteId: fx.site.id,
-        category: "HARDWARE_FAILURE",
-        shortDescription: "E2E server unresponsive after power event",
+        issueType: "BUG",
+        subject: "E2E server unresponsive after power event",
       })
       .expect(201); // NEW
 
@@ -111,6 +127,12 @@ describe("Incidents API (e2e)", () => {
         requiredFields: [],
         allowed: true,
         hint: expect.stringContaining("resolved"),
+      },
+      {
+        toStatus: "DUPLICATE",
+        requiredFields: [],
+        allowed: true,
+        hint: expect.stringContaining("refIncidentNo"),
       },
     ]);
 
@@ -154,7 +176,130 @@ describe("Incidents API (e2e)", () => {
       .expect(200);
     expect(afterInProgress.body).toEqual([
       { toStatus: "PENDING_CUSTOMER", requiredFields: ["reason"], allowed: true },
+      {
+        toStatus: "BLOCKED",
+        requiredFields: [],
+        allowed: true,
+        hint: expect.stringContaining("refIncidentNo"),
+      },
+      {
+        toStatus: "DUPLICATE",
+        requiredFields: [],
+        allowed: true,
+        hint: expect.stringContaining("refIncidentNo"),
+      },
     ]);
+  });
+
+  it("issue template: the reporter edits everything but the description, staff move the status, both see names", async () => {
+    const viewer = await t.tokenFor(fx.users.clientViewer.email);
+    const noc = await t.tokenFor(fx.users.serviceDesk.email);
+    const admin = await t.tokenFor(fx.users.superAdmin.email);
+
+    const created = await t
+      .http()
+      .post("/api/v1/incidents/customer-report")
+      .set("authorization", `Bearer ${viewer}`)
+      .send({
+        siteId: fx.site.id,
+        issueType: "BUG",
+        subject: "Login page broken",
+        description: "Since 9am",
+      })
+      .expect(201);
+    const id = created.body.id;
+    const other = await createIncident(admin, fx.site.id).expect(201);
+
+    // The reporter changes the template, subject, priority and Ref Bug ID.
+    const edited = await t
+      .http()
+      .patch(`/api/v1/incidents/${id}/report`)
+      .set("authorization", `Bearer ${viewer}`)
+      .send({
+        issueType: "CHANGE_REQUEST",
+        subject: "Login page needs a change",
+        priority: "P2",
+        refIncidentNo: other.body.incidentNo,
+      })
+      .expect(200);
+    expect(edited.body).toMatchObject({
+      issueType: "CHANGE_REQUEST",
+      shortDescription: "Login page needs a change",
+      priority: "P2",
+      refIncidentNo: other.body.incidentNo,
+      description: "Since 9am",
+    });
+    // ...but has no route to the description, and staff can't rewrite it either.
+    await t
+      .http()
+      .patch(`/api/v1/incidents/${id}`)
+      .set("authorization", `Bearer ${noc}`)
+      .send({ description: "Rewritten" })
+      .expect(400);
+    // The staff-only edit route stays closed to the reporter.
+    await t
+      .http()
+      .patch(`/api/v1/incidents/${id}`)
+      .set("authorization", `Bearer ${viewer}`)
+      .send({ shortDescription: "x y" })
+      .expect(403);
+    // And the reporter can't set the status.
+    await t
+      .http()
+      .post(`/api/v1/incidents/${id}/status`)
+      .set("authorization", `Bearer ${viewer}`)
+      .send({ status: "FIXED" })
+      .expect(403);
+
+    // Staff pick "Duplicate of" from the template's Status list.
+    const options = await t
+      .http()
+      .get(`/api/v1/incidents/${id}/status-options`)
+      .set("authorization", `Bearer ${noc}`)
+      .expect(200);
+    expect(options.body.find((o: { status: string }) => o.status === "NEW").current).toBe(true);
+    expect(options.body.find((o: { status: string }) => o.status === "DUPLICATE_OF")).toMatchObject(
+      { available: true, steps: ["DUPLICATE"], fields: ["refIncidentNo"] },
+    );
+    const dup = await t
+      .http()
+      .post(`/api/v1/incidents/${id}/status`)
+      .set("authorization", `Bearer ${noc}`)
+      .send({ status: "DUPLICATE_OF" })
+      .expect(201);
+    expect(dup.body).toMatchObject({ status: "DUPLICATE", refIncidentNo: other.body.incidentNo });
+
+    // Messages carry the sender's name, for both sides.
+    await t
+      .http()
+      .post(`/api/v1/incidents/${id}/comments`)
+      .set("authorization", `Bearer ${viewer}`)
+      .send({ body: "Thanks" })
+      .expect(201);
+    await t
+      .http()
+      .post(`/api/v1/incidents/${id}/comments`)
+      .set("authorization", `Bearer ${noc}`)
+      .send({ body: "Tracking it on the other ticket", isInternal: false })
+      .expect(201);
+    const seenByClient = await t
+      .http()
+      .get(`/api/v1/incidents/${id}/comments`)
+      .set("authorization", `Bearer ${viewer}`)
+      .expect(200);
+    expect(seenByClient.body.map((c: { author: { id: string } }) => c.author.id)).toEqual([
+      fx.users.clientViewer.id,
+      fx.users.serviceDesk.id,
+    ]);
+    expect(seenByClient.body[1].author.displayName).toEqual(expect.any(String));
+
+    // A closed-out (duplicate) ticket can't be edited by the reporter any more.
+    await t
+      .http()
+      .patch(`/api/v1/incidents/${id}/report`)
+      .set("authorization", `Bearer ${viewer}`)
+      .send({ subject: "too late" })
+      .expect(400);
   });
 
   it("creates and lists comments on an incident", async () => {
@@ -199,8 +344,8 @@ describe("Incidents API (e2e)", () => {
       .set("authorization", `Bearer ${viewer}`)
       .send({
         siteId: fx.siteB.id,
-        category: "HARDWARE_FAILURE",
-        shortDescription: "Should be rejected",
+        issueType: "BUG",
+        subject: "Should be rejected",
       })
       .expect(403);
 
@@ -210,9 +355,9 @@ describe("Incidents API (e2e)", () => {
       .set("authorization", `Bearer ${viewer}`)
       .send({
         siteId: fx.site.id,
-        category: "HARDWARE_FAILURE",
-        shortDescription: "Server in Rack 3 showing a red fault light",
-        details: "Started around 2pm, other equipment in the rack seems fine.",
+        issueType: "BUG",
+        subject: "Server in Rack 3 showing a red fault light",
+        description: "Started around 2pm, other equipment in the rack seems fine.",
       })
       .expect(201);
     expect(created.body).toMatchObject({
@@ -220,6 +365,8 @@ describe("Incidents API (e2e)", () => {
       priority: "P3",
       impact: "MEDIUM",
       urgency: "MEDIUM",
+      // the description is stored on the ticket itself, not as a comment
+      description: expect.stringContaining("2pm"),
     });
 
     // an internal role in INCIDENT_WRITE_ROLES, not the customer role, must
@@ -239,17 +386,12 @@ describe("Incidents API (e2e)", () => {
       })
       .expect(403);
 
-    // the "details" text landed as a customer-visible comment
     const comments = await t
       .http()
       .get(`/api/v1/incidents/${created.body.id}/comments`)
       .set("authorization", `Bearer ${viewer}`)
       .expect(200);
-    expect(comments.body).toHaveLength(1);
-    expect(comments.body[0]).toMatchObject({
-      isInternal: false,
-      body: expect.stringContaining("2pm"),
-    });
+    expect(comments.body).toHaveLength(0);
 
     // Service Desk sees it and replies; the reply defaults to internal=true
     // unless marked otherwise, but the customer's own comment write always
@@ -274,7 +416,7 @@ describe("Incidents API (e2e)", () => {
       .get(`/api/v1/incidents/${created.body.id}/comments`)
       .set("authorization", `Bearer ${viewer}`)
       .expect(200);
-    expect(finalComments.body).toHaveLength(3);
+    expect(finalComments.body).toHaveLength(2);
   });
 
   it("a customer only sees their own reported tickets, never another incident at the same site", async () => {
@@ -291,8 +433,8 @@ describe("Incidents API (e2e)", () => {
       .set("authorization", `Bearer ${viewer}`)
       .send({
         siteId: fx.site.id,
-        category: "HARDWARE_FAILURE",
-        shortDescription: "My own ticket",
+        issueType: "BUG",
+        subject: "My own ticket",
       })
       .expect(201);
 

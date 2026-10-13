@@ -15,6 +15,8 @@ export enum IncidentStatus {
   CLOSED = "CLOSED",
   REOPENED = "REOPENED",
   CANCELLED = "CANCELLED",
+  BLOCKED = "BLOCKED",
+  DUPLICATE = "DUPLICATE",
 }
 
 export enum Priority {

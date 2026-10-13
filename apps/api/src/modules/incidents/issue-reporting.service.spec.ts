@@ -433,3 +433,76 @@ describe("IssueReportingService admin writes", () => {
     );
   });
 });
+
+describe("IssueReportingService retired values and client group picks", () => {
+  const RETIRED = option(IssueCatalogKind.ISSUE_TYPE, "OLD_TYPE", { isActive: false });
+  const withRetired = () =>
+    makeService({
+      issueCatalogOption: {
+        findMany: jest.fn().mockImplementation(({ where }) => {
+          const wanted = (where?.OR ?? []) as { kind: IssueCatalogKind; value: string }[];
+          return Promise.resolve(
+            [...CATALOG, RETIRED].filter((o) =>
+              wanted.some((w) => w.kind === o.kind && w.value === o.value),
+            ),
+          );
+        }),
+      },
+    });
+
+  it("rejects a retired value on a new pick", async () => {
+    const { service } = withRetired();
+    await expect(service.assertValidSelections({ issueType: "OLD_TYPE" })).rejects.toThrow(
+      'Issue type "OLD_TYPE" is not an available option',
+    );
+  });
+
+  it("accepts a retired value the edited ticket already holds", async () => {
+    const { service } = withRetired();
+    await expect(
+      service.assertValidSelections(
+        { issueType: "OLD_TYPE", severity: "MAJOR" },
+        { keep: { issueType: "OLD_TYPE" } },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses a group clients can't pick when the reporter chose it", async () => {
+    const { service } = makeService({
+      supportGroup: {
+        findFirst: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({
+          id: "grp-storage",
+          name: "Storage team",
+          isClientSelectable: false,
+          isDefaultAssignee: null,
+        }),
+      },
+    });
+    await expect(
+      service.resolveAssignment("grp-storage", undefined, { clientPick: true }),
+    ).rejects.toThrow("Storage team can't be picked as the assignee group");
+    // Staff routing to the same group is fine.
+    await expect(service.resolveAssignment("grp-storage", undefined)).resolves.toEqual({
+      ownerGroupId: "grp-storage",
+      ownerUserId: null,
+    });
+  });
+
+  it("lets the reporter pick a client-selectable group", async () => {
+    const { service } = makeService({
+      supportGroup: {
+        findFirst: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({
+          id: "grp-infra",
+          name: "Infra team",
+          isClientSelectable: true,
+          isDefaultAssignee: null,
+        }),
+      },
+    });
+    await expect(
+      service.resolveAssignment("grp-infra", undefined, { clientPick: true }),
+    ).resolves.toEqual({ ownerGroupId: "grp-infra", ownerUserId: null });
+  });
+});

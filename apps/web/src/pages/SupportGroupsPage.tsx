@@ -16,7 +16,7 @@ import {
   Typography,
 } from "@mui/material";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
-import { apiDelete, apiGet, apiPost } from "../api/client";
+import { apiDelete, apiGet, apiPost, apiPut } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
 
 // Mirrors SupportGroupsController's SUPPORT_GROUP_WRITE_ROLES — UI-only gate
@@ -29,6 +29,7 @@ interface SupportGroup {
   createdAt: string;
   /** true on the one group new client reports land in by default. */
   isDefaultAssignee: boolean | null;
+  isClientSelectable: boolean;
 }
 
 interface Member {
@@ -173,6 +174,20 @@ export function SupportGroupsPage() {
     }
   };
 
+  // --- Offered to clients as an Assignee Group --------------------------
+  const toggleClientSelectable = async () => {
+    if (!selectedGroup) return;
+    setActionError(null);
+    try {
+      await apiPut(`/support-groups/${selectedGroup.id}/client-selectable`, {
+        isClientSelectable: !selectedGroup.isClientSelectable,
+      });
+      refetchGroups();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <Box>
       <Typography variant="h4" sx={{ mb: 2 }}>
@@ -211,6 +226,9 @@ export function SupportGroupsPage() {
                   <ListItemText primary={g.name} />
                   {g.isDefaultAssignee && (
                     <Chip size="small" color="primary" variant="outlined" label="Default" />
+                  )}
+                  {g.isClientSelectable && (
+                    <Chip size="small" variant="outlined" label="Clients" sx={{ ml: 0.5 }} />
                   )}
                 </ListItemButton>
               ))}
@@ -266,6 +284,15 @@ export function SupportGroupsPage() {
                   </Button>
                   <Button
                     size="small"
+                    variant={selectedGroup.isClientSelectable ? "contained" : "outlined"}
+                    onClick={toggleClientSelectable}
+                  >
+                    {selectedGroup.isClientSelectable
+                      ? "Clients can pick (turn off)"
+                      : "Let clients pick it"}
+                  </Button>
+                  <Button
+                    size="small"
                     color="error"
                     startIcon={<DeleteOutlineIcon fontSize="small" />}
                     onClick={deleteGroup}
@@ -278,6 +305,11 @@ export function SupportGroupsPage() {
             {selectedGroup?.isDefaultAssignee && (
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
                 New client reports are assigned to this group unless the reporter picks another.
+              </Typography>
+            )}
+            {selectedGroup?.isClientSelectable && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                Offered as an Assignee Group on the client portal's issue template.
               </Typography>
             )}
             {selectedGroup && (

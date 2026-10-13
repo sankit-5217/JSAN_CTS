@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Put,
   UseGuards,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
@@ -18,7 +19,7 @@ import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { AddSupportGroupMemberDto } from "./dto/add-support-group-member.dto";
-import { CreateSupportGroupDto } from "./dto/create-support-group.dto";
+import { CreateSupportGroupDto, SetClientSelectableDto } from "./dto/create-support-group.dto";
 import { SitesService } from "./sites.service";
 
 // Support groups aren't site-scoped (an ownership/assignment group can
@@ -68,6 +69,20 @@ export class SupportGroupsController {
     @CorrelationId() correlationId?: string,
   ) {
     return this.sitesService.setDefaultSupportGroup(id, { actorId: user.id, correlationId });
+  }
+
+  @Put(":id/client-selectable")
+  @Roles(...SUPPORT_GROUP_WRITE_ROLES)
+  setClientSelectable(
+    @Param("id") id: string,
+    @Body() dto: SetClientSelectableDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.sitesService.setSupportGroupClientSelectable(id, dto.isClientSelectable, {
+      actorId: user.id,
+      correlationId,
+    });
   }
 
   @Get(":id/members")

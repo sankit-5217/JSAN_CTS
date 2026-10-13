@@ -97,9 +97,15 @@ export function apiDelete<T>(path: string): Promise<T> {
   return request<T>(path, { method: "DELETE" });
 }
 
-/** Field name must match `FileInterceptor("file")` server-side. */
-export function apiUpload<T>(path: string, file: File): Promise<T> {
+/** Field name must match `FileInterceptor("file")` server-side. `fields`
+ *  ride along as extra multipart fields (e.g. the message a file belongs to). */
+export function apiUpload<T>(
+  path: string,
+  file: File,
+  fields?: Record<string, string>,
+): Promise<T> {
   const formData = new FormData();
+  for (const [key, value] of Object.entries(fields ?? {})) formData.append(key, value);
   formData.append("file", file);
   return request<T>(path, { method: "POST", body: formData });
 }

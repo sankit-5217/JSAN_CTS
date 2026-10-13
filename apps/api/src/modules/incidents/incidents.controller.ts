@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -29,9 +30,9 @@ import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { CustomerFeedbackDto } from "./dto/customer-feedback.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
-import { TransitionIncidentDto } from "./dto/transition-incident.dto";
+import { SetTemplateStatusDto, TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateCcListDto } from "./dto/update-cc-list.dto";
-import { UpdateIncidentDto } from "./dto/update-incident.dto";
+import { UpdateCustomerReportDto, UpdateIncidentDto } from "./dto/update-incident.dto";
 import { CUSTOMER_FEEDBACK_ROLES, IncidentCustomerService } from "./incident-customer.service";
 import { IncidentsService, UploadedAttachmentFile } from "./incidents.service";
 
@@ -119,6 +120,25 @@ export class IncidentsController {
     return this.incidentsService.update(id, dto, user, { actorId: user.id, correlationId });
   }
 
+  @Patch(":id/report")
+  @Roles(UserRole.CLIENT_MANAGER_VIEWER)
+  @ApiOperation({
+    summary: "Reporter edits their own ticket (every template field but Description and Status)",
+  })
+  updateAsCustomer(
+    @Param("id") id: string,
+    @Body() dto: UpdateCustomerReportDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.incidentsService.updateFromCustomer(
+      id,
+      dto,
+      { actorId: user.id, correlationId },
+      user,
+    );
+  }
+
   @Put(":id/cc-list")
   @Roles(...INCIDENT_CC_LIST_ROLES)
   @ApiOperation({ summary: "Replace the ticket's CC List (reporter or staff)" })
@@ -142,6 +162,31 @@ export class IncidentsController {
   @Get(":id/transitions")
   listAvailableTransitions(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.incidentsService.getAvailableTransitions(id, user);
+  }
+
+  @Get(":id/status-options")
+  @ApiOperation({ summary: "The issue template's Status list, with what this caller can pick" })
+  listTemplateStatusOptions(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.incidentsService.getTemplateStatusOptions(id, user);
+  }
+
+  @Post(":id/status")
+  @Roles(...INCIDENT_WRITE_ROLES)
+  @ApiOperation({
+    summary: "Pick an issue-template status; runs the matching transition(s)",
+  })
+  setTemplateStatus(
+    @Param("id") id: string,
+    @Body() dto: SetTemplateStatusDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.incidentsService.setTemplateStatus(
+      id,
+      dto,
+      { actorId: user.id, correlationId },
+      user,
+    );
   }
 
   @Post(":id/transition")
@@ -215,6 +260,8 @@ export class IncidentsController {
     @Param("id") id: string,
     @UploadedFile() file: UploadedAttachmentFile,
     @CurrentUser() user: AuthenticatedUser,
+    // Optional multipart field: the message this file was sent with.
+    @Body("commentId", new ParseUUIDPipe({ optional: true })) commentId?: string,
     @CorrelationId() correlationId?: string,
   ) {
     return this.incidentsService.uploadAttachment(
@@ -222,6 +269,7 @@ export class IncidentsController {
       file,
       { actorId: user.id, correlationId },
       user,
+      commentId,
     );
   }
 

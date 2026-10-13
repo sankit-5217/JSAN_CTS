@@ -73,7 +73,6 @@ describe("applyTemplate", () => {
       severity: "MAJOR",
       component: "SERVER",
       subComponent: "SERVER.PSU",
-      tool: "VISUAL",
     });
   });
 
@@ -172,7 +171,6 @@ describe("toRequestBody", () => {
       severity: "MAJOR",
       component: "SERVER",
       subComponent: "SERVER.PSU",
-      tool: "VISUAL",
       ownerGroupId: undefined,
       ownerUserId: undefined,
       ccEmails: ["ops@x.io"],

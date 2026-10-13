@@ -43,9 +43,9 @@ import { CreateIncidentAsCustomerDto } from "./dto/create-incident-as-customer.d
 import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
-import { TransitionIncidentDto } from "./dto/transition-incident.dto";
+import { SetTemplateStatusDto, TransitionIncidentDto } from "./dto/transition-incident.dto";
 import { UpdateCcListDto } from "./dto/update-cc-list.dto";
-import { UpdateIncidentDto } from "./dto/update-incident.dto";
+import { UpdateCustomerReportDto, UpdateIncidentDto } from "./dto/update-incident.dto";
 import {
   findTransitionRule,
   INCIDENT_ROUTING_ROLES,
@@ -53,7 +53,15 @@ import {
   OPEN_STATUSES,
   TRANSITION_RULES,
 } from "./incident-transitions";
-import type { TransitionDto } from "./incident-transitions";
+import type { TransitionDto, TransitionRule } from "./incident-transitions";
+import {
+  fieldsForPath,
+  planTemplateStatus,
+  TEMPLATE_STATUS_FOR,
+  TEMPLATE_STATUS_LABEL,
+  TEMPLATE_STATUSES,
+  TemplateStatus,
+} from "./incident-status-display";
 
 /** How a status change reads in the reporting customer's bell. Mirrors the
  *  client portal's labels (apps/web/src/pages/client/clientTicket.ts). */
@@ -68,7 +76,24 @@ const CUSTOMER_STATUS_LABEL: Record<IncidentStatus, string> = {
   CLOSED: "closed",
   REOPENED: "reopened",
   CANCELLED: "cancelled",
+  BLOCKED: "blocked by another ticket",
+  DUPLICATE: "closed as a duplicate",
 };
+
+/** A reporter can't edit a ticket that's finished. */
+const CUSTOMER_FROZEN_STATUSES: IncidentStatus[] = [
+  IncidentStatus.CLOSED,
+  IncidentStatus.CANCELLED,
+  IncidentStatus.DUPLICATE,
+];
+
+/** Field equality for the REPORT_EDITED timeline entry (arrays by content). */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+  return a === b;
+}
 
 /** Impact and urgency recorded on an incident opened from an alert, where no
  *  person assessed them; they mirror the priority the alert rule gave it. */
@@ -97,6 +122,29 @@ export interface AvailableTransition {
    */
   hint?: string;
 }
+
+/** One row of the issue template's Status list (GET /incidents/:id/status-options). */
+export interface TemplateStatusOption {
+  status: TemplateStatus;
+  label: string;
+  /** What the ticket shows as now. */
+  current: boolean;
+  /** The caller can reach it from here. */
+  available: boolean;
+  /** The transitions picking it would run, in order. */
+  steps: IncidentStatus[];
+  /** Fields the request must carry for those steps. */
+  fields: (keyof TransitionDto)[];
+  /** What the first step's own check says as things stand (e.g. no owner yet). */
+  hint?: string;
+}
+
+/** A conversation message as both portals read it: who wrote it, by name,
+ *  and the files sent with it. */
+export type CommentView = IncidentComment & {
+  author: { id: string; displayName: string; role: UserRole | null };
+  attachments: Attachment[];
+};
 
 /** Minimal shape of what NestJS's FileInterceptor hands us (multer.File). */
 /** A monitoring alert as the incident timeline records it (`ALERT_LINKED`). */
@@ -478,6 +526,7 @@ export class IncidentsService {
     const assignment = await this.issueReporting.resolveAssignment(
       dto.ownerGroupId,
       dto.ownerUserId,
+      { clientPick: true },
     );
     const refIncidentNo = dto.refIncidentNo
       ? await this.issueReporting.resolveRefIncidentNo(dto.refIncidentNo)
@@ -581,53 +630,192 @@ export class IncidentsService {
         "Only Service Desk/NOC or an elevated role can reassign ownership or override priority",
       );
     }
+    this.assertDescriptionUnchanged(before, dto.description);
 
     // The template's pick-lists are validated against the merged result,
     // so changing the component alone can't leave a mismatched sub
-    // component behind.
-    await this.issueReporting.assertValidSelections({
-      issueType: dto.issueType ?? before.issueType ?? undefined,
-      severity: dto.severity ?? before.severity ?? undefined,
-      component: dto.component ?? before.component ?? undefined,
-      subComponent: dto.subComponent ?? before.subComponent ?? undefined,
-      tool: dto.tool ?? before.tool ?? undefined,
-    });
-    const refIncidentNo =
-      dto.refIncidentNo === undefined
-        ? undefined
-        : dto.refIncidentNo.trim() === ""
-          ? null
-          : await this.issueReporting.resolveRefIncidentNo(dto.refIncidentNo);
-    if (refIncidentNo && refIncidentNo === before.incidentNo) {
-      throw new BadRequestException("A ticket cannot reference itself");
-    }
+    // component behind. Values the ticket already holds stay valid even
+    // after an admin retires them.
+    await this.issueReporting.assertValidSelections(
+      {
+        issueType: dto.issueType ?? before.issueType ?? undefined,
+        severity: dto.severity ?? before.severity ?? undefined,
+        component: dto.component ?? before.component ?? undefined,
+        subComponent: dto.subComponent ?? before.subComponent ?? undefined,
+        tool: dto.tool ?? before.tool ?? undefined,
+      },
+      { keep: before },
+    );
+    const refIncidentNo = await this.resolveRefIncidentEdit(before, dto.refIncidentNo);
     const ccEmails =
       dto.ccEmails === undefined ? undefined : this.issueReporting.normalizeCcEmails(dto.ccEmails);
 
-    const after = await this.prisma.$transaction(async (tx) => {
-      const after = await tx.incident.update({
-        where: { id },
-        data: {
-          shortDescription: dto.shortDescription,
-          category: dto.category,
-          impact: dto.impact,
-          urgency: dto.urgency,
-          ciId: dto.ciId,
-          ownerGroupId: dto.ownerGroupId,
-          ownerUserId: dto.ownerUserId,
-          priority: dto.priority,
-          description: dto.description,
-          issueType: dto.issueType,
-          severity: dto.severity,
-          component: dto.component,
-          subComponent: dto.subComponent,
-          tool: dto.tool,
-          refIncidentNo,
-          ccEmails,
-        },
-      });
+    const after = await this.persistUpdate(
+      before,
+      {
+        shortDescription: dto.shortDescription,
+        category: dto.category,
+        impact: dto.impact,
+        urgency: dto.urgency,
+        ciId: dto.ciId,
+        ownerGroupId: dto.ownerGroupId,
+        ownerUserId: dto.ownerUserId,
+        priority: dto.priority,
+        issueType: dto.issueType,
+        severity: dto.severity,
+        component: dto.component,
+        subComponent: dto.subComponent,
+        tool: dto.tool,
+        refIncidentNo,
+        ccEmails,
+      },
+      actor,
+      { ownerChanged, priorityChanged },
+    );
+    // The reporter and the CC list hear about desk-side edits that matter
+    // to them (who is handling it, priority, subject, classification, the
+    // CC list itself) — internal fields like impact/urgency/CI stay quiet.
+    await this.notifyCustomerUpdate(after, await this.describeCustomerChanges(before, after));
+    return after;
+  }
 
-      if (ownerChanged) {
+  /**
+   * The reporter editing their own ticket from the client portal: every
+   * field of the issue template except Description (frozen once raised)
+   * and Status (staff only, through the transition rules). Same checks as
+   * a new report — catalog values, Assignee Group a client may pick, an
+   * Assignee who belongs to it, a real Ref Bug ID — and a priority change
+   * re-targets the SLA exactly like a desk override does.
+   */
+  async updateFromCustomer(
+    id: string,
+    dto: UpdateCustomerReportDto,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ): Promise<Incident> {
+    const before = await this.findOneScoped(id, user);
+    if (CUSTOMER_FROZEN_STATUSES.includes(before.status)) {
+      throw new BadRequestException(
+        "This ticket is closed. Report a new issue and mention its number instead.",
+      );
+    }
+    const clear = (v: string | undefined, current: string | null) =>
+      v === undefined ? current : v.trim() === "" ? null : v.trim();
+    const severity = clear(dto.severity, before.severity);
+    const component = clear(dto.component, before.component);
+    // A new component drops a sub component that was under the old one,
+    // unless one was sent with it.
+    const subComponent =
+      dto.subComponent !== undefined
+        ? clear(dto.subComponent, before.subComponent)
+        : component !== before.component
+          ? null
+          : before.subComponent;
+    const issueType = dto.issueType ?? before.issueType;
+    await this.issueReporting.assertValidSelections(
+      {
+        issueType: issueType ?? undefined,
+        severity: severity ?? undefined,
+        component: component ?? undefined,
+        subComponent: subComponent ?? undefined,
+      },
+      { keep: before },
+    );
+
+    let ownerGroupId = before.ownerGroupId;
+    let ownerUserId = before.ownerUserId;
+    if (dto.ownerGroupId !== undefined || dto.ownerUserId !== undefined) {
+      const groupChanged =
+        dto.ownerGroupId !== undefined && dto.ownerGroupId !== before.ownerGroupId;
+      const wantedUser =
+        dto.ownerUserId !== undefined
+          ? dto.ownerUserId || undefined
+          : groupChanged
+            ? undefined
+            : (before.ownerUserId ?? undefined);
+      const resolved = await this.issueReporting.resolveAssignment(
+        dto.ownerGroupId ?? before.ownerGroupId ?? undefined,
+        wantedUser,
+        { clientPick: groupChanged },
+      );
+      ownerGroupId = resolved.ownerGroupId;
+      ownerUserId = resolved.ownerUserId;
+    }
+    const ownerChanged = ownerGroupId !== before.ownerGroupId || ownerUserId !== before.ownerUserId;
+    const priorityChanged = dto.priority !== undefined && dto.priority !== before.priority;
+    const refIncidentNo = await this.resolveRefIncidentEdit(before, dto.refIncidentNo);
+    const ccEmails =
+      dto.ccEmails === undefined ? undefined : this.issueReporting.normalizeCcEmails(dto.ccEmails);
+
+    const data: Prisma.IncidentUncheckedUpdateInput = {
+      shortDescription: dto.subject?.trim() || undefined,
+      issueType,
+      severity,
+      component,
+      subComponent,
+      ownerGroupId,
+      ownerUserId,
+      priority: dto.priority,
+      refIncidentNo,
+      ccEmails,
+    };
+    // The issue type doubles as the routing category on a client report;
+    // keep them in step unless the desk has reclassified the category.
+    if (issueType && before.category === before.issueType) {
+      data.category = issueType;
+    }
+    const after = await this.persistUpdate(before, data, actor, {
+      ownerChanged,
+      priorityChanged,
+      timelineEvent: "REPORT_EDITED",
+    });
+    const changes = await this.describeCustomerChanges(before, after);
+    if (changes.length > 0) {
+      await this.notifyReporterEdit(after, changes, user.id);
+    }
+    return after;
+  }
+
+  /** "Description is frozen once the ticket is raised" — on every portal. */
+  private assertDescriptionUnchanged(before: Incident, description: string | undefined): void {
+    if (description !== undefined && description.trim() !== (before.description ?? "").trim()) {
+      throw new BadRequestException(
+        "The description can't be changed once the ticket is raised. Add detail as a comment instead.",
+      );
+    }
+  }
+
+  /** An edit's Ref Bug ID: undefined leaves it, "" clears it, else it must exist. */
+  private async resolveRefIncidentEdit(
+    before: Incident,
+    raw: string | undefined,
+  ): Promise<string | null | undefined> {
+    if (raw === undefined) return undefined;
+    if (raw.trim() === "") return null;
+    const refIncidentNo = await this.issueReporting.resolveRefIncidentNo(raw);
+    if (refIncidentNo === before.incidentNo) {
+      throw new BadRequestException("A ticket cannot reference itself");
+    }
+    return refIncidentNo;
+  }
+
+  /**
+   * One edit, in one transaction: the row, an OWNER_CHANGE timeline entry
+   * when ownership moved, an optional extra timeline entry naming the
+   * changed fields, the audit record and the SLA re-target on a priority
+   * change. Then the assignment notifications and the updated event.
+   */
+  private async persistUpdate(
+    before: Incident,
+    data: Prisma.IncidentUncheckedUpdateInput,
+    actor: ActorContext,
+    opts: { ownerChanged: boolean; priorityChanged: boolean; timelineEvent?: string },
+  ): Promise<Incident> {
+    const id = before.id;
+    const after = await this.prisma.$transaction(async (tx) => {
+      const after = await tx.incident.update({ where: { id }, data });
+
+      if (opts.ownerChanged) {
         await tx.incidentEvent.create({
           data: {
             incidentId: id,
@@ -643,6 +831,22 @@ export class IncidentsService {
         });
       }
 
+      if (opts.timelineEvent) {
+        const fields = (Object.keys(data) as (keyof Incident)[]).filter(
+          (k) => data[k as keyof typeof data] !== undefined && !sameValue(before[k], after[k]),
+        );
+        if (fields.length > 0) {
+          await tx.incidentEvent.create({
+            data: {
+              incidentId: id,
+              eventType: opts.timelineEvent,
+              actorId: actor.actorId,
+              payload: { fields } as Prisma.InputJsonValue,
+            },
+          });
+        }
+      }
+
       await this.auditService.record(
         {
           actorId: actor.actorId,
@@ -656,7 +860,7 @@ export class IncidentsService {
         tx,
       );
 
-      if (priorityChanged) {
+      if (opts.priorityChanged) {
         await this.slaService.onPriorityChanged(
           tx,
           { id, siteId: before.siteId },
@@ -668,18 +872,40 @@ export class IncidentsService {
       return after;
     });
 
-    if (ownerChanged && after.ownerUserId) {
+    if (opts.ownerChanged && after.ownerUserId) {
       await this.notifyAssignment(after, after.ownerUserId, actor.actorId);
-    } else if (ownerChanged && after.ownerGroupId && !after.ownerUserId) {
+    } else if (opts.ownerChanged && after.ownerGroupId && !after.ownerUserId) {
       await this.notifyGroupAssignment(after, after.ownerGroupId, actor.actorId);
     }
-    // The reporter and the CC list hear about desk-side edits that matter
-    // to them (who is handling it, priority, subject, classification, the
-    // CC list itself) — internal fields like impact/urgency/CI stay quiet.
-    await this.notifyCustomerUpdate(after, await this.describeCustomerChanges(before, after));
     this.emitUpdated(after, actor);
-
     return after;
+  }
+
+  /** The desk hears when the reporter changes their own ticket. */
+  private async notifyReporterEdit(
+    incident: Incident,
+    changes: string[],
+    actorUserId: string,
+  ): Promise<void> {
+    try {
+      await this.inbox.notifyUsers({
+        userIds: await this.supportRecipientIds(incident),
+        actorUserId,
+        kind: InAppNotificationKind.CUSTOMER_RESPONDED,
+        title: `${incident.incidentNo}: the reporter updated the ticket`,
+        body: changes.join("; ").slice(0, 400),
+        entityType: "INCIDENT",
+        entityId: incident.id,
+        level: levelForPriority(incident.priority),
+        dedupeKey: `report-edit:${incident.id}:${incident.updatedAt.getTime()}`,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `reporter-edit notification skipped for incident ${incident.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   /** Plain-language lines for the customer-facing "ticket updated" mail. */
@@ -830,6 +1056,18 @@ export class IncidentsService {
       throw new BadRequestException(validationError);
     }
 
+    // "Blocked by" / "Duplicate of" record the other ticket as the Ref Bug
+    // ID — it must exist and can't be this ticket.
+    let refIncidentNo: string | undefined;
+    if (dto.toStatus === IncidentStatus.BLOCKED || dto.toStatus === IncidentStatus.DUPLICATE) {
+      refIncidentNo = await this.issueReporting.resolveRefIncidentNo(
+        dto.refIncidentNo?.trim() || incident.refIncidentNo || "",
+      );
+      if (refIncidentNo === incident.incidentNo) {
+        throw new BadRequestException("A ticket cannot be blocked by or duplicate itself");
+      }
+    }
+
     let openAlertsAtResolve: Awaited<ReturnType<typeof this.findOpenAlertsForIncident>> = [];
     if (dto.toStatus === "RESOLVED") {
       openAlertsAtResolve = await this.findOpenAlertsForIncident(id);
@@ -862,6 +1100,9 @@ export class IncidentsService {
       if (dto.toStatus === "CLOSED") {
         data.closedAt = new Date();
       }
+      if (refIncidentNo) {
+        data.refIncidentNo = refIncidentNo;
+      }
 
       const after = await tx.incident.update({ where: { id }, data });
 
@@ -876,6 +1117,7 @@ export class IncidentsService {
             reason: dto.reason,
             resolutionCategory: dto.resolutionCategory,
             rootCauseSummary: dto.rootCauseSummary,
+            ...(refIncidentNo ? { refIncidentNo } : {}),
             ...(openAlertsAtResolve.length > 0
               ? {
                   resolvedWithOpenAlerts: openAlertsAtResolve.map((a) => ({
@@ -1121,6 +1363,101 @@ export class IncidentsService {
   }
 
   /**
+   * The issue template's Status list for this caller: every label, which
+   * one the ticket shows as now, and for each other label whether the
+   * caller can get there (the chain of transitions it would run and the
+   * fields that chain needs). See incident-status-display.ts.
+   */
+  async getTemplateStatusOptions(
+    id: string,
+    user: AuthenticatedUser,
+  ): Promise<TemplateStatusOption[]> {
+    const incident = await this.findOneScoped(id, user);
+    const current = TEMPLATE_STATUS_FOR[incident.status];
+    const canUse = this.ruleCheckerFor(incident, user);
+    return TEMPLATE_STATUSES.map((status) => {
+      const path = status === current ? null : planTemplateStatus(incident.status, status, canUse);
+      const firstHint = path?.[0].validate?.(incident, { toStatus: path[0].to });
+      return {
+        status,
+        label: TEMPLATE_STATUS_LABEL[status],
+        current: status === current,
+        available: path !== null,
+        steps: path?.map((r) => r.to) ?? [],
+        fields: path ? fieldsForPath(path) : [],
+        // The ref-ticket check is satisfied by filling the field in the form.
+        hint: firstHint && !firstHint.startsWith("refIncidentNo") ? firstHint : undefined,
+      };
+    });
+  }
+
+  /**
+   * Moves the ticket to one of the issue template's statuses by running
+   * the planned chain of ordinary transitions, one createTransition() per
+   * step (each re-checked, audited and SLA-hooked on its own). Fields are
+   * checked for the whole chain up front; if a later step still fails
+   * (e.g. a resolve blocked by open alerts), the earlier steps stay done
+   * and the error says where the ticket stopped.
+   */
+  async setTemplateStatus(
+    id: string,
+    dto: SetTemplateStatusDto,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ): Promise<Incident> {
+    const incident = await this.findOneScoped(id, user);
+    const path = planTemplateStatus(
+      incident.status,
+      dto.status,
+      this.ruleCheckerFor(incident, user),
+    );
+    if (!path) {
+      throw new BadRequestException(
+        TEMPLATE_STATUS_FOR[incident.status] === dto.status
+          ? `The ticket is already "${TEMPLATE_STATUS_LABEL[dto.status]}"`
+          : `You can't move this ticket to "${TEMPLATE_STATUS_LABEL[dto.status]}" from its current status`,
+      );
+    }
+    const missing = fieldsForPath(path).filter(
+      (f) =>
+        !dto[f as keyof SetTemplateStatusDto] && !(f === "refIncidentNo" && incident.refIncidentNo),
+    );
+    if (missing.length > 0) {
+      throw new BadRequestException(`Missing required field(s): ${missing.join(", ")}`);
+    }
+    let after = incident;
+    for (const [i, rule] of path.entries()) {
+      try {
+        after = await this.createTransition(
+          id,
+          {
+            toStatus: rule.to,
+            reason: dto.reason,
+            resolutionCategory: dto.resolutionCategory,
+            rootCauseSummary: dto.rootCauseSummary,
+            refIncidentNo: dto.refIncidentNo,
+          },
+          actor,
+          user,
+        );
+      } catch (err) {
+        if (i === 0) throw err;
+        const message = err instanceof Error ? err.message : String(err);
+        throw new BadRequestException(
+          `Moved to ${after.status}, but couldn't continue to ${rule.to}: ${message}`,
+        );
+      }
+    }
+    return after;
+  }
+
+  private ruleCheckerFor(incident: Incident, user: AuthenticatedUser) {
+    return (rule: TransitionRule) =>
+      rule.allowedRoles.includes(user.role) &&
+      (!rule.requiresOwnerOrElevated || isOwnerOrElevated(user.id, user.role, incident));
+  }
+
+  /**
    * Alerts linked to this incident (Alert.correlatedIncidentId) that monitoring
    * hasn't reported as RECOVERED yet — i.e. the real condition, not just the
    * ticket, still looks broken. Scalar read only, same as `linkAlert` below
@@ -1158,6 +1495,7 @@ export class IncidentsService {
     IncidentStatus.PENDING_VENDOR,
     IncidentStatus.PENDING_CUSTOMER,
     IncidentStatus.REOPENED,
+    IncidentStatus.BLOCKED,
   ];
 
   /**
@@ -1538,16 +1876,34 @@ export class IncidentsService {
    * role (including AUDITOR_READ_ONLY, which needs full evidence per §4)
    * sees everything.
    */
-  async listComments(incidentId: string, user: AuthenticatedUser): Promise<IncidentComment[]> {
+  async listComments(incidentId: string, user: AuthenticatedUser): Promise<CommentView[]> {
     await this.findOneScoped(incidentId, user);
     const comments = await this.prisma.incidentComment.findMany({
-      where: { incidentId },
+      where: {
+        incidentId,
+        ...(user.role === UserRole.CLIENT_MANAGER_VIEWER ? { isInternal: false } : {}),
+      },
       orderBy: { createdAt: "asc" },
+      include: {
+        attachments: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
+      },
     });
-    if (user.role === UserRole.CLIENT_MANAGER_VIEWER) {
-      return comments.filter((comment) => !comment.isInternal);
-    }
-    return comments;
+    // Both sides of the conversation see who wrote each message, by name.
+    const authors = await this.prisma.user.findMany({
+      where: { id: { in: [...new Set(comments.map((c) => c.authorId))] } },
+      select: { id: true, displayName: true, role: true },
+    });
+    const byId = new Map(authors.map((a) => [a.id, a]));
+    // The query already leaves internal notes out for a customer; this is
+    // the belt to that brace.
+    const visible =
+      user.role === UserRole.CLIENT_MANAGER_VIEWER
+        ? comments.filter((c) => !c.isInternal)
+        : comments;
+    return visible.map((c) => ({
+      ...c,
+      author: byId.get(c.authorId) ?? { id: c.authorId, displayName: "Unknown user", role: null },
+    }));
   }
 
   /**
@@ -1595,8 +1951,22 @@ export class IncidentsService {
     file: UploadedAttachmentFile,
     actor: ActorContext,
     user: AuthenticatedUser,
+    commentId?: string,
   ): Promise<Attachment> {
     await this.findOneScoped(incidentId, user);
+    if (!file) {
+      throw new BadRequestException("No file was sent");
+    }
+    // A file sent with a message: only onto your own message on this ticket.
+    if (commentId) {
+      const comment = await this.prisma.incidentComment.findUnique({ where: { id: commentId } });
+      if (!comment || comment.incidentId !== incidentId) {
+        throw new BadRequestException("That message isn't on this ticket");
+      }
+      if (comment.authorId !== actor.actorId) {
+        throw new ForbiddenException("You can only attach files to your own messages");
+      }
+    }
 
     if (!isAllowedAttachment(file.mimetype, file.originalname)) {
       throw new BadRequestException(`Content type ${file.mimetype} is not allowed`);
@@ -1626,6 +1996,7 @@ export class IncidentsService {
           sizeBytes: file.size,
           sha256,
           uploadedById: actor.actorId,
+          commentId,
         },
       });
 
@@ -1638,6 +2009,7 @@ export class IncidentsService {
             attachmentId: attachment.id,
             contentType: attachment.contentType,
             sizeBytes: attachment.sizeBytes,
+            ...(commentId ? { commentId } : {}),
           } as Prisma.InputJsonValue,
         },
       });
@@ -1661,9 +2033,21 @@ export class IncidentsService {
   async listAttachments(incidentId: string, user: AuthenticatedUser): Promise<Attachment[]> {
     await this.findOneScoped(incidentId, user);
     return this.prisma.attachment.findMany({
-      where: { entityType: "INCIDENT", entityId: incidentId, deletedAt: null },
+      where: {
+        entityType: "INCIDENT",
+        entityId: incidentId,
+        deletedAt: null,
+        ...this.customerAttachmentFilter(user),
+      },
       orderBy: { createdAt: "asc" },
     });
+  }
+
+  /** A file sent with an internal note is as staff-only as the note. */
+  private customerAttachmentFilter(user: AuthenticatedUser): Prisma.AttachmentWhereInput {
+    return user.role === UserRole.CLIENT_MANAGER_VIEWER
+      ? { OR: [{ commentId: null }, { comment: { isInternal: false } }] }
+      : {};
   }
 
   /** Short-lived signed URL, not a proxied stream or a public object (spec §17). */
@@ -1673,15 +2057,26 @@ export class IncidentsService {
     user: AuthenticatedUser,
   ): Promise<{ url: string }> {
     await this.findOneScoped(incidentId, user);
-    const attachment = await this.findLiveAttachment(incidentId, attachmentId);
+    const attachment = await this.findLiveAttachment(incidentId, attachmentId, user);
     const url = await this.storageService.getSignedDownloadUrl(attachment.objectKey);
     return { url };
   }
 
-  private async findLiveAttachment(incidentId: string, attachmentId: string): Promise<Attachment> {
+  private async findLiveAttachment(
+    incidentId: string,
+    attachmentId: string,
+    user: AuthenticatedUser,
+  ): Promise<Attachment> {
     const attachment = await this.prisma.attachment.findUnique({ where: { id: attachmentId } });
+    // A file sent with an internal note doesn't exist as far as a customer knows.
+    const hiddenFromCustomer =
+      attachment?.commentId && user.role === UserRole.CLIENT_MANAGER_VIEWER
+        ? (await this.prisma.incidentComment.findUnique({ where: { id: attachment.commentId } }))
+            ?.isInternal !== false
+        : false;
     if (
       !attachment ||
+      hiddenFromCustomer ||
       attachment.entityType !== "INCIDENT" ||
       attachment.entityId !== incidentId ||
       attachment.deletedAt !== null
@@ -1704,7 +2099,7 @@ export class IncidentsService {
     user: AuthenticatedUser,
   ): Promise<void> {
     await this.findOneScoped(incidentId, user);
-    const before = await this.findLiveAttachment(incidentId, attachmentId);
+    const before = await this.findLiveAttachment(incidentId, attachmentId, user);
     // A customer can take back their own evidence, never the desk's.
     if (user.role === UserRole.CLIENT_MANAGER_VIEWER && before.uploadedById !== user.id) {
       throw new ForbiddenException("You can only remove files you attached yourself");

@@ -1,7 +1,21 @@
-import { ApiProperty } from "@nestjs/swagger";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Priority } from "@prisma/client";
-import { IsEnum, IsIn, IsOptional, IsString, IsUUID, Length, ValidateIf } from "class-validator";
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsEmail,
+  IsEnum,
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Matches,
+  ValidateIf,
+} from "class-validator";
 import { IMPACT_URGENCY_VALUES, IncidentTemplateFieldsDto } from "./create-incident.dto";
+import { CATALOG_VALUE_PATTERN } from "./issue-catalog.dto";
+import { MAX_CC_EMAILS } from "./update-cc-list.dto";
 
 // Deliberately has no `status` field — status only ever changes through
 // POST /incidents/:id/transition (CLAUDE.md: never let the frontend set
@@ -60,4 +74,74 @@ export class UpdateIncidentDto extends IncidentTemplateFieldsDto {
   @IsString()
   @Length(2, 256)
   priorityChangeReason?: string;
+}
+
+const CATALOG_VALUE_OR_EMPTY = new RegExp(`^(?:|${CATALOG_VALUE_PATTERN.source.slice(1, -1)})$`);
+
+/**
+ * PATCH /incidents/:id/report — the reporter editing their own ticket on
+ * the client portal. The issue template's fields minus Description (frozen
+ * once raised) and Status (staff only). For the optional pick-lists,
+ * Assignee and Ref Bug ID, "" clears the value; an omitted field is left
+ * as it is.
+ */
+export class UpdateCustomerReportDto {
+  @ApiPropertyOptional({ description: "ISSUE_TYPE catalog value (the template)" })
+  @IsOptional()
+  @IsString()
+  @Matches(CATALOG_VALUE_PATTERN)
+  issueType?: string;
+
+  @ApiPropertyOptional({ description: "Subject" })
+  @IsOptional()
+  @IsString()
+  @Length(2, 256)
+  subject?: string;
+
+  @ApiPropertyOptional({ enum: Priority, description: "Re-targets the SLA when it changes" })
+  @IsOptional()
+  @IsEnum(Priority)
+  priority?: Priority;
+
+  @ApiPropertyOptional({ description: 'SEVERITY catalog value; "" clears it' })
+  @IsOptional()
+  @IsString()
+  @Matches(CATALOG_VALUE_OR_EMPTY)
+  severity?: string;
+
+  @ApiPropertyOptional({ description: 'COMPONENT catalog value; "" clears it' })
+  @IsOptional()
+  @IsString()
+  @Matches(CATALOG_VALUE_OR_EMPTY)
+  component?: string;
+
+  @ApiPropertyOptional({ description: 'SUB_COMPONENT catalog value; "" clears it' })
+  @IsOptional()
+  @IsString()
+  @Matches(CATALOG_VALUE_OR_EMPTY)
+  subComponent?: string;
+
+  @ApiPropertyOptional({ description: "Assignee Group (one a client may pick)" })
+  @IsOptional()
+  @IsUUID()
+  ownerGroupId?: string;
+
+  @ApiPropertyOptional({ description: 'Assignee, a member of the group; "" unassigns' })
+  @IsOptional()
+  @ValidateIf((o: UpdateCustomerReportDto) => o.ownerUserId !== "")
+  @IsUUID()
+  ownerUserId?: string;
+
+  @ApiPropertyOptional({ type: [String], description: "CC List" })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_CC_EMAILS)
+  @IsEmail({}, { each: true })
+  ccEmails?: string[];
+
+  @ApiPropertyOptional({ description: 'Ref Bug ID (INC-000123); "" clears it' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 32)
+  refIncidentNo?: string;
 }

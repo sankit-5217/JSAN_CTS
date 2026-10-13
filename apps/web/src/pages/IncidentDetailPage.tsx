@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import {
   Alert,
@@ -41,12 +41,21 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiUpload, getStoredToken } from 
 import { decodeJwtPayload, getCurrentUserRole } from "../api/jwt";
 import { severityColors } from "../theme/theme";
 import {
-  allSubComponents,
-  labelFor,
-  parseCcList,
-  subComponentsFor,
+  draftFromTicket,
+  editProblems,
+  normalizeRefIncidentNo,
   type IssueCatalog,
+  type ReportDraft,
 } from "./client/issueReporting";
+import { IssueTemplateForm, type TemplateGroup } from "./client/IssueTemplateForm";
+import { templateStatusText, type TemplateStatusOption } from "./client/issueStatus";
+import {
+  attachmentName,
+  sendMessage,
+  type ConversationMessage,
+  type TicketAttachment,
+} from "./client/conversation";
+import { MessageBubble, StagedFiles } from "./client/MessageBubble";
 
 const pulse = keyframes`
   0%, 100% { opacity: 1; }
@@ -55,7 +64,6 @@ const pulse = keyframes`
 
 const WORKLOG_ACTIVITY_TYPES = ["REMOTE_WORK", "ONSITE", "TRAVEL", "VENDOR_CALL"];
 const IMPACT_URGENCY_VALUES = ["HIGH", "MEDIUM", "LOW"];
-const PRIORITY_VALUES = ["P1", "P2", "P3", "P4"];
 
 // Mirrors IncidentsService's INCIDENT_ROUTING_ROLES — UI-only gate so a Site
 // Engineer sees disabled controls instead of a 403 after filling the form.
@@ -70,7 +78,7 @@ const INCIDENT_ROUTING_ROLES = [
 
 // A field name as it appears in TransitionRule.requiredFields on the
 // backend (apps/api/src/modules/incidents/incident-transitions.ts).
-type TransitionField = "reason" | "resolutionCategory" | "rootCauseSummary";
+type TransitionField = "reason" | "resolutionCategory" | "rootCauseSummary" | "refIncidentNo";
 
 interface AvailableTransition {
   toStatus: string;
@@ -172,13 +180,7 @@ function describeAlertLinkedEvent(e: IncidentEvent): string | null {
   return `${String(p.severity ?? "")} ${String(p.source ?? "")} alert linked: ${what}${component}`;
 }
 
-interface Comment {
-  id: string;
-  authorId: string;
-  body: string;
-  isInternal: boolean;
-  createdAt: string;
-}
+type Comment = ConversationMessage;
 
 interface Worklog {
   id: string;
@@ -192,13 +194,7 @@ interface Worklog {
   editReason: string | null;
 }
 
-interface Attachment {
-  id: string;
-  objectKey: string;
-  contentType: string;
-  sizeBytes: number;
-  createdAt: string;
-}
+type Attachment = TicketAttachment;
 
 interface CiOption {
   id: string;
@@ -215,6 +211,7 @@ interface EngineerOption {
 interface GroupOption {
   id: string;
   name: string;
+  isDefaultAssignee?: boolean | null;
 }
 
 interface VendorCase {
@@ -334,134 +331,6 @@ function EngineerPicker({
  * has no query params at all) — client-side filtering is enough, no search
  * round-trip needed. `options` is fetched once at the page level and shared
  * by every instance instead of each picker re-fetching the same list. */
-/** A select over one of the issue catalog's pick-lists, with "none". */
-function CatalogSelect({
-  label,
-  value,
-  options,
-  onChange,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  options: { id: string; value: string; label: string }[];
-  onChange: (value: string) => void;
-  disabled?: boolean;
-}) {
-  // A stored value no longer in the active catalog still shows, so saving
-  // another field doesn't silently drop it.
-  const stale = value && !options.some((o) => o.value === value);
-  return (
-    <TextField
-      select
-      label={label}
-      size="small"
-      fullWidth
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-    >
-      <MenuItem value="">
-        <em>None</em>
-      </MenuItem>
-      {stale && (
-        <MenuItem value={value}>
-          {value} <em style={{ marginLeft: 6 }}>(retired)</em>
-        </MenuItem>
-      )}
-      {options.map((o) => (
-        <MenuItem key={o.id} value={o.value}>
-          {o.label}
-        </MenuItem>
-      ))}
-    </TextField>
-  );
-}
-
-/**
- * The "Report an issue" sheet as the reporter filled it in: description,
- * classification, reporter, ref bug and CC list. Only renders rows that
- * have a value, so an alert- or staff-created ticket adds nothing here.
- */
-function ReportSheet({
-  incident,
-  catalog,
-  reporter,
-}: {
-  incident: Incident;
-  catalog: IssueCatalog | null;
-  reporter: EngineerOption | null;
-}) {
-  const label = (options: { id: string; value: string; label: string }[] | undefined, v: string) =>
-    catalog && options ? labelFor(options, v) : v;
-  const rows: [string, ReactNode][] = [];
-  if (reporter) rows.push(["Reporter", `${reporter.displayName} <${reporter.email}>`]);
-  if (incident.issueType) rows.push(["Issue type", label(catalog?.issueTypes, incident.issueType)]);
-  if (incident.severity) rows.push(["Severity", label(catalog?.severities, incident.severity)]);
-  if (incident.component || incident.subComponent) {
-    const component = incident.component ? label(catalog?.components, incident.component) : "";
-    const sub = incident.subComponent
-      ? label(catalog ? allSubComponents(catalog) : undefined, incident.subComponent)
-      : "";
-    rows.push(["Component", [component, sub].filter(Boolean).join(" › ")]);
-  }
-  if (incident.tool) rows.push(["Tool", label(catalog?.tools, incident.tool)]);
-  if (incident.refIncidentNo) {
-    rows.push([
-      "Ref Bug ID",
-      <Link
-        key="ref"
-        component={RouterLink}
-        to={`/incidents?q=${encodeURIComponent(incident.refIncidentNo)}`}
-      >
-        {incident.refIncidentNo}
-      </Link>,
-    ]);
-  }
-  if (incident.ccEmails?.length) rows.push(["CC", incident.ccEmails.join(", ")]);
-  if (rows.length === 0 && !incident.description) return null;
-  return (
-    <Box sx={{ my: 1.5 }}>
-      {incident.description && (
-        <Typography
-          variant="body2"
-          sx={{
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
-            p: 1.5,
-            mb: 1,
-            borderRadius: 1,
-            bgcolor: "action.hover",
-          }}
-        >
-          {incident.description}
-        </Typography>
-      )}
-      {rows.length > 0 && (
-        <Box
-          component="dl"
-          sx={{
-            m: 0,
-            display: "grid",
-            gridTemplateColumns: "max-content 1fr",
-            columnGap: 2,
-            rowGap: 0.25,
-            "& dt": { fontWeight: 600, fontSize: 13, color: "text.secondary" },
-            "& dd": { m: 0, fontSize: 13, overflowWrap: "anywhere" },
-          }}
-        >
-          {rows.map(([k, v]) => (
-            <Fragment key={k}>
-              <dt>{k}</dt>
-              <dd>{v}</dd>
-            </Fragment>
-          ))}
-        </Box>
-      )}
-    </Box>
-  );
-}
-
 function GroupPicker({
   options,
   value,
@@ -1140,43 +1009,26 @@ export function IncidentDetailPage() {
   // Seeded from the incident once per incident id, not on every refetch, so
   // a mid-edit refetch (e.g. someone else posts a comment) doesn't clobber
   // what's being typed.
-  const [editShortDescription, setEditShortDescription] = useState("");
+  // The issue template (the same form the client reported on) plus the
+  // staff-only fields around it.
+  const [draft, setDraft] = useState<ReportDraft | null>(null);
   const [editCategory, setEditCategory] = useState("");
   const [editImpact, setEditImpact] = useState("");
   const [editUrgency, setEditUrgency] = useState("");
-  const [editPriority, setEditPriority] = useState("");
   const [editPriorityChangeReason, setEditPriorityChangeReason] = useState("");
   const [editOwnerUser, setEditOwnerUser] = useState<EngineerOption | null>(null);
   const [editOwnerGroup, setEditOwnerGroup] = useState<GroupOption | null>(null);
-  // The "Report an issue" template fields.
-  const [editDescription, setEditDescription] = useState("");
-  const [editIssueType, setEditIssueType] = useState("");
-  const [editSeverity, setEditSeverity] = useState("");
-  const [editComponent, setEditComponent] = useState("");
-  const [editSubComponent, setEditSubComponent] = useState("");
-  const [editTool, setEditTool] = useState("");
-  const [editRefIncidentNo, setEditRefIncidentNo] = useState("");
-  const [editCcText, setEditCcText] = useState("");
   const [ciQuery, setCiQuery] = useState("");
   const [ciOptions, setCiOptions] = useState<CiOption[]>([]);
   const [selectedCi, setSelectedCi] = useState<CiOption | null>(null);
 
   useEffect(() => {
     if (!incident) return;
-    setEditShortDescription(incident.shortDescription);
+    setDraft(draftFromTicket(incident as Parameters<typeof draftFromTicket>[0], catalog));
     setEditCategory(incident.category);
     setEditImpact(incident.impact);
     setEditUrgency(incident.urgency);
-    setEditPriority(incident.priority);
     setEditPriorityChangeReason("");
-    setEditDescription(incident.description ?? "");
-    setEditIssueType(incident.issueType ?? "");
-    setEditSeverity(incident.severity ?? "");
-    setEditComponent(incident.component ?? "");
-    setEditSubComponent(incident.subComponent ?? "");
-    setEditTool(incident.tool ?? "");
-    setEditRefIncidentNo(incident.refIncidentNo ?? "");
-    setEditCcText((incident.ccEmails ?? []).join(", "));
     // The incident only carries owner/CI ids, not readable names — resolve
     // each to show a name instead of a raw UUID. Not `refetch`'s problem to
     // fold in: this only needs to happen once per incident, same as
@@ -1203,7 +1055,7 @@ export function IncidentDetailPage() {
     setCiQuery("");
     // Only re-seed when a different incident loads, not on every refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incident?.id, supportGroups]);
+  }, [incident?.id, supportGroups, catalog]);
 
   useEffect(() => {
     if (!incident) {
@@ -1220,41 +1072,37 @@ export function IncidentDetailPage() {
       .catch(() => undefined);
   }, [ciQuery, incident]);
 
-  const priorityChanged = incident !== null && editPriority !== incident.priority;
-
-  const editCc = parseCcList(editCcText);
+  const priorityChanged =
+    incident !== null && draft !== null && draft.priority !== incident.priority;
 
   const submitEdit = async () => {
-    if (!id) return;
+    if (!id || !draft) return;
     setActionError(null);
-    if (editCc.invalid.length > 0) {
-      setActionError(`CC list: not an email address: ${editCc.invalid.join(", ")}`);
-      return;
-    }
     try {
       await apiPatch(`/incidents/${id}`, {
-        shortDescription: editShortDescription,
+        shortDescription: draft.subject.trim(),
         category: editCategory,
         impact: editImpact,
         urgency: editUrgency,
-        description: editDescription.trim() || undefined,
-        issueType: editIssueType || undefined,
-        severity: editSeverity || undefined,
-        component: editComponent || undefined,
-        subComponent: editSubComponent || undefined,
-        tool: editTool || undefined,
+        // Description is frozen once raised (the backend refuses a change).
+        issueType: draft.issueType || undefined,
+        severity: draft.severity || undefined,
+        component: draft.component || undefined,
+        subComponent: draft.subComponent || undefined,
         // "" clears the reference; undefined would leave it untouched.
-        refIncidentNo: editRefIncidentNo.trim(),
-        ccEmails: editCc.emails,
+        refIncidentNo: draft.refIncidentNo.trim()
+          ? normalizeRefIncidentNo(draft.refIncidentNo)
+          : "",
+        ccEmails: draft.ccEmails,
         // The backend requires priorityChangeReason whenever `priority` is
         // present in the body at all (spec §16), not just when it differs
         // from the current value — so only include the key when it's
         // actually being changed, same as priorityChangeReason itself.
-        priority: priorityChanged ? editPriority : undefined,
+        priority: priorityChanged ? draft.priority : undefined,
         priorityChangeReason: priorityChanged ? editPriorityChangeReason : undefined,
         ciId: selectedCi?.id,
-        ownerUserId: editOwnerUser?.id,
-        ownerGroupId: editOwnerGroup?.id,
+        ownerUserId: draft.ownerUserId || undefined,
+        ownerGroupId: draft.ownerGroupId || undefined,
       });
       refetch();
     } catch (err) {
@@ -1267,6 +1115,7 @@ export function IncidentDetailPage() {
   const [reason, setReason] = useState("");
   const [resolutionCategory, setResolutionCategory] = useState("");
   const [rootCauseSummary, setRootCauseSummary] = useState("");
+  const [transitionRef, setTransitionRef] = useState("");
   const [transitionOwnerUser, setTransitionOwnerUser] = useState<EngineerOption | null>(null);
   const [transitionOwnerGroup, setTransitionOwnerGroup] = useState<GroupOption | null>(null);
   const selectedTransition = availableTransitions.find((t) => t.toStatus === toStatus);
@@ -1281,6 +1130,7 @@ export function IncidentDetailPage() {
         reason: reason || undefined,
         resolutionCategory: resolutionCategory || undefined,
         rootCauseSummary: rootCauseSummary || undefined,
+        refIncidentNo: transitionRef.trim() ? normalizeRefIncidentNo(transitionRef) : undefined,
         ownerUserId: transitionOwnerUser?.id,
         ownerGroupId: transitionOwnerGroup?.id,
       });
@@ -1288,6 +1138,7 @@ export function IncidentDetailPage() {
       setReason("");
       setResolutionCategory("");
       setRootCauseSummary("");
+      setTransitionRef("");
       setTransitionOwnerUser(null);
       setTransitionOwnerGroup(null);
       refetch();
@@ -1299,19 +1150,27 @@ export function IncidentDetailPage() {
   // --- Comment form --------------------------------------------------------
   const [commentBody, setCommentBody] = useState("");
   const [commentInternal, setCommentInternal] = useState(true);
+  const [commentFiles, setCommentFiles] = useState<File[]>([]);
+  const [commentSending, setCommentSending] = useState(false);
 
+  // The message and its files go together: the files show inside it, and
+  // an internal note's files stay staff-only like the note.
   const submitComment = async () => {
-    if (!id || !commentBody) return;
+    if (!id || (!commentBody.trim() && commentFiles.length === 0)) return;
     setActionError(null);
+    setCommentSending(true);
     try {
-      await apiPost(`/incidents/${id}/comments`, {
-        body: commentBody,
-        isInternal: commentInternal,
-      });
+      const { failedUploads } = await sendMessage(id, commentBody, commentFiles, commentInternal);
       setCommentBody("");
+      setCommentFiles([]);
+      if (failedUploads.length > 0) {
+        setActionError(`Message sent, but these files didn't upload: ${failedUploads.join(", ")}`);
+      }
       refetch();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCommentSending(false);
     }
   };
 
@@ -1435,7 +1294,11 @@ export function IncidentDetailPage() {
           >
             <Stack direction="row" spacing={1} alignItems="center">
               <Typography variant="h5">{incident.incidentNo}</Typography>
-              <Chip label={incident.status} />
+              <Tooltip title={`Workflow state: ${incident.status}`}>
+                <Chip
+                  label={templateStatusText(incident.status as never, incident.refIncidentNo)}
+                />
+              </Tooltip>
               <Chip label={incident.priority} color={PRIORITY_COLOR[incident.priority]} />
             </Stack>
             {lastUpdatedAt && (
@@ -1464,7 +1327,6 @@ export function IncidentDetailPage() {
           <Typography variant="body2" color="text.secondary">
             {incident.category} · impact {incident.impact} · urgency {incident.urgency}
           </Typography>
-          <ReportSheet incident={incident} catalog={catalog} reporter={reporter} />
           <Typography variant="body2" color="text.secondary">
             Owner: {editOwnerUser?.displayName ?? (incident.ownerUserId ? "…" : "unassigned")}
             {" · "}
@@ -1498,26 +1360,50 @@ export function IncidentDetailPage() {
         <Grid item xs={12} md={canRoute ? 8 : 12}>
           <Paper sx={{ p: 2, height: "100%" }}>
             <Typography variant="h6" gutterBottom>
-              Edit incident
+              Issue template
             </Typography>
             {!canRoute && (
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 Reassigning ownership and overriding priority are a Service Desk/NOC or
-                elevated-role call — you can still update the description, category, impact/urgency
-                and affected CI.
+                elevated-role call — you can still update the classification, CC list, Ref Bug ID,
+                category, impact/urgency and affected CI.
               </Typography>
             )}
+            {draft && catalog ? (
+              <IssueTemplateForm
+                mode="edit"
+                catalog={catalog}
+                draft={draft}
+                update={(fn) => setDraft((d) => (d ? fn(d) : d))}
+                groups={supportGroups as TemplateGroup[]}
+                reporter={
+                  reporter
+                    ? `${reporter.displayName} <${reporter.email}>`
+                    : incident.reportedByUserId
+                      ? "…"
+                      : "Raised by staff or monitoring"
+                }
+                routingLocked={!canRoute}
+                routingLockedHint="Service Desk/NOC or elevated roles only"
+                currentOwner={editOwnerUser}
+                priorityHelper={priorityChanged ? "A reason is needed below" : " "}
+                status={
+                  <TemplateStatusPicker
+                    incident={incident}
+                    onChanged={() => refetch()}
+                    onError={setActionError}
+                  />
+                }
+              />
+            ) : (
+              <Typography color="text.secondary">Loading the template…</Typography>
+            )}
+
+            <Typography variant="subtitle2" sx={{ mt: 3, mb: 1.5 }}>
+              Staff details
+            </Typography>
             <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  label="Short description"
-                  size="small"
-                  fullWidth
-                  value={editShortDescription}
-                  onChange={(e) => setEditShortDescription(e.target.value)}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={4}>
                 <TextField
                   label="Category"
                   size="small"
@@ -1526,89 +1412,7 @@ export function IncidentDetailPage() {
                   onChange={(e) => setEditCategory(e.target.value)}
                 />
               </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  label="Description"
-                  size="small"
-                  fullWidth
-                  multiline
-                  minRows={3}
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <CatalogSelect
-                  label="Issue type"
-                  value={editIssueType}
-                  options={catalog?.issueTypes ?? []}
-                  onChange={setEditIssueType}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <CatalogSelect
-                  label="Severity"
-                  value={editSeverity}
-                  options={catalog?.severities ?? []}
-                  onChange={setEditSeverity}
-                />
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <CatalogSelect
-                  label="Component"
-                  value={editComponent}
-                  options={catalog?.components ?? []}
-                  onChange={(v) => {
-                    setEditComponent(v);
-                    setEditSubComponent("");
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <CatalogSelect
-                  label="Sub component"
-                  value={editSubComponent}
-                  options={catalog ? subComponentsFor(catalog, editComponent) : []}
-                  onChange={setEditSubComponent}
-                  disabled={!editComponent}
-                />
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <CatalogSelect
-                  label="Tool"
-                  value={editTool}
-                  options={catalog?.tools ?? []}
-                  onChange={setEditTool}
-                />
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  label="Ref Bug ID"
-                  size="small"
-                  fullWidth
-                  placeholder="INC-000123"
-                  value={editRefIncidentNo}
-                  onChange={(e) => setEditRefIncidentNo(e.target.value)}
-                  helperText="Duplicate of / blocked by"
-                />
-              </Grid>
-              <Grid item xs={12} sm={8}>
-                <TextField
-                  label="CC list"
-                  size="small"
-                  fullWidth
-                  placeholder="email, email"
-                  value={editCcText}
-                  onChange={(e) => setEditCcText(e.target.value)}
-                  error={editCc.invalid.length > 0}
-                  helperText={
-                    editCc.invalid.length > 0
-                      ? `Not an email address: ${editCc.invalid.join(", ")}`
-                      : "Copied on customer-facing updates"
-                  }
-                />
-              </Grid>
-              <Grid item xs={6} sm={3}>
+              <Grid item xs={6} sm={4}>
                 <TextField
                   select
                   label="Impact"
@@ -1624,7 +1428,7 @@ export function IncidentDetailPage() {
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={6} sm={3}>
+              <Grid item xs={6} sm={4}>
                 <TextField
                   select
                   label="Urgency"
@@ -1640,28 +1444,10 @@ export function IncidentDetailPage() {
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={6} sm={3}>
-                <TextField
-                  select
-                  label="Priority"
-                  size="small"
-                  fullWidth
-                  disabled={!canRoute}
-                  helperText={!canRoute ? "Service Desk/NOC or elevated roles only" : undefined}
-                  value={editPriority}
-                  onChange={(e) => setEditPriority(e.target.value)}
-                >
-                  {PRIORITY_VALUES.map((v) => (
-                    <MenuItem key={v} value={v}>
-                      {v}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Grid>
               {priorityChanged && (
-                <Grid item xs={12} sm={6}>
+                <Grid item xs={12}>
                   <TextField
-                    label="Reason for priority change"
+                    label={`Reason for priority change (${incident.priority} → ${draft?.priority})`}
                     size="small"
                     fullWidth
                     required
@@ -1692,36 +1478,33 @@ export function IncidentDetailPage() {
                   )}
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
-                <EngineerPicker
-                  siteId={incident.siteId}
-                  value={editOwnerUser}
-                  onChange={setEditOwnerUser}
-                  label="Owner (engineer)"
-                  disabled={!canRoute}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <GroupPicker
-                  options={supportGroups}
-                  value={editOwnerGroup}
-                  onChange={setEditOwnerGroup}
-                  label="Owner group"
-                  disabled={!canRoute}
-                />
-              </Grid>
+              {incident.tool && (
+                <Grid item xs={12}>
+                  <Typography variant="caption" color="text.secondary">
+                    Tool (field retired from the template): {incident.tool}
+                  </Typography>
+                </Grid>
+              )}
               <Grid item xs={12}>
-                <Button
-                  variant="contained"
-                  disabled={
-                    !editShortDescription ||
-                    !editCategory ||
-                    (priorityChanged && !editPriorityChangeReason)
-                  }
-                  onClick={submitEdit}
-                >
-                  Save changes
-                </Button>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Button
+                    variant="contained"
+                    disabled={
+                      !draft ||
+                      editProblems(draft).length > 0 ||
+                      !editCategory ||
+                      (priorityChanged && !editPriorityChangeReason)
+                    }
+                    onClick={submitEdit}
+                  >
+                    Save changes
+                  </Button>
+                  {draft && editProblems(draft)[0] && (
+                    <Typography variant="body2" color="text.secondary">
+                      {editProblems(draft)[0]}
+                    </Typography>
+                  )}
+                </Stack>
               </Grid>
             </Grid>
           </Paper>
@@ -1731,9 +1514,10 @@ export function IncidentDetailPage() {
             <RoutingSuggestionsCard
               incident={incident}
               onAssigned={(engineer) => {
-                // Keep the Edit form's Owner field in step with the new
-                // owner, so a later Save changes doesn't revert it.
+                // Keep the template's Assignee in step with the new owner,
+                // so a later Save changes doesn't revert it.
                 setEditOwnerUser(engineer);
+                setDraft((d) => (d ? { ...d, ownerUserId: engineer.id } : d));
                 refetch();
               }}
             />
@@ -1745,7 +1529,11 @@ export function IncidentDetailPage() {
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 2, mb: 3 }}>
             <Typography variant="h6" gutterBottom>
-              Change status
+              Workflow actions
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Everyday moves are on the template's Status field. Use this for a specific workflow
+              step — closing a fixed ticket, cancelling, or assigning while you move it.
             </Typography>
             {availableTransitions.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
@@ -1800,6 +1588,24 @@ export function IncidentDetailPage() {
                   value={rootCauseSummary}
                   onChange={(e) => setRootCauseSummary(e.target.value)}
                 />
+                {(toStatus === "BLOCKED" || toStatus === "DUPLICATE") && (
+                  <TextField
+                    label={
+                      toStatus === "BLOCKED"
+                        ? "Blocked by (ticket number)"
+                        : "Duplicate of (ticket number)"
+                    }
+                    size="small"
+                    placeholder={incident.refIncidentNo ?? "INC-000123"}
+                    helperText={
+                      incident.refIncidentNo
+                        ? `Leave empty to use the Ref Bug ID ${incident.refIncidentNo}`
+                        : "Required"
+                    }
+                    value={transitionRef}
+                    onChange={(e) => setTransitionRef(e.target.value)}
+                  />
+                )}
                 <EngineerPicker
                   siteId={incident.siteId}
                   value={transitionOwnerUser}
@@ -1822,8 +1628,13 @@ export function IncidentDetailPage() {
                         ? !reason
                         : f === "resolutionCategory"
                           ? !resolutionCategory
-                          : !rootCauseSummary,
-                    )
+                          : f === "rootCauseSummary"
+                            ? !rootCauseSummary
+                            : false,
+                    ) ||
+                    ((toStatus === "BLOCKED" || toStatus === "DUPLICATE") &&
+                      !transitionRef.trim() &&
+                      !incident.refIncidentNo)
                   }
                   onClick={submitTransition}
                 >
@@ -1835,36 +1646,27 @@ export function IncidentDetailPage() {
 
           <Paper sx={{ p: 2, mb: 3 }}>
             <Typography variant="h6" gutterBottom>
-              Comments
+              Conversation
             </Typography>
-            <Stack spacing={1} sx={{ mb: 2 }}>
+            <Stack spacing={1.25} sx={{ mb: 2 }}>
               {comments.map((c) => (
-                <Box key={c.id}>
-                  <Typography variant="body2" component="div" sx={{ whiteSpace: "pre-wrap" }}>
-                    {c.authorId === incident.reportedByUserId ? (
-                      <Chip size="small" color="warning" label="Customer" sx={{ mr: 1 }} />
-                    ) : c.isInternal ? (
-                      <Chip size="small" label="Internal" sx={{ mr: 1 }} />
-                    ) : (
-                      <Chip
-                        size="small"
-                        color="info"
-                        variant="outlined"
-                        label="To customer"
-                        sx={{ mr: 1 }}
-                      />
-                    )}
-                    {c.body}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {c.authorId} · {new Date(c.createdAt).toLocaleString()}
-                  </Typography>
-                  <Divider sx={{ mt: 1 }} />
-                </Box>
+                <MessageBubble
+                  key={c.id}
+                  message={c}
+                  mine={c.authorId === currentUserId}
+                  tag={
+                    c.authorId === incident.reportedByUserId
+                      ? { label: "Customer", color: "warning" }
+                      : c.isInternal
+                        ? { label: "Internal" }
+                        : { label: "To customer", color: "info" }
+                  }
+                  onDownload={(attachmentId) => void downloadAttachment(attachmentId)}
+                />
               ))}
               {comments.length === 0 && (
                 <Typography variant="body2" color="text.secondary">
-                  No comments yet.
+                  No messages yet.
                 </Typography>
               )}
             </Stack>
@@ -1910,14 +1712,37 @@ export function IncidentDetailPage() {
                     }),
               }}
             />
-            <Button
-              variant="contained"
-              color={commentInternal ? "primary" : "info"}
-              disabled={!commentBody}
-              onClick={submitComment}
-            >
-              {commentInternal ? "Add internal note" : "Send to customer"}
-            </Button>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Button
+                variant="contained"
+                color={commentInternal ? "primary" : "info"}
+                disabled={(!commentBody.trim() && commentFiles.length === 0) || commentSending}
+                onClick={submitComment}
+              >
+                {commentSending
+                  ? "Sending..."
+                  : commentInternal
+                    ? "Add internal note"
+                    : "Send to customer"}
+              </Button>
+              <Button component="label" variant="outlined" disabled={commentSending}>
+                Attach files
+                <input
+                  type="file"
+                  hidden
+                  multiple
+                  onChange={(e) => {
+                    const picked = Array.from(e.target.files ?? []);
+                    setCommentFiles((prev) => [...prev, ...picked]);
+                    e.target.value = "";
+                  }}
+                />
+              </Button>
+            </Stack>
+            <StagedFiles
+              files={commentFiles}
+              onRemove={(i) => setCommentFiles((prev) => prev.filter((_, j) => j !== i))}
+            />
           </Paper>
 
           <Paper sx={{ p: 2 }}>
@@ -1927,8 +1752,14 @@ export function IncidentDetailPage() {
             <Stack spacing={1} sx={{ mb: 2 }}>
               {attachments.map((a) => (
                 <Stack key={a.id} direction="row" spacing={2} alignItems="center">
-                  <Typography variant="body2" sx={{ flex: 1 }}>
-                    {a.objectKey.split("/").pop()} ({(a.sizeBytes / 1024).toFixed(1)} KB)
+                  <Typography variant="body2" sx={{ flex: 1, overflowWrap: "anywhere" }}>
+                    {attachmentName(a)} ({(a.sizeBytes / 1024).toFixed(1)} KB)
+                    {a.commentId && (
+                      <Typography component="span" variant="caption" color="text.secondary">
+                        {" "}
+                        · sent with a message
+                      </Typography>
+                    )}
                   </Typography>
                   <Button size="small" onClick={() => downloadAttachment(a.id)}>
                     Download
@@ -2179,6 +2010,176 @@ export function IncidentDetailPage() {
         </Grid>
       </Grid>
     </Box>
+  );
+}
+
+/**
+ * The template's Status field on the staff side: every label from
+ * GET /incidents/:id/status-options, the ones this person can reach
+ * enabled. Picking one asks for whatever that move needs (a reason, the
+ * resolution, the other ticket) and then POST /incidents/:id/status runs
+ * the matching transition(s) — the backend decides, this only asks.
+ */
+function TemplateStatusPicker({
+  incident,
+  onChanged,
+  onError,
+}: {
+  incident: Incident;
+  onChanged: () => void;
+  onError: (message: string | null) => void;
+}) {
+  const [options, setOptions] = useState<TemplateStatusOption[]>([]);
+  const [target, setTarget] = useState("");
+  const [reason, setReason] = useState("");
+  const [resolutionCategory, setResolutionCategory] = useState("");
+  const [rootCauseSummary, setRootCauseSummary] = useState("");
+  const [refNo, setRefNo] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<TemplateStatusOption[]>(`/incidents/${incident.id}/status-options`)
+      .then((res) => !cancelled && setOptions(res))
+      .catch(() => !cancelled && setOptions([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [incident.id, incident.status, incident.ownerUserId]);
+
+  const current = options.find((o) => o.current);
+  const chosen = options.find((o) => o.status === target && !o.current);
+  const fields = chosen?.fields ?? [];
+  const missing = fields.filter((f) =>
+    f === "reason"
+      ? !reason.trim()
+      : f === "resolutionCategory"
+        ? !resolutionCategory.trim()
+        : f === "rootCauseSummary"
+          ? !rootCauseSummary.trim()
+          : !refNo.trim() && !incident.refIncidentNo,
+  );
+
+  const reset = () => {
+    setTarget("");
+    setReason("");
+    setResolutionCategory("");
+    setRootCauseSummary("");
+    setRefNo("");
+  };
+
+  const apply = async () => {
+    if (!chosen) return;
+    setSaving(true);
+    onError(null);
+    try {
+      await apiPost(`/incidents/${incident.id}/status`, {
+        status: chosen.status,
+        reason: reason.trim() || undefined,
+        resolutionCategory: resolutionCategory.trim() || undefined,
+        rootCauseSummary: rootCauseSummary.trim() || undefined,
+        refIncidentNo: refNo.trim() ? normalizeRefIncidentNo(refNo) : undefined,
+      });
+      reset();
+      onChanged();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Stack spacing={1}>
+      <TextField
+        select
+        size="small"
+        fullWidth
+        value={target || current?.status || ""}
+        onChange={(e) => setTarget(e.target.value)}
+        helperText={
+          options.length === 0
+            ? templateStatusText(incident.status as never, incident.refIncidentNo)
+            : chosen
+              ? chosen.steps.length > 1
+                ? `Runs ${chosen.steps.join(" → ")}`
+                : undefined
+              : "Pick a new status to move the ticket"
+        }
+        sx={{ "& .MuiInputBase-root": { bgcolor: "background.paper" } }}
+      >
+        {options.map((o) => (
+          <MenuItem key={o.status} value={o.status} disabled={!o.available && !o.current}>
+            {o.label}
+            {o.current ? " (current)" : ""}
+          </MenuItem>
+        ))}
+      </TextField>
+      {chosen && (
+        <>
+          {chosen.hint && <Alert severity="info">{chosen.hint}</Alert>}
+          {fields.includes("refIncidentNo") && (
+            <TextField
+              size="small"
+              label={
+                chosen.status === "BLOCKED_BY"
+                  ? "Blocked by (ticket number)"
+                  : "Duplicate of (ticket number)"
+              }
+              placeholder={incident.refIncidentNo ?? "INC-000123"}
+              helperText={
+                incident.refIncidentNo
+                  ? `Leave empty to use the Ref Bug ID ${incident.refIncidentNo}`
+                  : undefined
+              }
+              value={refNo}
+              onChange={(e) => setRefNo(e.target.value)}
+            />
+          )}
+          {fields.includes("reason") && (
+            <TextField
+              size="small"
+              label="Reason"
+              required
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          )}
+          {fields.includes("resolutionCategory") && (
+            <TextField
+              size="small"
+              label="Resolution category"
+              required
+              value={resolutionCategory}
+              onChange={(e) => setResolutionCategory(e.target.value)}
+            />
+          )}
+          {fields.includes("rootCauseSummary") && (
+            <TextField
+              size="small"
+              label="Root cause summary"
+              required
+              multiline
+              value={rootCauseSummary}
+              onChange={(e) => setRootCauseSummary(e.target.value)}
+            />
+          )}
+          <Stack direction="row" spacing={1}>
+            <Button
+              size="small"
+              variant="contained"
+              disabled={missing.length > 0 || saving}
+              onClick={() => void apply()}
+            >
+              {saving ? "Updating..." : `Set to ${chosen.label}`}
+            </Button>
+            <Button size="small" disabled={saving} onClick={reset}>
+              Cancel
+            </Button>
+          </Stack>
+        </>
+      )}
+    </Stack>
   );
 }
 

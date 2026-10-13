@@ -57,6 +57,16 @@ export interface IssueSelections {
   tool?: string;
 }
 
+/** Which IssueSelections field holds each kind's value. */
+const KIND_FIELD: Record<IssueCatalogKind, keyof IssueSelections> = {
+  ISSUE_TYPE: "issueType",
+  PRIORITY: "priority",
+  SEVERITY: "severity",
+  COMPONENT: "component",
+  SUB_COMPONENT: "subComponent",
+  TOOL: "tool",
+};
+
 const KIND_LABEL: Record<IssueCatalogKind, string> = {
   ISSUE_TYPE: "Issue type",
   PRIORITY: "Priority",
@@ -329,10 +339,16 @@ export class IssueReportingService {
    * Every supplied pick-list value must be an *active* option of its kind,
    * and a sub component must sit under the supplied component. Priority is
    * the fixed enum (already validated by the DTO) so it isn't looked up.
+   * `keep` is the ticket being edited: a value it already holds stays
+   * acceptable even after an admin retires that option, so editing one
+   * field of an older ticket doesn't fail on another it didn't touch.
    */
   async assertValidSelections(
     sel: IssueSelections,
-    opts: { requireIssueType?: boolean } = {},
+    opts: {
+      requireIssueType?: boolean;
+      keep?: { [K in keyof IssueSelections]?: IssueSelections[K] | null };
+    } = {},
   ): Promise<void> {
     if (opts.requireIssueType && !sel.issueType) {
       throw new BadRequestException("Issue type is required");
@@ -347,9 +363,11 @@ export class IssueReportingService {
     if (wanted.length === 0) {
       return;
     }
-    const found = await this.prisma.issueCatalogOption.findMany({
-      where: { isActive: true, OR: wanted },
-    });
+    const keep = opts.keep ?? {};
+    const kept = (kind: IssueCatalogKind, value: string) => keep[KIND_FIELD[kind]] === value;
+    const found = (await this.prisma.issueCatalogOption.findMany({ where: { OR: wanted } })).filter(
+      (o) => o.isActive || kept(o.kind, o.value),
+    );
     const lookup = (kind: IssueCatalogKind, value: string) =>
       found.find((o) => o.kind === kind && o.value === value);
     for (const w of wanted) {
@@ -377,17 +395,29 @@ export class IssueReportingService {
    * Assignee Group / Assignee as submitted on the form. No group picked →
    * the default group (Service Desk), if one is flagged. An assignee must be
    * an active staff member of that group; a reporter can't route a ticket
-   * to an arbitrary user.
+   * to an arbitrary user. `clientPick`: the reporter chose this group
+   * themselves, so it must be one offered to clients (flagged
+   * isClientSelectable, or the default group).
    */
   async resolveAssignment(
     ownerGroupId: string | undefined,
     ownerUserId: string | undefined,
+    opts: { clientPick?: boolean } = {},
   ): Promise<{ ownerGroupId: string | null; ownerUserId: string | null }> {
     const group = ownerGroupId
       ? await this.prisma.supportGroup.findUnique({ where: { id: ownerGroupId } })
       : await this.prisma.supportGroup.findFirst({ where: { isDefaultAssignee: true } });
     if (ownerGroupId && !group) {
       throw new BadRequestException("Unknown assignee group");
+    }
+    if (
+      opts.clientPick &&
+      ownerGroupId &&
+      group &&
+      !group.isClientSelectable &&
+      !group.isDefaultAssignee
+    ) {
+      throw new BadRequestException(`${group.name} can't be picked as the assignee group`);
     }
     if (!ownerUserId) {
       return { ownerGroupId: group?.id ?? null, ownerUserId: null };

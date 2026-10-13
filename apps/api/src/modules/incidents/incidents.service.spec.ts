@@ -145,7 +145,10 @@ function makeService(
       count: jest.fn().mockResolvedValue(0),
       groupBy: overrides.incidentGroupBy ?? jest.fn().mockResolvedValue([]),
     },
-    incidentComment: { findMany: jest.fn().mockResolvedValue([]) },
+    incidentComment: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
     incidentEvent: {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: overrides.incidentEventFindMany ?? jest.fn().mockResolvedValue([]),
@@ -462,7 +465,9 @@ describe("IncidentsService.createFromCustomer", () => {
       }),
     });
     await service.createFromCustomer(customerDto, { actorId: clientViewer.id }, clientViewer);
-    expect(issueReporting.resolveAssignment).toHaveBeenCalledWith(undefined, undefined);
+    expect(issueReporting.resolveAssignment).toHaveBeenCalledWith(undefined, undefined, {
+      clientPick: true,
+    });
     expect(tx.incident.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ ownerGroupId: "grp-desk" }),
@@ -1507,6 +1512,13 @@ describe("IncidentsService.createTransition", () => {
 });
 
 describe("IncidentsService.getAvailableTransitions", () => {
+  // BLOCKED / DUPLICATE are offered from most open states; these cases are
+  // about the other moves, so they're set aside (and covered on their own).
+  const withoutRefMoves = (result: { toStatus: IncidentStatus }[]) =>
+    result.filter(
+      (t) => t.toStatus !== IncidentStatus.BLOCKED && t.toStatus !== IncidentStatus.DUPLICATE,
+    );
+
   it("omits a transition the caller's role can never perform", async () => {
     const { service } = makeService({
       incidentFindUnique: jest
@@ -1531,13 +1543,13 @@ describe("IncidentsService.getAvailableTransitions", () => {
     // serviceDesk's role is allowed for PENDING_CUSTOMER -> IN_PROGRESS, but
     // they're neither the owner (otherEngineer is) nor elevated.
     const result = await service.getAvailableTransitions("incident-1", serviceDesk);
-    expect(result).toEqual([
-      {
+    expect(withoutRefMoves(result)).toEqual([
+      expect.objectContaining({
         toStatus: IncidentStatus.IN_PROGRESS,
         requiredFields: [],
         allowed: false,
         blockedReason: expect.stringContaining("owner"),
-      },
+      }),
     ]);
   });
 
@@ -1549,13 +1561,13 @@ describe("IncidentsService.getAvailableTransitions", () => {
     });
     // IN_PROGRESS -> PENDING_CUSTOMER has no requiresOwnerOrElevated gate.
     const result = await service.getAvailableTransitions("incident-1", serviceDesk);
-    expect(result).toEqual([
-      {
+    expect(withoutRefMoves(result)).toEqual([
+      expect.objectContaining({
         toStatus: IncidentStatus.PENDING_CUSTOMER,
         requiredFields: ["reason"],
         allowed: true,
         blockedReason: undefined,
-      },
+      }),
     ]);
   });
 
@@ -1567,14 +1579,14 @@ describe("IncidentsService.getAvailableTransitions", () => {
     // requiredFields entry for it, but its validate() still needs an owner
     // resolved — that's what `hint` is for.
     const result = await service.getAvailableTransitions("incident-1", serviceDesk);
-    expect(result).toEqual([
-      {
+    expect(withoutRefMoves(result)).toEqual([
+      expect.objectContaining({
         toStatus: IncidentStatus.ASSIGNED,
         requiredFields: [],
         allowed: true,
         blockedReason: undefined,
         hint: expect.stringContaining("resolved"),
-      },
+      }),
     ]);
   });
 
@@ -1585,15 +1597,34 @@ describe("IncidentsService.getAvailableTransitions", () => {
         .mockResolvedValue(baseIncident({ status: IncidentStatus.NEW, ownerUserId: "engineer-1" })),
     });
     const result = await service.getAvailableTransitions("incident-1", serviceDesk);
-    expect(result).toEqual([
-      {
+    expect(withoutRefMoves(result)).toEqual([
+      expect.objectContaining({
         toStatus: IncidentStatus.ASSIGNED,
         requiredFields: [],
         allowed: true,
         blockedReason: undefined,
         hint: undefined,
-      },
+      }),
     ]);
+  });
+
+  it("offers Blocked by / Duplicate of, hinting at the other ticket's number", async () => {
+    const { service } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ status: IncidentStatus.IN_PROGRESS })),
+    });
+    const result = await service.getAvailableTransitions("incident-1", serviceDesk);
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toStatus: IncidentStatus.BLOCKED,
+          allowed: true,
+          hint: expect.stringContaining("refIncidentNo"),
+        }),
+        expect.objectContaining({ toStatus: IncidentStatus.DUPLICATE, allowed: true }),
+      ]),
+    );
   });
 
   it("hints that a RESOLVED move needs a reason while a linked alert is still OPEN", async () => {
@@ -1647,7 +1678,42 @@ describe("IncidentsService comment visibility", () => {
     (prisma.incidentComment.findMany as jest.Mock).mockResolvedValue(comments);
 
     const result = await service.listComments("incident-1", clientViewer);
-    expect(result).toEqual([comments[1]]);
+    expect(result.map((c) => c.id)).toEqual(["c2"]);
+    expect(prisma.incidentComment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { incidentId: "incident-1", isInternal: false } }),
+    );
+  });
+
+  it("names the author of every message, for both sides", async () => {
+    const comments = [
+      {
+        id: "c1",
+        incidentId: "incident-1",
+        authorId: clientViewer.id,
+        isInternal: false,
+        body: "hi",
+      },
+      {
+        id: "c2",
+        incidentId: "incident-1",
+        authorId: engineer.id,
+        isInternal: false,
+        body: "on it",
+      },
+    ];
+    const { service, prisma } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
+      userFindMany: jest.fn().mockResolvedValue([
+        { id: clientViewer.id, displayName: "Priya Client", role: UserRole.CLIENT_MANAGER_VIEWER },
+        { id: engineer.id, displayName: "Rahul Engineer", role: UserRole.SITE_ENGINEER },
+      ]),
+    });
+    (prisma.incidentComment.findMany as jest.Mock).mockResolvedValue(comments);
+
+    const result = await service.listComments("incident-1", clientViewer);
+    expect(result.map((c) => c.author.displayName)).toEqual(["Priya Client", "Rahul Engineer"]);
   });
 
   it("returns every comment for a non-viewer role", async () => {
@@ -1659,7 +1725,7 @@ describe("IncidentsService comment visibility", () => {
     (prisma.incidentComment.findMany as jest.Mock).mockResolvedValue(comments);
 
     const result = await service.listComments("incident-1", engineer);
-    expect(result).toEqual(comments);
+    expect(result.map((c) => c.id)).toEqual(["c1", "c2"]);
   });
 });
 
@@ -2803,5 +2869,434 @@ describe("IncidentsService.findPossibleDuplicates", () => {
     });
     await service.findPossibleDuplicates("incident-1", engineer);
     expect((prisma.incident.findMany as jest.Mock).mock.calls[0][0].where.AND).toBeDefined();
+  });
+});
+
+describe("IncidentsService issue template v2", () => {
+  const passThroughUpdate = (before: ReturnType<typeof baseIncident>) => ({
+    update: jest.fn().mockImplementation(({ data }) =>
+      Promise.resolve({
+        ...before,
+        ...Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)),
+        updatedAt: new Date(),
+      }),
+    ),
+  });
+
+  describe("description is frozen once raised", () => {
+    it("refuses a staff edit that changes the description", async () => {
+      const { service, tx } = makeService({
+        incidentFindUnique: jest
+          .fn()
+          .mockResolvedValue(baseIncident({ description: "Original words" })),
+      });
+      await expect(
+        service.update("incident-1", { description: "Rewritten" }, serviceDesk, {
+          actorId: serviceDesk.id,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.incident.update).not.toHaveBeenCalled();
+    });
+
+    it("lets a form that round-trips the same description through", async () => {
+      const { service, tx } = makeService({
+        incidentFindUnique: jest
+          .fn()
+          .mockResolvedValue(baseIncident({ description: "Original words" })),
+      });
+      await service.update(
+        "incident-1",
+        { description: "Original words", shortDescription: "New subject" },
+        serviceDesk,
+        { actorId: serviceDesk.id },
+      );
+      expect(tx.incident.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.not.objectContaining({ description: expect.anything() }),
+        }),
+      );
+    });
+
+    it("keeps values the ticket already holds valid even after they are retired", async () => {
+      const before = baseIncident({ issueType: "HARDWARE_FAILURE", component: "SERVER" });
+      const { service, issueReporting } = makeService({
+        incidentFindUnique: jest.fn().mockResolvedValue(before),
+      });
+      await service.update("incident-1", { shortDescription: "x y" }, serviceDesk, {
+        actorId: serviceDesk.id,
+      });
+      expect(issueReporting.assertValidSelections).toHaveBeenCalledWith(
+        expect.objectContaining({ issueType: "HARDWARE_FAILURE" }),
+        { keep: before },
+      );
+    });
+  });
+
+  describe("updateFromCustomer (reporter edits their own ticket)", () => {
+    const mine = (overrides: Partial<Record<string, unknown>> = {}) =>
+      baseIncident({
+        reportedByUserId: clientViewer.id,
+        issueType: "BUG",
+        category: "BUG",
+        priority: Priority.P3,
+        ownerGroupId: "grp-desk",
+        component: "HW",
+        subComponent: "HW.SERVER",
+        ...overrides,
+      });
+
+    it("saves the template fields, re-targets the SLA on a priority change and tells the desk", async () => {
+      const before = mine();
+      const { service, tx, slaService, inbox } = makeService({
+        incidentFindUnique: jest.fn().mockResolvedValue(before),
+        txIncident: passThroughUpdate(before),
+      });
+      const after = await service.updateFromCustomer(
+        "incident-1",
+        { subject: "Now a change", issueType: "CHANGE_REQUEST", priority: Priority.P2 },
+        { actorId: clientViewer.id },
+        clientViewer,
+      );
+      expect(after).toEqual(
+        expect.objectContaining({
+          shortDescription: "Now a change",
+          issueType: "CHANGE_REQUEST",
+          // category followed the issue type: the desk hadn't reclassified it
+          category: "CHANGE_REQUEST",
+          priority: Priority.P2,
+        }),
+      );
+      expect(slaService.onPriorityChanged).toHaveBeenCalled();
+      expect(tx.incidentEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventType: "REPORT_EDITED",
+            payload: { fields: expect.arrayContaining(["shortDescription", "priority"]) },
+          }),
+        }),
+      );
+      expect(inbox.notifyUsers).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "INC-000001: the reporter updated the ticket" }),
+      );
+    });
+
+    it("leaves a category the desk reclassified alone", async () => {
+      const before = mine({ category: "SERVER_FAILURE" });
+      const { service, tx } = makeService({
+        incidentFindUnique: jest.fn().mockResolvedValue(before),
+        txIncident: passThroughUpdate(before),
+      });
+      await service.updateFromCustomer(
+        "incident-1",
+        { issueType: "OTHER_REQUEST" },
+        { actorId: clientViewer.id },
+        clientViewer,
+      );
+      expect(tx.incident.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.not.objectContaining({ category: expect.anything() }),
+        }),
+      );
+    });
+
+    it("drops the old sub component when the component changes, and clears with an empty string", async () => {
+      const before = mine();
+      const { service, tx } = makeService({
+        incidentFindUnique: jest.fn().mockResolvedValue(before),
+        txIncident: passThroughUpdate(before),
+      });
+      await service.updateFromCustomer(
+        "incident-1",
+        { component: "SW", severity: "" },
+        { actorId: clientViewer.id },
+        clientViewer,
+      );
+      expect(tx.incident.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ component: "SW", subComponent: null, severity: null }),
+        }),
+      );
+    });
+
+    it("checks a new assignee group as the reporter's own pick and clears the old assignee", async () => {
+      const before = mine({ ownerUserId: "eng-1" });
+      const { service, issueReporting } = makeService({
+        incidentFindUnique: jest.fn().mockResolvedValue(before),
+        txIncident: passThroughUpdate(before),
+        issueReporting: {
+          resolveAssignment: jest
+            .fn()
+            .mockResolvedValue({ ownerGroupId: "grp-infra", ownerUserId: null }),
+        },
+      });
+      await service.updateFromCustomer(
+        "incident-1",
+        { ownerGroupId: "grp-infra" },
+        { actorId: clientViewer.id },
+        clientViewer,
+      );
+      expect(issueReporting.resolveAssignment).toHaveBeenCalledWith("grp-infra", undefined, {
+        clientPick: true,
+      });
+    });
+
+    it("refuses edits once the ticket is closed", async () => {
+      const { service, tx } = makeService({
+        incidentFindUnique: jest.fn().mockResolvedValue(mine({ status: IncidentStatus.CLOSED })),
+      });
+      await expect(
+        service.updateFromCustomer(
+          "incident-1",
+          { subject: "too late" },
+          { actorId: clientViewer.id },
+          clientViewer,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.incident.update).not.toHaveBeenCalled();
+    });
+
+    it("is only for the reporter's own ticket", async () => {
+      const { service } = makeService({
+        incidentFindUnique: jest.fn().mockResolvedValue(mine({ reportedByUserId: "someone-else" })),
+      });
+      await expect(
+        service.updateFromCustomer(
+          "incident-1",
+          { subject: "not mine" },
+          { actorId: clientViewer.id },
+          clientViewer,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe("Blocked by / Duplicate of", () => {
+    it("records the other ticket as the Ref Bug ID when blocking", async () => {
+      const before = baseIncident({ status: IncidentStatus.IN_PROGRESS, ownerUserId: engineer.id });
+      const { service, tx } = makeService({
+        incidentFindUnique: jest.fn().mockResolvedValue(before),
+      });
+      await service.createTransition(
+        "incident-1",
+        { toStatus: IncidentStatus.BLOCKED, refIncidentNo: "INC-000777" },
+        { actorId: engineer.id },
+        engineer,
+      );
+      expect(tx.incident.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: IncidentStatus.BLOCKED,
+            refIncidentNo: "INC-000777",
+          }),
+        }),
+      );
+    });
+
+    it("needs the other ticket's number", async () => {
+      const { service } = makeService({
+        incidentFindUnique: jest
+          .fn()
+          .mockResolvedValue(baseIncident({ status: IncidentStatus.IN_PROGRESS })),
+      });
+      await expect(
+        service.createTransition(
+          "incident-1",
+          { toStatus: IncidentStatus.DUPLICATE },
+          { actorId: serviceDesk.id },
+          serviceDesk,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it("can't point at itself", async () => {
+      const { service } = makeService({
+        incidentFindUnique: jest
+          .fn()
+          .mockResolvedValue(baseIncident({ status: IncidentStatus.IN_PROGRESS })),
+      });
+      await expect(
+        service.createTransition(
+          "incident-1",
+          { toStatus: IncidentStatus.DUPLICATE, refIncidentNo: "INC-000001" },
+          { actorId: serviceDesk.id },
+          serviceDesk,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe("template status list", () => {
+    it("shows the current label and what the caller can reach", async () => {
+      const { service } = makeService({
+        incidentFindUnique: jest
+          .fn()
+          .mockResolvedValue(
+            baseIncident({ status: IncidentStatus.ACKNOWLEDGED, ownerUserId: engineer.id }),
+          ),
+      });
+      const options = await service.getTemplateStatusOptions("incident-1", engineer);
+      const by = Object.fromEntries(options.map((o) => [o.status, o]));
+      expect(by.IN_PROGRESS).toEqual(expect.objectContaining({ current: true, available: false }));
+      expect(by.FIXED).toEqual(
+        expect.objectContaining({
+          available: true,
+          steps: [IncidentStatus.IN_PROGRESS, IncidentStatus.RESOLVED],
+          fields: ["resolutionCategory", "rootCauseSummary"],
+        }),
+      );
+      expect(by.NEW.available).toBe(false);
+      expect(options.map((o) => o.label)).toEqual([
+        "New",
+        "Assigned",
+        "In Progress",
+        "Pending 3rd Party",
+        "Assigned to requester",
+        "Fixed",
+        "Blocked by",
+        "Duplicate of",
+      ]);
+    });
+
+    it("runs each transition of the chain in turn", async () => {
+      let status: IncidentStatus = IncidentStatus.RESOLVED;
+      const { service, tx } = makeService({
+        incidentFindUnique: jest
+          .fn()
+          .mockImplementation(() =>
+            Promise.resolve(baseIncident({ status, ownerUserId: engineer.id })),
+          ),
+        txIncident: {
+          update: jest.fn().mockImplementation(({ data }) => {
+            status = data.status;
+            return Promise.resolve(baseIncident({ ...data, ownerUserId: engineer.id }));
+          }),
+        },
+      });
+      const after = await service.setTemplateStatus(
+        "incident-1",
+        { status: "IN_PROGRESS", reason: "Still failing" },
+        { actorId: engineer.id },
+        engineer,
+      );
+      expect(after.status).toBe(IncidentStatus.IN_PROGRESS);
+      expect(
+        (tx.incident.update as jest.Mock).mock.calls.map(
+          ([arg]: [{ data: { status: IncidentStatus } }]) => arg.data.status,
+        ),
+      ).toEqual([IncidentStatus.REOPENED, IncidentStatus.IN_PROGRESS]);
+    });
+
+    it("checks the whole chain's fields before moving anything", async () => {
+      const { service, tx } = makeService({
+        incidentFindUnique: jest
+          .fn()
+          .mockResolvedValue(
+            baseIncident({ status: IncidentStatus.RESOLVED, ownerUserId: engineer.id }),
+          ),
+      });
+      await expect(
+        service.setTemplateStatus(
+          "incident-1",
+          { status: "IN_PROGRESS" },
+          { actorId: engineer.id },
+          engineer,
+        ),
+      ).rejects.toThrow("reason");
+      expect(tx.incident.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses a label the caller can't reach", async () => {
+      const { service } = makeService({
+        incidentFindUnique: jest
+          .fn()
+          .mockResolvedValue(baseIncident({ status: IncidentStatus.ASSIGNED })),
+      });
+      await expect(
+        service.setTemplateStatus(
+          "incident-1",
+          { status: "IN_PROGRESS" },
+          { actorId: serviceDesk.id },
+          serviceDesk,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe("files sent with a message", () => {
+    const file = {
+      originalname: "photo.png",
+      mimetype: "image/png",
+      size: 1024,
+      buffer: Buffer.from("png"),
+    };
+
+    it("links the file to the sender's own message", async () => {
+      const { service, prisma, tx } = makeService({
+        incidentFindUnique: jest
+          .fn()
+          .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
+      });
+      (prisma.incidentComment.findUnique as jest.Mock).mockResolvedValue({
+        id: "c-1",
+        incidentId: "incident-1",
+        authorId: clientViewer.id,
+        isInternal: false,
+      });
+      await service.uploadAttachment(
+        "incident-1",
+        file,
+        { actorId: clientViewer.id },
+        clientViewer,
+        "c-1",
+      );
+      expect(tx.attachment.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ commentId: "c-1" }) }),
+      );
+    });
+
+    it("won't attach to someone else's message", async () => {
+      const { service, prisma, storageService } = makeService();
+      (prisma.incidentComment.findUnique as jest.Mock).mockResolvedValue({
+        id: "c-1",
+        incidentId: "incident-1",
+        authorId: "someone-else",
+        isInternal: false,
+      });
+      await expect(
+        service.uploadAttachment("incident-1", file, { actorId: engineer.id }, engineer, "c-1"),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(storageService.putObject).not.toHaveBeenCalled();
+    });
+
+    it("hides an internal note's files from the customer", async () => {
+      const { service, prisma } = makeService({
+        incidentFindUnique: jest
+          .fn()
+          .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
+      });
+      (prisma.attachment.findUnique as jest.Mock).mockResolvedValue({
+        id: "att-1",
+        entityType: "INCIDENT",
+        entityId: "incident-1",
+        objectKey: "incidents/incident-1/x-photo.png",
+        deletedAt: null,
+        commentId: "c-internal",
+      });
+      (prisma.incidentComment.findUnique as jest.Mock).mockResolvedValue({
+        id: "c-internal",
+        isInternal: true,
+      });
+      await expect(
+        service.getAttachmentDownloadUrl("incident-1", "att-1", clientViewer),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await service.listAttachments("incident-1", clientViewer);
+      expect(prisma.attachment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: [{ commentId: null }, { comment: { isInternal: false } }],
+          }),
+        }),
+      );
+    });
   });
 });
