@@ -1,0 +1,10 @@
+{
+  "builder": "RAILPACK",
+  "buildCommand": "pnpm --filter @cts-dc-opsdesk/api exec prisma generate && pnpm --filter \"@cts-dc-opsdesk/api...\" build",
+  "preDeployCommand": ["pnpm --filter @cts-dc-opsdesk/api exec prisma migrate deploy"],
+  "startCommand": "node apps/api/dist/main.js",
+  "healthcheckPath": "/api/v1/health",
+  "healthcheckTimeout": 120,
+  "restartPolicyType": "ON_FAILURE",
+  "restartPolicyMaxRetries": 10
+}

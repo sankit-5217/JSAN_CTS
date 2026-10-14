@@ -1,0 +1,7 @@
+{
+  "builder": "RAILPACK",
+  "buildCommand": "pnpm --filter \"@cts-dc-opsdesk/worker...\" build",
+  "startCommand": "node apps/worker/dist/index.js",
+  "restartPolicyType": "ON_FAILURE",
+  "restartPolicyMaxRetries": 10
+}
