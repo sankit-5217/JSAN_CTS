@@ -4,6 +4,7 @@ import { join } from "path";
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -145,6 +146,29 @@ export class AgentEnrollmentService {
     };
     this.logger.log(`installer (${os}) served for enrollment ${enrollment.id} (${siteCode})`);
     return renderTemplate(this.script(os), values);
+  }
+
+  /**
+   * The installer, or — when the link is invalid/expired/revoked or the server
+   * side isn't ready — a tiny script that prints why and exits non-zero.
+   * Served with HTTP 200 on purpose: with `curl -f ... | bash` a 4xx/5xx makes
+   * curl print only "error: 404" and bash then exits 0 on its empty input, so
+   * the client would neither understand the problem nor get a failing exit code.
+   */
+  async installerOrError(code: string, os: InstallerOs): Promise<string> {
+    try {
+      return await this.renderInstaller(code, os);
+    } catch (err) {
+      if (!(err instanceof HttpException)) throw err;
+      const body = err.getResponse() as { message?: unknown } | string;
+      const message =
+        typeof body === "string"
+          ? body
+          : typeof body.message === "string"
+            ? body.message
+            : "The installer could not be prepared";
+      return errorScript(os, message);
+    }
   }
 
   /**
@@ -333,4 +357,31 @@ export function renderTemplate(template: string, values: Record<string, string>)
   const left = out.match(/__OPSDESK_[A-Z_]+__/);
   if (left) throw new Error(`installer template placeholder ${left[0]} has no value`);
   return out;
+}
+
+/**
+ * A script that only explains a failure and exits 1 (R20). The message is
+ * reduced to plain characters so it cannot break out of its quotes.
+ */
+export function errorScript(os: InstallerOs, message: string): string {
+  const text = message
+    .replace(/[^A-Za-z0-9 .,:()/_-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
+  const lines =
+    os === "linux"
+      ? [
+          "#!/usr/bin/env bash",
+          "# JSAN OpsDesk monitoring agent installer - not available",
+          `echo "ERROR: ${text}" >&2`,
+          "exit 1",
+        ]
+      : [
+          "# JSAN OpsDesk monitoring agent installer - not available",
+          `Write-Host 'ERROR: ${text}' -ForegroundColor Red`,
+          // `iex` cannot exit the caller's shell; a terminating error stops the line.
+          "throw 'JSAN OpsDesk installer not available'",
+        ];
+  return lines.join("\n") + "\n";
 }

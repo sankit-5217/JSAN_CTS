@@ -4,7 +4,12 @@ import { PrismaService } from "../../../common/prisma/prisma.service";
 import { AuditService } from "../../audit/audit.service";
 import { CmdbService } from "../../cmdb/cmdb.service";
 import { ZabbixService } from "../zabbix/zabbix.service";
-import { AgentEnrollmentService, agentHostName, hashCode } from "./agent-enrollment.service";
+import {
+  AgentEnrollmentService,
+  agentHostName,
+  errorScript,
+  hashCode,
+} from "./agent-enrollment.service";
 
 const SITE = { id: "11111111-1111-4111-8111-111111111111", code: "SITE04" };
 const ACTOR = { actorId: "admin-1", correlationId: "corr-1" };
@@ -181,6 +186,38 @@ describe("AgentEnrollmentService", () => {
     await expect(
       svc.register(code, { hostname: "web-01", os: "windows", machineId: MACHINE }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe("R20: a bad link fails clearly with a non-zero exit", () => {
+  it("serves an explaining script instead of a 404 for an unknown code", async () => {
+    const { svc } = setup();
+    const sh = await svc.installerOrError("B".repeat(43), "linux");
+    expect(sh).toContain("invalid, expired or revoked");
+    expect(sh).toContain("exit 1");
+    expect(sh).not.toContain("ENROLL_CODE");
+    const ps1 = await svc.installerOrError("B".repeat(43), "windows");
+    expect(ps1).toContain("throw");
+  });
+
+  it("explains a server-side problem too (Zabbix not ready)", async () => {
+    const { svc, zabbix } = setup();
+    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    const { ServiceUnavailableException } = await import("@nestjs/common");
+    (zabbix.agentInstallTarget as jest.Mock).mockRejectedValueOnce(
+      new ServiceUnavailableException({ code: "X", message: "Zabbix is switched off" }),
+    );
+    expect(await svc.installerOrError(code, "linux")).toContain("Zabbix is switched off");
+  });
+
+  it("the error script really exits 1 in bash, and hostile text cannot escape its quotes", () => {
+    const { spawnSync } = jest.requireActual<typeof import("child_process")>("child_process");
+    if (spawnSync("bash", ["-c", "true"]).status !== 0) return;
+    const script = errorScript("linux", 'Link gone"; touch /tmp/pwned; echo "$(id)`id`');
+    expect(script).not.toMatch(/[$`"]\s*;|\$\(|`/);
+    const r = spawnSync("bash", ["-s"], { input: script, encoding: "utf8" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("ERROR: Link gone");
   });
 });
 

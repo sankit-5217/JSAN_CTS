@@ -70,7 +70,8 @@ export class AgentEnrollmentController {
 /**
  * What the client's machine calls — authenticated by the enrollment code in
  * the path (32 random bytes, stored only as a hash, expires, revocable), not
- * by a user session. Rate-limited per IP; an unknown code is a plain 404.
+ * by a user session. Rate-limited per IP. An unknown/expired/revoked code
+ * gets a script that explains it and exits non-zero (never the installer).
  */
 @ApiTags("monitoring / agent enrollment")
 @Throttle({ default: { limit: 30, ttl: 60_000 } })
@@ -83,7 +84,7 @@ export class AgentEnrollmentPublicController {
   @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "Linux installer: curl -fsSL .../install.sh | sudo bash" })
   linux(@Param("code") code: string) {
-    return this.enrollments.renderInstaller(code, "linux");
+    return this.enrollments.installerOrError(code, "linux");
   }
 
   @Get(":code/install.ps1")
@@ -91,7 +92,7 @@ export class AgentEnrollmentPublicController {
   @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "Windows installer: irm .../install.ps1 | iex" })
   windows(@Param("code") code: string) {
-    return this.enrollments.renderInstaller(code, "windows");
+    return this.enrollments.installerOrError(code, "windows");
   }
 
   @Post(":code/register")
