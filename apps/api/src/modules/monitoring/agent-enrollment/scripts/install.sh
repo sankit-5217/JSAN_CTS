@@ -34,6 +34,9 @@ readonly CONF_D=/etc/zabbix/zabbix_agent2.d
 readonly OPSDESK_CONF="$CONF_D/opsdesk.conf"
 readonly PSK_FILE=/etc/zabbix/opsdesk.psk
 readonly AGENT_LOG=/var/log/zabbix/zabbix_agent2.log
+# Loopback-only port for the agent's (unused) passive listener; not 10050, so a
+# Zabbix agent the client already runs is left alone.
+readonly LISTEN_PORT=31050
 
 STEP_TOTAL=6
 STEP=0
@@ -233,7 +236,7 @@ configure_agent() {
   printf '%s\n' "$PSK" >"$PSK_FILE"
   # Settings this installer owns live in opsdesk.conf; switch off the same
   # keys in the stock file so there is exactly one value for each.
-  sed -i -E 's/^(Server|ServerActive|Hostname|HostnameItem|ListenIP|TLSConnect|TLSAccept|TLSPSKIdentity|TLSPSKFile)=/# opsdesk: &/' "$CONF"
+  sed -i -E 's/^(Server|ServerActive|Hostname|HostnameItem|ListenIP|ListenPort|TLSConnect|TLSAccept|TLSPSKIdentity|TLSPSKFile)=/# opsdesk: &/' "$CONF"
   grep -q "^Include=$CONF_D/\*.conf" "$CONF" || printf '\nInclude=%s/*.conf\n' "$CONF_D" >>"$CONF"
   umask 022
   cat >"$OPSDESK_CONF" <<EOF
@@ -241,9 +244,11 @@ configure_agent() {
 # installer to change it; manual edits are overwritten.
 Hostname=$HOST_NAME
 ServerActive=$SERVER_ACTIVE
-# Passive checks only from this machine itself: no port is reachable from outside.
+# Passive checks only from this machine itself: no port is reachable from
+# outside. A dedicated local port, so an existing Zabbix agent on 10050 keeps working.
 Server=127.0.0.1
 ListenIP=127.0.0.1
+ListenPort=$LISTEN_PORT
 TLSConnect=psk
 TLSAccept=psk
 TLSPSKIdentity=$PSK_IDENTITY

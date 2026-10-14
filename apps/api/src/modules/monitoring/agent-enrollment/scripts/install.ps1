@@ -113,7 +113,7 @@
       # Placeholder settings only - the real ones (incl. the key) are written
       # to the config file below, never put on a command line.
       $msiLog = Join-Path $LogDir 'agent-msi.log'
-      $msiArgs = "/i `"$msi`" /qn /norestart /l*v `"$msiLog`" SERVER=127.0.0.1 SERVERACTIVE=127.0.0.1 LISTENIP=127.0.0.1"
+      $msiArgs = "/i `"$msi`" /qn /norestart /l*v `"$msiLog`" SERVER=127.0.0.1 SERVERACTIVE=127.0.0.1 LISTENIP=127.0.0.1 LISTENPORT=31050"
       $p = Start-Process msiexec.exe -ArgumentList $msiArgs -Wait -PassThru
       Remove-Item -Force -ErrorAction SilentlyContinue $msi
       if ($p.ExitCode -notin 0, 3010) { Fail "The Zabbix agent MSI failed (exit code $($p.ExitCode)); see $msiLog" }
@@ -143,7 +143,7 @@
     Set-Content -Path $PskFile -Value $reg.psk -Encoding Ascii -NoNewline
     # Only SYSTEM (the agent service) and Administrators may read the key.
     & icacls.exe $PskFile /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
-    $owned = 'Server', 'ServerActive', 'Hostname', 'HostnameItem', 'ListenIP', 'TLSConnect', 'TLSAccept', 'TLSPSKIdentity', 'TLSPSKFile'
+    $owned = 'Server', 'ServerActive', 'Hostname', 'HostnameItem', 'ListenIP', 'ListenPort', 'TLSConnect', 'TLSAccept', 'TLSPSKIdentity', 'TLSPSKFile'
     $lines = New-Object System.Collections.Generic.List[string]
     $inBlock = $false
     foreach ($line in (Get-Content -Path $ConfFile)) {
@@ -159,6 +159,8 @@
     $lines.Add("ServerActive=$($reg.serverActive)")
     $lines.Add('Server=127.0.0.1')
     $lines.Add('ListenIP=127.0.0.1')
+    # Dedicated local port so an existing Zabbix agent on 10050 keeps working.
+    $lines.Add('ListenPort=31050')
     $lines.Add('TLSConnect=psk')
     $lines.Add('TLSAccept=psk')
     $lines.Add("TLSPSKIdentity=$($reg.pskIdentity)")

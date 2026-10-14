@@ -59,6 +59,7 @@ all of these. IDs are referenced by the tests in `installer-scripts.spec.ts`.
 | R16 | **Served safely** | only `[A-Za-z0-9._:/-]` values are substituted into a script; unknown/expired/revoked code → 404; rate-limited | same |
 | R17 | **Matches the server** | agent version series taken from the live Zabbix server, not hard-coded | exact MSI version from the server |
 | R18 | **Lint-clean** | `bash -n`, and ShellCheck clean with `-o all` (only the pure-style SC2250/SC2292/SC2312 excluded) | PowerShell parser clean |
+| R19 | **Coexists with an existing agent** | own loopback port 31050 (not 10050); an agent the client already runs is left alone | same |
 
 ## Troubleshooting
 

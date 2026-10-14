@@ -115,6 +115,12 @@ describe("Linux installer (install.sh) rubric", () => {
     expect(body).toContain("Server=127.0.0.1");
   });
 
+  it("R19: coexists with an agent the client already runs (not port 10050)", () => {
+    expect(body).toContain("readonly LISTEN_PORT=31050");
+    expect(body).toContain("ListenPort=$LISTEN_PORT");
+    expect(body).toMatch(/ListenIP\|ListenPort\|TLSConnect/);
+  });
+
   it("R9: PSK both ways, key file locked down, key never printed", () => {
     expect(body).toContain("TLSConnect=psk");
     expect(body).toContain("TLSAccept=psk");
@@ -226,6 +232,11 @@ describe("Windows installer (install.ps1) rubric", () => {
     expect(body).toContain("/inheritance:r");
     expect(body).not.toMatch(/msiexec[^\n]*psk/i);
     expect(body).not.toMatch(/\$msiArgs[^\n]*psk/i);
+  });
+
+  it("R19: own local port, not 10050", () => {
+    expect(body).toContain("'ListenPort=31050'");
+    expect(body).toContain("'ListenPort'");
   });
 
   it("R10: signed MSI over TLS 1.2", () => {
