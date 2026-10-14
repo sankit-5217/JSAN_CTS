@@ -10,6 +10,7 @@ type PrismaMock = {
   healthSnapshot: { upsert: jest.Mock; findUnique: jest.Mock };
   site: { findUnique: jest.Mock };
   alert: { findUnique: jest.Mock };
+  collectorHeartbeat: { upsert: jest.Mock };
   $transaction: jest.Mock;
 };
 
@@ -19,6 +20,7 @@ function createPrismaMock(): PrismaMock {
     healthSnapshot: { upsert: jest.fn(), findUnique: jest.fn() },
     site: { findUnique: jest.fn().mockResolvedValue({ code: "SITE01" }) },
     alert: { findUnique: jest.fn() },
+    collectorHeartbeat: { upsert: jest.fn().mockResolvedValue({}) },
     $transaction: jest.fn(),
   };
   mock.$transaction.mockImplementation((fn: (tx: PrismaMock) => unknown) => fn(mock));
@@ -367,18 +369,17 @@ describe("MonitoringService", () => {
   });
 
   describe("recordHeartbeat", () => {
-    it("writes an append-only COLLECTOR_HEARTBEAT audit event for the site", async () => {
+    it("keeps the site's last ping and writes nothing to the audit trail", async () => {
       const result = await service.recordHeartbeat("SITE01", ACTOR);
 
       expect(result.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-      expect(audit.record).toHaveBeenCalledWith(
+      expect(prisma.collectorHeartbeat.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          entityType: "collector",
-          entityId: "SITE01",
-          action: "COLLECTOR_HEARTBEAT",
-          actorId: "collector-svc",
+          where: { siteCode: "SITE01" },
+          create: expect.objectContaining({ siteCode: "SITE01", reportedById: "collector-svc" }),
         }),
       );
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 

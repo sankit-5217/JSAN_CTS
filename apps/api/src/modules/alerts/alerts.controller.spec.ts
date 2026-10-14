@@ -5,6 +5,7 @@ import request from "supertest";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AlertsController } from "./alerts.controller";
+import { AuthzService } from "../auth/authz.service";
 import { AlertsService } from "./alerts.service";
 import { AlertmanagerAlertDto, AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
 import { SnmpTrapDto } from "./dto/snmp-trap.dto";
@@ -35,7 +36,10 @@ describe("AlertsController (source payload validation)", () => {
     };
     const moduleRef = await Test.createTestingModule({
       controllers: [AlertsController],
-      providers: [{ provide: AlertsService, useValue: service }],
+      providers: [
+        { provide: AlertsService, useValue: service },
+        { provide: AuthzService, useValue: { getAccessibleSiteIds: jest.fn().mockResolvedValue(null) } },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue(allowAs)

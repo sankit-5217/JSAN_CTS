@@ -16,6 +16,7 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
+import { tmpdir } from "os";
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
@@ -35,6 +36,7 @@ import { UpdateCcListDto } from "./dto/update-cc-list.dto";
 import { UpdateCustomerReportDto, UpdateIncidentDto } from "./dto/update-incident.dto";
 import { CUSTOMER_FEEDBACK_ROLES, IncidentCustomerService } from "./incident-customer.service";
 import { IncidentsService, UploadedAttachmentFile } from "./incidents.service";
+import { MAX_ATTACHMENT_SIZE_BYTES } from "./attachment.constants";
 
 // Wider than CMDB's write set by exactly SERVICE_DESK_NOC — spec §4 gives
 // that role "Triage, acknowledge, route, update incidents" as its primary
@@ -255,7 +257,14 @@ export class IncidentsController {
   @Post(":id/attachments")
   @Roles(...INCIDENT_ATTACHMENT_ROLES)
   @ApiConsumes("multipart/form-data")
-  @UseInterceptors(FileInterceptor("file"))
+  // Streamed to a temp file, never held in memory; multer stops reading at
+  // the size limit (413) instead of buffering a huge body first.
+  @UseInterceptors(
+    FileInterceptor("file", {
+      dest: tmpdir(),
+      limits: { fileSize: MAX_ATTACHMENT_SIZE_BYTES, files: 1 },
+    }),
+  )
   uploadAttachment(
     @Param("id") id: string,
     @UploadedFile() file: UploadedAttachmentFile,

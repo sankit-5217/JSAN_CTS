@@ -1,10 +1,11 @@
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
-import { ConfigModule } from "@nestjs/config";
+import { ConfigModule, ConfigService } from "@nestjs/config";
 import { EventEmitterModule } from "@nestjs/event-emitter";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { NotificationsModule } from "./common/notifications/notifications.module";
 import { PrismaModule } from "./common/prisma/prisma.module";
+import { throttlerOptions } from "./common/http/throttling";
 import { HealthModule } from "./modules/health/health.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { SitesModule } from "./modules/sites/sites.module";
@@ -33,11 +34,14 @@ import { AuditModule } from "./modules/audit/audit.module";
     // routing auto-assign) — CLAUDE.md: cross-module calls via events.
     EventEmitterModule.forRoot(),
     // Applies to every route app-wide (spec §18: "protect login, search,
-    // event ingestion and webhook endpoints") — a single global default
-    // covers Dev B's alerts ingestion/webhook endpoints too, without
-    // touching their module code. Tighter per-route limits (e.g. login)
-    // are layered on top via @Throttle(...).
-    ThrottlerModule.forRoot([{ name: "default", ttl: 60_000, limit: 100 }]),
+    // event ingestion and webhook endpoints"): a per-IP ceiling plus a
+    // per-caller limit (see common/http/throttling.ts). Tighter per-route
+    // limits (e.g. login) are layered on top via @Throttle(...); machine
+    // alert intake opts out with @SkipThrottle().
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: throttlerOptions,
+    }),
     PrismaModule,
     NotificationsModule,
     HealthModule,

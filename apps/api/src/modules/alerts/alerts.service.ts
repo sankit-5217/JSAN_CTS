@@ -793,7 +793,26 @@ export class AlertsService {
     return { accepted, rejected };
   }
 
-  async findAll(query: QueryAlertsDto) {
+  /** Current state of each of a source's alerts, by external event id (for re-sync). */
+  async statesByExternalId(source: string, externalEventIds: string[]): Promise<Map<string, AlertState>> {
+    if (externalEventIds.length === 0) return new Map();
+    const rows = await this.prisma.alert.findMany({
+      where: { source, externalEventId: { in: externalEventIds } },
+      select: { externalEventId: true, state: true },
+    });
+    return new Map(rows.map((r) => [r.externalEventId, r.state]));
+  }
+
+  /** A source's alerts that are still open (not RECOVERED) and first seen before `before`. */
+  openFromSource(source: string, before: Date) {
+    return this.prisma.alert.findMany({
+      where: { source, state: { not: "RECOVERED" }, firstSeenAt: { lt: before } },
+      select: { externalEventId: true, state: true, summary: true, details: true },
+    });
+  }
+
+  /** `siteIds` null = every site (all-sites roles); otherwise only those sites. */
+  async findAll(query: QueryAlertsDto, siteIds: string[] | null = null) {
     let ciId: string | undefined;
     if (query.ciCode) {
       const ci = await this.prisma.configurationItem.findUnique({
@@ -807,6 +826,7 @@ export class AlertsService {
 
     return this.prisma.alert.findMany({
       where: {
+        ...(siteIds ? { siteId: { in: siteIds } } : {}),
         ...(query.state ? { state: query.state } : {}),
         ...(query.severity ? { severity: query.severity } : {}),
         ...(query.fingerprint ? { fingerprint: query.fingerprint } : {}),
@@ -816,6 +836,15 @@ export class AlertsService {
       orderBy: { lastSeenAt: "desc" },
       take: query.limit ?? 50,
     });
+  }
+
+  /** 404 (not 403) outside the reader's sites, so ids can't be probed. */
+  async findOneScoped(id: string, siteIds: string[] | null) {
+    const alert = await this.findOne(id);
+    if (siteIds && (!alert.siteId || !siteIds.includes(alert.siteId))) {
+      throw new NotFoundException(`Alert ${id} not found`);
+    }
+    return alert;
   }
 
   async findOne(id: string) {

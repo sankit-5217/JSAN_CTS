@@ -92,6 +92,15 @@ export class MonitoringService {
       const openAlerts = plan.next as unknown as Prisma.InputJsonValue;
       const openAlertEventId = legacyEventId ? null : (existing?.openAlertEventId ?? null);
 
+      // Audit only what changed (overall health, or a component alert opening
+      // or closing): the collector polls every ~30 s, and an audit row per
+      // unchanged poll is telemetry in the audit trail (CLAUDE.md).
+      const changed =
+        !existing ||
+        existing.overallHealth !== snap.overallHealth ||
+        plan.raise.length > 0 ||
+        plan.recover.length > 0;
+
       const persisted = await this.prisma.$transaction(async (tx) => {
         const row = await tx.healthSnapshot.upsert({
           where: { ciId: ci.id },
@@ -110,7 +119,7 @@ export class MonitoringService {
             openAlertEventId,
           },
         });
-        await this.audit.record(
+        if (changed) await this.audit.record(
           {
             actorId: actor.actorId,
             correlationId: actor.correlationId,
@@ -259,28 +268,37 @@ export class MonitoringService {
   }
 
   /**
-   * Record a site collector's liveness ping (spec §26). Written as an
-   * append-only audit event (entityType "collector", entityId the site code) so
-   * a monitoring check / report can flag any site whose last COLLECTOR_HEARTBEAT
-   * is stale — a silent collector must not read as "everything healthy".
+   * Record a site collector's liveness ping (spec §26): the latest ping per
+   * site, overwritten each time, so a monitoring check can flag any site
+   * whose collector has gone quiet — a silent collector must not read as
+   * "everything healthy". Not an audit event: it changes nothing.
    */
   async recordHeartbeat(siteCode: string, actor: ActorContext): Promise<{ recordedAt: string }> {
-    const recordedAt = new Date().toISOString();
-    await this.audit.record({
-      actorId: actor.actorId,
-      correlationId: actor.correlationId,
-      entityType: "collector",
-      entityId: siteCode,
-      action: "COLLECTOR_HEARTBEAT",
-      after: { recordedAt },
+    const now = new Date();
+    await this.prisma.collectorHeartbeat.upsert({
+      where: { siteCode },
+      create: { siteCode, lastSeenAt: now, reportedById: actor.actorId },
+      update: { lastSeenAt: now, reportedById: actor.actorId },
     });
-    return { recordedAt };
+    return { recordedAt: now.toISOString() };
+  }
+
+  /** Each site's last collector ping, limited to `siteIds` (null = all). */
+  async listHeartbeats(siteIds: string[] | null) {
+    const sites = siteIds
+      ? await this.prisma.site.findMany({ where: { id: { in: siteIds } }, select: { code: true } })
+      : null;
+    return this.prisma.collectorHeartbeat.findMany({
+      where: sites ? { siteCode: { in: sites.map((s) => s.code) } } : undefined,
+      orderBy: { siteCode: "asc" },
+    });
   }
 
   /** Current snapshot for a CI by its code. */
-  async getForCi(ciCode: string) {
+  /** `siteIds` null = every site; a CI on another site reads as not found. */
+  async getForCi(ciCode: string, siteIds: string[] | null = null) {
     const ci = await this.prisma.configurationItem.findUnique({ where: { ciCode } });
-    if (!ci) {
+    if (!ci || (siteIds && !siteIds.includes(ci.siteId))) {
       throw new NotFoundException(`Configuration item ${ciCode} not found`);
     }
     const snapshot = await this.prisma.healthSnapshot.findUnique({ where: { ciId: ci.id } });

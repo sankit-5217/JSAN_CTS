@@ -1,8 +1,9 @@
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { InAppNotificationKind } from "@prisma/client";
 import { randomUUID } from "crypto";
+import { JobLockService } from "../../common/prisma/job-lock.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import {
@@ -46,6 +47,7 @@ export class InboxService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly soundRules: NotificationSoundRulesService,
+    @Optional() private readonly jobLock?: JobLockService,
   ) {}
 
   async notifyUsers(input: InAppNotificationInput): Promise<void> {
@@ -143,6 +145,13 @@ export class InboxService {
 
   /** Daily cleanup of notifications older than the retention window. */
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async scheduledPurge(): Promise<void> {
+    // One instance at a time (see JobLockService); the method below stays
+    // directly callable for tests and manual runs.
+    const run = () => this.purgeExpired();
+    await (this.jobLock ? this.jobLock.runExclusive("inbox-purge", run) : run());
+  }
+
   async purgeExpired(now: Date = new Date()): Promise<number> {
     const cutoff = new Date(now.getTime() - this.retentionDays() * 24 * 60 * 60 * 1000);
     try {

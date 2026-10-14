@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
@@ -108,9 +109,11 @@ export class VendorsService {
     });
   }
 
-  listCases(query: QueryVendorCasesDto) {
+  /** `siteIds` null = every site; otherwise only cases on those sites. */
+  listCases(query: QueryVendorCasesDto, siteIds: string[] | null = null) {
     return this.prisma.vendorCase.findMany({
       where: {
+        ...(siteIds ? vendorCaseSiteFilter(siteIds) : {}),
         ...(query.vendorId ? { vendorId: query.vendorId } : {}),
         ...(query.linkedIncidentId ? { linkedIncidentId: query.linkedIncidentId } : {}),
         ...(query.dispatchStatus ? { dispatchStatus: query.dispatchStatus } : {}),
@@ -120,6 +123,19 @@ export class VendorsService {
       orderBy: { openedAt: "desc" },
       take: query.limit ?? 50,
     });
+  }
+
+  /** A case as a site-limited reader may see it: 404 outside their sites. */
+  async getCaseScoped(id: string, siteIds: string[] | null) {
+    if (siteIds) {
+      const visible = await this.prisma.vendorCase.count({
+        where: { id, ...vendorCaseSiteFilter(siteIds) },
+      });
+      if (visible === 0) {
+        throw new NotFoundException(`Vendor case ${id} not found`);
+      }
+    }
+    return this.getCase(id);
   }
 
   async getCase(id: string) {
@@ -259,4 +275,11 @@ export class VendorsService {
       throw new NotFoundException(`Configuration item ${id} not found`);
     }
   }
+}
+
+/** A case belongs to the site of its CI, or of the incident it's linked to. */
+function vendorCaseSiteFilter(siteIds: string[]): Prisma.VendorCaseWhereInput {
+  return {
+    OR: [{ ci: { siteId: { in: siteIds } } }, { incident: { siteId: { in: siteIds } } }],
+  };
 }

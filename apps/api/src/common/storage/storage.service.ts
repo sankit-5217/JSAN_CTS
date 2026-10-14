@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import type { Readable } from "stream";
 
 /**
  * Thin wrapper around @aws-sdk/client-s3 — chosen over the MinIO-specific
@@ -23,7 +24,9 @@ export class StorageService {
     this.client = new S3Client({
       region: configService.get<string>("S3_REGION", "us-east-1"),
       endpoint: configService.get<string>("S3_ENDPOINT"),
-      forcePathStyle: true,
+      // MinIO needs path-style URLs; Railway buckets (and AWS) use
+      // virtual-hosted style. S3_FORCE_PATH_STYLE=false switches.
+      forcePathStyle: configService.get<string>("S3_FORCE_PATH_STYLE", "true") !== "false",
       credentials: {
         accessKeyId: configService.get<string>("S3_ACCESS_KEY", ""),
         secretAccessKey: configService.get<string>("S3_SECRET_KEY", ""),
@@ -31,13 +34,20 @@ export class StorageService {
     });
   }
 
-  async putObject(key: string, body: Buffer, contentType: string): Promise<void> {
+  /** A stream body needs its length (S3 won't accept an unsized stream). */
+  async putObject(
+    key: string,
+    body: Buffer | Readable,
+    contentType: string,
+    contentLength?: number,
+  ): Promise<void> {
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
         Body: body,
         ContentType: contentType,
+        ...(contentLength !== undefined ? { ContentLength: contentLength } : {}),
       }),
     );
   }

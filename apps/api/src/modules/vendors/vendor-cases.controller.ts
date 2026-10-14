@@ -10,7 +10,8 @@ import { AddVendorCaseUpdateDto } from "./dto/add-vendor-case-update.dto";
 import { CreateVendorCaseDto } from "./dto/create-vendor-case.dto";
 import { QueryVendorCasesDto } from "./dto/query-vendor-cases.dto";
 import { UpdateVendorCaseDto } from "./dto/update-vendor-case.dto";
-import { VENDOR_WRITE_ROLES } from "./vendors.controller";
+import { AuthzService } from "../auth/authz.service";
+import { VENDOR_READ_ROLES, VENDOR_WRITE_ROLES } from "./vendors.controller";
 import { VendorsService } from "./vendors.service";
 
 // `dispatchStatus` and case closure are backend state rules — the PATCH body is
@@ -20,7 +21,10 @@ import { VendorsService } from "./vendors.service";
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("vendor-cases")
 export class VendorCasesController {
-  constructor(private readonly vendorsService: VendorsService) {}
+  constructor(
+    private readonly vendorsService: VendorsService,
+    private readonly authz: AuthzService,
+  ) {}
 
   @Post()
   @Roles(...VENDOR_WRITE_ROLES)
@@ -33,14 +37,17 @@ export class VendorCasesController {
     return this.vendorsService.openCase(dto, { actorId: user.id, correlationId });
   }
 
+  // Staff only, and a site-limited role sees only cases on its sites.
   @Get()
-  findAll(@Query() query: QueryVendorCasesDto) {
-    return this.vendorsService.listCases(query);
+  @Roles(...VENDOR_READ_ROLES)
+  async findAll(@Query() query: QueryVendorCasesDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.vendorsService.listCases(query, await this.authz.getAccessibleSiteIds(user));
   }
 
   @Get(":id")
-  findOne(@Param("id") id: string) {
-    return this.vendorsService.getCase(id);
+  @Roles(...VENDOR_READ_ROLES)
+  async findOne(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.vendorsService.getCaseScoped(id, await this.authz.getAccessibleSiteIds(user));
   }
 
   @Patch(":id")

@@ -1,10 +1,4 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from "@nestjs/common";
+import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { OnEvent } from "@nestjs/event-emitter";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import {
@@ -17,6 +11,7 @@ import {
   UserRole,
 } from "@prisma/client";
 import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
+import { JobLockService } from "../../common/prisma/job-lock.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
@@ -82,6 +77,7 @@ export class RoutingOffersService {
     private readonly inbox: InboxService,
     private readonly notifications: NotificationsPublisher,
     private readonly categoryTeams: CategoryTeamsService,
+    @Optional() private readonly jobLock?: JobLockService,
   ) {}
 
   // --- Triggers ---------------------------------------------------------
@@ -131,6 +127,13 @@ export class RoutingOffersService {
 
   /** Every minute: expire overdue offers and move each ticket on. */
   @Cron(CronExpression.EVERY_MINUTE)
+  async scheduledExpireOverdue(): Promise<void> {
+    // One instance at a time (see JobLockService); the method below stays
+    // directly callable for tests and manual runs.
+    const run = () => this.expireOverdue();
+    await (this.jobLock ? this.jobLock.runExclusive("routing-offer-expiry", run) : run());
+  }
+
   async expireOverdue(now: Date = new Date()): Promise<number> {
     let expired = 0;
     try {

@@ -11,13 +11,22 @@ import { CreateVendorDto } from "./dto/create-vendor.dto";
 import { VendorsService } from "./vendors.service";
 
 // Vendor + case writes: the vendor coordination roles (spec §4). Vendors are
-// cross-site reference data, so no SiteScopeGuard; reads are open to any
-// authenticated user.
+// cross-site reference data, so no SiteScopeGuard. Reads are staff-only:
+// a client login never sees vendors or vendor cases (only its own sites'
+// alerts and hardware health).
 export const VENDOR_WRITE_ROLES = [
   UserRole.SUPER_ADMIN,
   UserRole.DELIVERY_OPS_MANAGER,
   UserRole.INFRASTRUCTURE_LEAD,
   UserRole.VENDOR_COORDINATOR,
+] as const;
+
+/** Every role except the client portal's. */
+export const VENDOR_READ_ROLES = [
+  ...VENDOR_WRITE_ROLES,
+  UserRole.SERVICE_DESK_NOC,
+  UserRole.SITE_ENGINEER,
+  UserRole.AUDITOR_READ_ONLY,
 ] as const;
 
 @ApiTags("vendors")
@@ -38,11 +47,13 @@ export class VendorsController {
   }
 
   @Get()
+  @Roles(...VENDOR_READ_ROLES)
   findAll() {
     return this.vendorsService.listVendors();
   }
 
   @Get(":id")
+  @Roles(...VENDOR_READ_ROLES)
   findOne(@Param("id") id: string) {
     return this.vendorsService.getVendor(id);
   }

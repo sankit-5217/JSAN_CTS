@@ -10,6 +10,7 @@ import {
   UsePipes,
   ValidationPipe,
 } from "@nestjs/common";
+import { SkipThrottle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
@@ -21,6 +22,7 @@ import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { CollectorHeartbeatDto } from "./dto/collector-heartbeat.dto";
 import { HealthSnapshotBatchDto } from "./dto/health-snapshot.dto";
 import { MonitoringService } from "./monitoring.service";
+import { AuthzService } from "../auth/authz.service";
 
 // The ingest route is machine-to-machine — the site collector posts with a
 // service-account JWT, same roles as the alert-source routes. Reads are open to
@@ -37,9 +39,14 @@ const HEALTH_INGEST_ROLES = [
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("monitoring")
 export class MonitoringController {
-  constructor(private readonly monitoringService: MonitoringService) {}
+  constructor(
+    private readonly monitoringService: MonitoringService,
+    private readonly authz: AuthzService,
+  ) {}
 
   @Post("health-snapshots")
+  // Machine intake: never 429 a monitoring source (it would drop the event).
+  @SkipThrottle()
   @Roles(...HEALTH_INGEST_ROLES)
   @HttpCode(HttpStatus.OK)
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
@@ -59,11 +66,20 @@ export class MonitoringController {
 
   @Get("health-snapshots/:ciCode")
   @ApiOperation({ summary: "Current health snapshot for a CI" })
-  getForCi(@Param("ciCode") ciCode: string) {
-    return this.monitoringService.getForCi(ciCode);
+  async getForCi(@Param("ciCode") ciCode: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.monitoringService.getForCi(ciCode, await this.authz.getAccessibleSiteIds(user));
+  }
+
+  @Get("collector-heartbeats")
+  @Roles(...HEALTH_INGEST_ROLES, UserRole.DELIVERY_OPS_MANAGER, UserRole.AUDITOR_READ_ONLY)
+  @ApiOperation({ summary: "Each site's last collector ping (to spot a silent collector)" })
+  async heartbeats(@CurrentUser() user: AuthenticatedUser) {
+    return this.monitoringService.listHeartbeats(await this.authz.getAccessibleSiteIds(user));
   }
 
   @Post("collector-heartbeat")
+  // Machine intake: never 429 a monitoring source (it would drop the event).
+  @SkipThrottle()
   @Roles(...HEALTH_INGEST_ROLES)
   @HttpCode(HttpStatus.OK)
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))

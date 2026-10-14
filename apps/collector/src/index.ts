@@ -112,6 +112,14 @@ function main(): void {
 
   const flush = setInterval(() => {
     void buffer.flush(send).then((r) => {
+      for (const { item, error } of r.rejected) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[collector] OpsDesk refused ${item.channel} ${item.key} for good, dropped: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
       if (r.remaining > 0) {
         // eslint-disable-next-line no-console
         console.warn(`[collector] ${r.delivered} delivered, ${r.remaining} still buffered`);

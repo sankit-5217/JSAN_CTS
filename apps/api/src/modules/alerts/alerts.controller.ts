@@ -11,6 +11,7 @@ import {
   UseGuards,
   ValidationPipe,
 } from "@nestjs/common";
+import { SkipThrottle } from "@nestjs/throttler";
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
@@ -19,6 +20,7 @@ import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { AuthzService } from "../auth/authz.service";
 import { AlertsService } from "./alerts.service";
 import { AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
 import { IngestAlertDto } from "./dto/ingest-alert.dto";
@@ -56,9 +58,14 @@ const ALERT_INGEST_ROLES = [
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("alerts")
 export class AlertsController {
-  constructor(private readonly alertsService: AlertsService) {}
+  constructor(
+    private readonly alertsService: AlertsService,
+    private readonly authz: AuthzService,
+  ) {}
 
   @Post("ingest")
+  // Machine intake: never 429 a monitoring source (it would drop the event).
+  @SkipThrottle()
   @Roles(...ALERT_INGEST_ROLES)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -73,6 +80,8 @@ export class AlertsController {
   }
 
   @Post("sources/zabbix")
+  // Machine intake: never 429 a monitoring source (it would drop the event).
+  @SkipThrottle()
   @Roles(...ALERT_INGEST_ROLES)
   @HttpCode(HttpStatus.OK)
   @ApiBody({ type: ZabbixWebhookBatchDto })
@@ -86,6 +95,8 @@ export class AlertsController {
   }
 
   @Post("sources/alertmanager")
+  // Machine intake: never 429 a monitoring source (it would drop the event).
+  @SkipThrottle()
   @Roles(...ALERT_INGEST_ROLES)
   @HttpCode(HttpStatus.OK)
   @ApiBody({ type: AlertmanagerWebhookDto })
@@ -99,6 +110,8 @@ export class AlertsController {
   }
 
   @Post("sources/snmp")
+  // Machine intake: never 429 a monitoring source (it would drop the event).
+  @SkipThrottle()
   @Roles(...ALERT_INGEST_ROLES)
   @HttpCode(HttpStatus.OK)
   @ApiBody({ type: SnmpTrapBatchDto })
@@ -111,13 +124,16 @@ export class AlertsController {
     return this.alertsService.ingestFromSnmp(body.traps, { actorId: user.id, correlationId });
   }
 
+  // Reads follow site access: a site-limited user (a client included) sees
+  // only alerts on their sites; alerts not yet matched to a site are for
+  // all-sites roles only.
   @Get()
-  findAll(@Query() query: QueryAlertsDto) {
-    return this.alertsService.findAll(query);
+  async findAll(@Query() query: QueryAlertsDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.alertsService.findAll(query, await this.authz.getAccessibleSiteIds(user));
   }
 
   @Get(":id")
-  findOne(@Param("id") id: string) {
-    return this.alertsService.findOne(id);
+  async findOne(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.alertsService.findOneScoped(id, await this.authz.getAccessibleSiteIds(user));
   }
 }

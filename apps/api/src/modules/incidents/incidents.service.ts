@@ -7,6 +7,8 @@ import {
 } from "@nestjs/common";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { createHash, randomUUID } from "crypto";
+import { createReadStream } from "fs";
+import { unlink } from "fs/promises";
 import {
   Attachment,
   InAppNotificationKind,
@@ -163,7 +165,10 @@ export interface UploadedAttachmentFile {
   originalname: string;
   mimetype: string;
   size: number;
-  buffer: Buffer;
+  /** Set when the upload was streamed to disk (the HTTP route). */
+  path?: string;
+  /** Set for in-memory uploads (tests, internal callers). */
+  buffer?: Buffer;
 }
 
 /** What a client report resolved to before the row is written — see
@@ -172,6 +177,17 @@ export interface IncidentIntake {
   ownerGroupId: string | null;
   ownerUserId: string | null;
   templateId?: string;
+}
+
+/** SHA-256 of an upload, read from disk in chunks when it was streamed there. */
+async function sha256Of(file: UploadedAttachmentFile): Promise<string> {
+  const hash = createHash("sha256");
+  if (file.path) {
+    for await (const chunk of createReadStream(file.path)) hash.update(chunk as Buffer);
+  } else if (file.buffer) {
+    hash.update(file.buffer);
+  }
+  return hash.digest("hex");
 }
 
 /** The ticket's CC List as mail parties, minus anyone already addressed. */
@@ -1953,21 +1969,35 @@ export class IncidentsService {
     user: AuthenticatedUser,
     commentId?: string,
   ): Promise<Attachment> {
-    await this.findOneScoped(incidentId, user);
     if (!file) {
       throw new BadRequestException("No file was sent");
     }
-    // A file sent with a message: only onto your own message on this ticket.
-    if (commentId) {
-      const comment = await this.prisma.incidentComment.findUnique({ where: { id: commentId } });
-      if (!comment || comment.incidentId !== incidentId) {
-        throw new BadRequestException("That message isn't on this ticket");
+    try {
+      await this.findOneScoped(incidentId, user);
+      // A file sent with a message: only onto your own message on this ticket.
+      if (commentId) {
+        const comment = await this.prisma.incidentComment.findUnique({ where: { id: commentId } });
+        if (!comment || comment.incidentId !== incidentId) {
+          throw new BadRequestException("That message isn't on this ticket");
+        }
+        if (comment.authorId !== actor.actorId) {
+          throw new ForbiddenException("You can only attach files to your own messages");
+        }
       }
-      if (comment.authorId !== actor.actorId) {
-        throw new ForbiddenException("You can only attach files to your own messages");
-      }
+      return await this.storeAttachment(incidentId, file, actor, commentId);
+    } finally {
+      // The temp file multer streamed the upload into is ours to remove,
+      // whether the upload was accepted or not.
+      if (file.path) await unlink(file.path).catch(() => undefined);
     }
+  }
 
+  private async storeAttachment(
+    incidentId: string,
+    file: UploadedAttachmentFile,
+    actor: ActorContext,
+    commentId: string | undefined,
+  ): Promise<Attachment> {
     if (!isAllowedAttachment(file.mimetype, file.originalname)) {
       throw new BadRequestException(`Content type ${file.mimetype} is not allowed`);
     }
@@ -1977,14 +2007,19 @@ export class IncidentsService {
       );
     }
 
-    const sha256 = createHash("sha256").update(file.buffer).digest("hex");
+    const sha256 = await sha256Of(file);
     const objectKey = `incidents/${incidentId}/${randomUUID()}-${file.originalname}`;
 
     // Uploaded before the DB transaction starts, not inside it — an S3 PUT
     // isn't rollback-able the way a DB write is. If the DB write then
     // fails, the object is orphaned in storage rather than a row
     // referencing a key that was never actually written.
-    await this.storageService.putObject(objectKey, file.buffer, file.mimetype);
+    await this.storageService.putObject(
+      objectKey,
+      file.path ? createReadStream(file.path) : (file.buffer ?? Buffer.alloc(0)),
+      file.mimetype,
+      file.size,
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const attachment = await tx.attachment.create({

@@ -746,6 +746,18 @@ model CiRelation {
   @@map("ci_relations")
 }
 
+/// The last liveness ping from each site's collector (spec §26) — current
+/// state only, one row per site, overwritten on every ping. Heartbeats used
+/// to be audit events (~55M rows a year at 5 sites); a ping is telemetry,
+/// not a business change, so it doesn't belong in the audit trail.
+model CollectorHeartbeat {
+  siteCode     String   @id @map("site_code")
+  lastSeenAt   DateTime @map("last_seen_at")
+  reportedById String?  @map("reported_by_id")
+
+  @@map("collector_heartbeats")
+}
+
 model HealthSnapshot {
   id               String    @id @default(uuid())
   ciId             String    @unique @map("ci_id")

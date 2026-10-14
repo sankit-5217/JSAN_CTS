@@ -539,6 +539,42 @@ export class ZabbixService {
     };
   }
 
+  /**
+   * Every unresolved trigger problem Zabbix knows of, each with the host it
+   * fired on — not filtered by any user's sites. Only the re-sync job
+   * (ZabbixResyncService) calls this; it throws the usual 503 when Zabbix
+   * isn't configured or is switched off.
+   */
+  async openProblemsForResync(): Promise<{ problem: RawProblem; host: RawHost }[]> {
+    const ep = await this.endpoint();
+    const problems = await this.zbx<RawProblem[]>(ep, "problem.get", {
+      output: "extend",
+      source: 0,
+      object: 0,
+      recent: false,
+      selectTags: ["tag", "value"],
+    });
+    const triggerHosts = await this.triggerHostMap(
+      ep,
+      problems.map((p) => p.objectid),
+    );
+    const hostIds = [...new Set([...triggerHosts.values()].flat())];
+    const hosts =
+      hostIds.length === 0
+        ? []
+        : await this.zbx<RawHost[]>(ep, "host.get", {
+            hostids: hostIds,
+            output: ["hostid", "host", "name"],
+          });
+    const hostsById = new Map(hosts.map((h) => [h.hostid, h]));
+    return problems.flatMap((problem) => {
+      const host = (triggerHosts.get(problem.objectid) ?? [])
+        .map((id) => hostsById.get(id))
+        .find(Boolean);
+      return host ? [{ problem, host }] : [];
+    });
+  }
+
   // ------------------------------------------------------------------ write
 
   async acknowledgeProblem(

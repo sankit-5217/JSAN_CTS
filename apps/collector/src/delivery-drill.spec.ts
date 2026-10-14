@@ -94,7 +94,7 @@ describe("delivery drill: outage → restart → recovery", () => {
     buffer.enqueue(HEALTH);
 
     const duringOutage = await buffer.flush(makeSend(client));
-    expect(duringOutage).toEqual({ delivered: 0, remaining: 3 });
+    expect(duringOutage).toEqual({ delivered: 0, remaining: 3, rejected: [] });
     expect(api.calls).toHaveLength(0);
     // persisted for the restart
     expect(JSON.parse(readFileSync(path, "utf8")).map((i: BufferedItem) => i.key)).toEqual([
@@ -110,7 +110,7 @@ describe("delivery drill: outage → restart → recovery", () => {
     // --- reconnect ---
     api.state.up = true;
     const onReconnect = await afterRestart.flush(makeSend(client));
-    expect(onReconnect).toEqual({ delivered: 3, remaining: 0 });
+    expect(onReconnect).toEqual({ delivered: 3, remaining: 0, rejected: [] });
     expect(api.calls.map((c) => c.path)).toEqual([
       "/api/v1/alerts/sources/snmp",
       "/api/v1/alerts/ingest",
@@ -147,7 +147,7 @@ describe("delivery drill: outage → restart → recovery", () => {
     });
 
     const first = await buffer.flush(makeSend(client2));
-    expect(first).toEqual({ delivered: 1, remaining: 2 });
+    expect(first).toEqual({ delivered: 1, remaining: 2, rejected: [] });
     expect(JSON.parse(readFileSync(path, "utf8")).map((i: BufferedItem) => i.key)).toEqual([
       ALERT.key,
       HEALTH.key,
@@ -155,7 +155,7 @@ describe("delivery drill: outage → restart → recovery", () => {
 
     // API fully back — the rest drain, still in order
     const rest = await buffer.flush(makeSend(client));
-    expect(rest).toEqual({ delivered: 2, remaining: 0 });
+    expect(rest).toEqual({ delivered: 2, remaining: 0, rejected: [] });
     expect(api.calls.map((c) => c.path)).toEqual([
       "/alerts/sources/snmp",
       "/alerts/ingest",
