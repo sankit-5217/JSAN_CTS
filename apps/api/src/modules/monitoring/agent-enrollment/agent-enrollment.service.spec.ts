@@ -81,6 +81,9 @@ describe("AgentEnrollmentService", () => {
     );
     expect(res.commands.windowsPowerShell).toContain(`/enroll/${res.code}/install.ps1 | iex`);
     expect(res.commands.windowsCurl).toMatch(/^curl\.exe -fsSL .*\| powershell /);
+    // R21: "-Command -" silently runs nothing for a multi-line script.
+    expect(res.commands.windowsCurl).not.toMatch(/-Command -$/);
+    expect(res.commands.windowsCurl).toContain("[Console]::In.ReadToEnd() | iex");
     expect(res.status).toBe("ACTIVE");
     expect(JSON.stringify(auditRecords)).not.toContain(res.code);
     expect(auditRecords[0]).toMatchObject({ action: "AGENT_ENROLLMENT_CREATED", actorId: "admin-1" });

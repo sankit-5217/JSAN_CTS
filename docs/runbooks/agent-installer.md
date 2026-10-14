@@ -6,7 +6,7 @@ inbound port: the agent connects **out** to the JSAN Zabbix server, encrypted.
 ```
 Linux   (root):         curl -fsSL https://<api>/api/v1/enroll/<code>/install.sh | sudo bash
 Windows (admin PS):     irm https://<api>/api/v1/enroll/<code>/install.ps1 | iex
-Windows (curl.exe):     curl.exe -fsSL https://<api>/api/v1/enroll/<code>/install.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command -
+Windows (curl.exe):     curl.exe -fsSL https://<api>/api/v1/enroll/<code>/install.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command "[Console]::In.ReadToEnd() | iex"
 ```
 
 Linux options go after `bash -s --`: `--skip-upgrade`, `--name WEB01`, `--uninstall`.
@@ -61,6 +61,7 @@ all of these. IDs are referenced by the tests in `installer-scripts.spec.ts`.
 | R18 | **Lint-clean** | `bash -n`, and ShellCheck clean with `-o all` (only the pure-style SC2250/SC2292/SC2312 excluded) | PowerShell parser clean |
 | R19 | **Coexists with an existing agent** | own loopback port 31050 (not 10050); an agent the client already runs is left alone | same |
 | R20 | **A bad link fails clearly** | invalid/expired/revoked link (or server not ready) → a script that prints the reason and `exit 1`, served with HTTP 200 because `curl -f … \| bash` would otherwise show only "error: 404" and exit 0 | prints the reason and throws |
+| R21 | **Every advertised one-liner really runs** | `curl -fsSL … \| sudo bash` run for real on a clean Ubuntu 24.04 (see Verification) | `irm … \| iex` and the curl.exe form verified; **not** `powershell -Command -`, which reads stdin line by line and silently skips the multi-line script |
 
 ## Troubleshooting
 

@@ -310,7 +310,9 @@ export class AgentEnrollmentService {
     return {
       linux: `curl -fsSL ${base}/install.sh | sudo bash`,
       windowsPowerShell: `irm ${base}/install.ps1 | iex`,
-      windowsCurl: `curl.exe -fsSL ${base}/install.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command -`,
+      // Not "-Command -": PowerShell then reads stdin line by line and silently
+      // skips the installer's multi-line block (exit 0). Read it whole, then run it.
+      windowsCurl: `curl.exe -fsSL ${base}/install.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command "[Console]::In.ReadToEnd() | iex"`,
     };
   }
 
