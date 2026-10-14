@@ -4,8 +4,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const KIT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
-export const SECRETS_DIR = join(KIT_DIR, "secrets");
-export const OUT_DIR = join(KIT_DIR, "out");
+// One folder per environment, e.g. KIT_SECRETS_DIR=secrets/railway and
+// KIT_OUT_DIR=out/railway for production (both stay gitignored), so a local
+// webhook token or bundle is never reused against another OpsDesk.
+export const SECRETS_DIR = process.env.KIT_SECRETS_DIR
+  ? join(KIT_DIR, process.env.KIT_SECRETS_DIR)
+  : join(KIT_DIR, "secrets");
+export const OUT_DIR = process.env.KIT_OUT_DIR
+  ? join(KIT_DIR, process.env.KIT_OUT_DIR)
+  : join(KIT_DIR, "out");
 
 export function secretFile(name) {
   const p = join(SECRETS_DIR, name);
