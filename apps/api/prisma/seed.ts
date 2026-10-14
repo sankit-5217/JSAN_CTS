@@ -2,18 +2,17 @@ import {
   CiType,
   Criticality,
   IncidentStatus,
-  IssueCatalogKind,
   LifecycleStatus,
   ManagedBy,
   Prisma,
   PrismaClient,
   Priority,
-  SlaPolicy,
   SupportCalendar,
   UserRole,
   WorklogActivityType,
 } from "@prisma/client";
 import { hashPassword, passwordPolicyProblem } from "../src/modules/auth/password-hasher";
+import { seedConfiguration } from "./seed-config";
 
 const prisma = new PrismaClient();
 
@@ -37,20 +36,10 @@ const DEMO_PASSWORD = process.env.SEED_DEMO_PASSWORD ?? "OpsDesk-Demo-2026!";
  */
 
 /**
- * SlaPolicy/SupportCalendar have no natural unique key to `upsert()`
- * against (only `id`), so this is a manual find-or-create — same
- * "guarded, not upserted" idempotency approach as the seeded incident
- * below, just for a table where the guard is a name lookup instead of a
- * findUnique on a real unique column.
+ * SupportCalendar has no natural unique key to `upsert()` against (only
+ * `id`), so this is a manual find-or-create guarded on site + name — same
+ * "guarded, not upserted" idempotency approach as the seeded incident below.
  */
-async function findOrCreateSlaPolicy(data: Prisma.SlaPolicyCreateInput): Promise<SlaPolicy> {
-  const existing = await prisma.slaPolicy.findFirst({ where: { name: data.name } });
-  if (existing) {
-    return existing;
-  }
-  return prisma.slaPolicy.create({ data });
-}
-
 async function findOrCreateSupportCalendar(
   data: Prisma.SupportCalendarUncheckedCreateInput,
 ): Promise<SupportCalendar> {
@@ -75,13 +64,6 @@ async function findOrCreateShift(data: Prisma.EngineerShiftUncheckedCreateInput)
 }
 
 /**
- * The "Report an issue" template configuration (client portal): the default
- * Assignee Group, the pick-list catalog and one auto-draft template per
- * issue type. All idempotent upserts keyed on (kind, value) / issue type, so
- * an admin's later edits in the UI survive a re-seed (update: {} never
- * overwrites a label or draft).
- */
-/**
  * Zabbix connection, pre-filled with the local Zabbix-in-WSL URL so the
  * settings page opens ready to edit. No token is seeded (it is a secret and is
  * entered on the page). Upsert with `update: {}` never overwrites an admin's
@@ -100,216 +82,6 @@ async function seedZabbixConnection() {
   });
 }
 
-async function seedIssueReporting(serviceDeskUserId: string) {
-  // The two Assignee Groups a client can pick on the issue template.
-  const serviceDeskGroup = await prisma.supportGroup.upsert({
-    where: { name: "JSAN ServiceDesk" },
-    update: {},
-    create: { name: "JSAN ServiceDesk", isClientSelectable: true },
-  });
-  await prisma.supportGroup.upsert({
-    where: { name: "Infra team" },
-    update: {},
-    create: { name: "Infra team", isClientSelectable: true },
-  });
-  const currentDefault = await prisma.supportGroup.findFirst({
-    where: { isDefaultAssignee: true },
-  });
-  if (!currentDefault) {
-    await prisma.supportGroup.update({
-      where: { id: serviceDeskGroup.id },
-      data: { isDefaultAssignee: true },
-    });
-  }
-  await prisma.supportGroupMember.upsert({
-    where: { groupId_userId: { groupId: serviceDeskGroup.id, userId: serviceDeskUserId } },
-    update: {},
-    create: { groupId: serviceDeskGroup.id, userId: serviceDeskUserId },
-  });
-
-  const option = async (
-    kind: IssueCatalogKind,
-    value: string,
-    label: string,
-    sortOrder: number,
-    parentId?: string,
-  ) =>
-    prisma.issueCatalogOption.upsert({
-      where: { kind_value: { kind, value } },
-      update: {},
-      create: { kind, value, label, sortOrder, parentId },
-    });
-
-  // Issue types and templates are the same list, one template each.
-  const issueTypes: [string, string][] = [
-    ["BUG", "Bug"],
-    ["PROCESS_REQUEST", "Process request"],
-    ["CHANGE_REQUEST", "Change request"],
-    ["FEATURE_REQUEST", "Feature request"],
-    ["OTHER_REQUEST", "Other request"],
-  ];
-  const issueTypeRows = new Map<string, string>();
-  for (const [i, [value, label]] of issueTypes.entries()) {
-    const row = await option(IssueCatalogKind.ISSUE_TYPE, value, label, i);
-    issueTypeRows.set(value, row.id);
-  }
-
-  const priorities: [Priority, string][] = [
-    [Priority.P1, "P1 - Critical"],
-    [Priority.P2, "P2 - High"],
-    [Priority.P3, "P3 - Standard"],
-    [Priority.P4, "P4 - Low"],
-  ];
-  for (const [i, [value, label]] of priorities.entries()) {
-    await option(IssueCatalogKind.PRIORITY, value, label, i);
-  }
-
-  const severities: [string, string][] = [
-    ["BLOCKER", "Blocker - service down"],
-    ["CRITICAL", "Critical - major degradation"],
-    ["MAJOR", "Major - partial impact"],
-    ["MINOR", "Minor - workaround available"],
-    ["TRIVIAL", "Trivial / cosmetic"],
-  ];
-  for (const [i, [value, label]] of severities.entries()) {
-    await option(IssueCatalogKind.SEVERITY, value, label, i);
-  }
-
-  const components: [string, string, [string, string][]][] = [
-    [
-      "HW",
-      "Hardware",
-      [
-        ["SERVER", "HW-Server"],
-        ["FIREWALL", "Firewall"],
-        ["PDU", "PDU"],
-        ["UPS", "UPS"],
-        ["OTHERS", "Others"],
-      ],
-    ],
-    [
-      "SW",
-      "Software",
-      [
-        ["SW1", "SW1"],
-        ["SW2", "SW2"],
-        ["SW3", "SW3"],
-        ["OS", "OS"],
-        ["FIRMWARE", "Firmware"],
-      ],
-    ],
-    [
-      "NW",
-      "NW",
-      [
-        ["ISP", "ISP"],
-        ["FW", "FW"],
-        ["WIFI", "Wifi"],
-      ],
-    ],
-    [
-      "OTHERS",
-      "Others",
-      [
-        ["POWER", "Power"],
-        ["AC", "AC"],
-        ["CCTV", "CCTV"],
-      ],
-    ],
-    [
-      "TOOLS",
-      "Tools",
-      [
-        ["DRIVEFLUX", "DriveFlux"],
-        ["DISKSQUAD", "DiskSquad"],
-        ["ANYDESK", "Anydesk"],
-        ["OTHERS", "Others"],
-      ],
-    ],
-  ];
-  for (const [i, [value, label, subs]] of components.entries()) {
-    const component = await option(IssueCatalogKind.COMPONENT, value, label, i);
-    for (const [j, [subValue, subLabel]] of subs.entries()) {
-      await option(
-        IssueCatalogKind.SUB_COMPONENT,
-        `${value}.${subValue}`,
-        subLabel,
-        j,
-        component.id,
-      );
-    }
-  }
-
-  const templates: {
-    issueType: string;
-    name: string;
-    subjectDraft: string;
-    descriptionDraft: string;
-    defaultPriority: Priority;
-    defaultSeverity?: string;
-    defaultComponent?: string;
-    defaultSubComponent?: string;
-    defaultTool?: string;
-  }[] = [
-    {
-      issueType: "BUG",
-      name: "Bug",
-      subjectDraft: "[Bug] <system / device> - <what is wrong>",
-      descriptionDraft:
-        "What is wrong:\n\nSteps to reproduce:\n1. \n\nExpected result:\n\nActual result:\n\nWhen did it start?\n\nAlready tried:\n",
-      defaultPriority: Priority.P3,
-    },
-    {
-      issueType: "PROCESS_REQUEST",
-      name: "Process request",
-      subjectDraft: "[Process] <process> - <what you need>",
-      descriptionDraft:
-        "Which process:\n\nWhat you need done:\n\nNeeded by (date / time):\n\nApprovals (if any):\n",
-      defaultPriority: Priority.P3,
-    },
-    {
-      issueType: "CHANGE_REQUEST",
-      name: "Change request",
-      subjectDraft: "[Change] <system / device> - <change>",
-      descriptionDraft:
-        "What should change:\n\nWhy (business reason):\n\nAffected systems / devices:\n\nPreferred maintenance window:\n\nRollback plan:\n",
-      defaultPriority: Priority.P3,
-    },
-    {
-      issueType: "FEATURE_REQUEST",
-      name: "Feature request",
-      subjectDraft: "[Feature] <what you would like>",
-      descriptionDraft: "What you would like:\n\nWhy it helps:\n\nWho will use it:\n",
-      defaultPriority: Priority.P3,
-    },
-    {
-      issueType: "OTHER_REQUEST",
-      name: "Other request",
-      subjectDraft: "[Request] <short summary>",
-      descriptionDraft: "What you need:\n\nAny details that help:\n",
-      defaultPriority: Priority.P3,
-    },
-  ];
-  for (const t of templates) {
-    const issueTypeId = issueTypeRows.get(t.issueType);
-    if (!issueTypeId) continue;
-    await prisma.issueTemplate.upsert({
-      where: { issueTypeId },
-      update: {},
-      create: {
-        issueTypeId,
-        name: t.name,
-        subjectDraft: t.subjectDraft || null,
-        descriptionDraft: t.descriptionDraft,
-        defaultPriority: t.defaultPriority,
-        defaultSeverity: t.defaultSeverity,
-        defaultComponent: t.defaultComponent,
-        defaultSubComponent: t.defaultSubComponent,
-        defaultTool: t.defaultTool,
-      },
-    });
-  }
-}
 
 async function main() {
   const site1 = await prisma.site.upsert({
@@ -509,44 +281,17 @@ async function main() {
     create: { ciId: server2.id, overallHealth: "HEALTHY", lastHeartbeatAt: new Date() },
   });
 
-  // SLA policies (spec §10.8's illustrative P1-P4 table) and one support
-  // calendar per site. SITE01 stays is247 (matching the site's own flag)
-  // so its P1/P2 incidents resolve as a flat 24x7 clock; SITE02 is a real
-  // 09:00-18:00 Mon-Fri calendar, so a P3/P4 incident there exercises the
-  // business-hours math end to end.
-  const p1Policy = await findOrCreateSlaPolicy({
-    name: "P1 Critical (24x7)",
-    priority: Priority.P1,
-    ackTargetMinutes: 15,
-    resolveTargetMinutes: 4 * 60,
-    usesBusinessCalendar: false,
-    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
-  });
-  await findOrCreateSlaPolicy({
-    name: "P2 High",
-    priority: Priority.P2,
-    ackTargetMinutes: 30,
-    resolveTargetMinutes: 8 * 60,
-    usesBusinessCalendar: false,
-    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
-  });
-  await findOrCreateSlaPolicy({
-    name: "P3 Medium (business hours)",
-    priority: Priority.P3,
-    ackTargetMinutes: 4 * 60, // 4 business hours
-    resolveTargetMinutes: 2 * 9 * 60, // 2 business days at 9h/day
-    usesBusinessCalendar: true,
-    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
-  });
-  await findOrCreateSlaPolicy({
-    name: "P4 Low (business hours)",
-    priority: Priority.P4,
-    ackTargetMinutes: 9 * 60, // 1 business day
-    resolveTargetMinutes: 5 * 9 * 60, // 5 business days at 9h/day
-    usesBusinessCalendar: true,
-    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+  // Reference configuration shared with production (seed-config.ts): SLA
+  // policies, the default alert rule, Assignee Groups and issue pick-lists.
+  await seedConfiguration(prisma);
+  const p1Policy = await prisma.slaPolicy.findFirstOrThrow({
+    where: { name: "P1 Critical (24x7)" },
   });
 
+  // One support calendar per site. SITE01 stays is247 (matching the site's
+  // own flag) so its P1/P2 incidents resolve as a flat 24x7 clock; SITE02 is
+  // a real 09:00-18:00 Mon-Fri calendar, so a P3/P4 incident there exercises
+  // the business-hours math end to end.
   await findOrCreateSupportCalendar({
     siteId: site1.id,
     name: "Standard",
@@ -565,14 +310,6 @@ async function main() {
     holidays: [],
     is247: false,
   });
-
-  // Default alert ingestion policy (spec §10.10). Values match the Prisma
-  // column defaults / AlertsService code fallback — seeded so operators have a
-  // row to tune via PATCH /alert-rules/:id instead of a migration.
-  const existingAlertRule = await prisma.alertRule.findFirst({ where: { name: "default" } });
-  if (!existingAlertRule) {
-    await prisma.alertRule.create({ data: { name: "default" } });
-  }
 
   // Skill-based routing demo (skills Phases 1-2 + routing Phase 3). A second
   // SITE01 engineer so GET /incidents/:id/routing-suggestions has something
@@ -739,10 +476,18 @@ async function main() {
   }
 
   // Only two support groups exist: JSAN ServiceDesk and Infra team (both
-  // in seedIssueReporting). The user removed every other group on
+  // in seed-config.ts). The user removed every other group on
   // 2026-10-13, so no demo category teams are seeded.
 
-  await seedIssueReporting(serviceDesk.id);
+  // The demo service-desk user works the default Assignee Group.
+  const serviceDeskGroup = await prisma.supportGroup.findUniqueOrThrow({
+    where: { name: "JSAN ServiceDesk" },
+  });
+  await prisma.supportGroupMember.upsert({
+    where: { groupId_userId: { groupId: serviceDeskGroup.id, userId: serviceDesk.id } },
+    update: {},
+    create: { groupId: serviceDeskGroup.id, userId: serviceDesk.id },
+  });
   await seedZabbixConnection();
 
   for (const engineer of [rahul, vikas]) {
