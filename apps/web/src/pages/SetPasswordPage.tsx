@@ -22,6 +22,15 @@ interface TokenInfo {
 
 const MIN_LENGTH = 12;
 
+const INCOMPLETE =
+  "This link is incomplete — the part after # didn't arrive. Paste the whole link from your email below.";
+
+/** The token from a fragment ("#token=...") or from a whole pasted link. */
+function tokenFrom(text: string): string {
+  const hash = text.includes("#") ? text.slice(text.indexOf("#") + 1) : text;
+  return new URLSearchParams(hash.trim()).get("token")?.trim() ?? "";
+}
+
 /**
  * Where invite and reset emails land (`/auth/set-password#token=...`). The
  * token lives in the URL fragment — never sent to a server or leaked via
@@ -37,20 +46,39 @@ export function SetPasswordPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (token.current === null) {
-      token.current = new URLSearchParams(window.location.hash.slice(1)).get("token") ?? "";
-      window.history.replaceState(null, "", window.location.pathname);
-    }
-    if (!token.current) {
-      setLinkError("This link is incomplete. Open it again from your email.");
-      return;
-    }
-    apiPost<TokenInfo>("/auth/password/inspect", { token: token.current })
+  const [pasted, setPasted] = useState("");
+
+  const checkToken = (value: string) => {
+    token.current = value;
+    setLinkError(null);
+    setInfo(null);
+    apiPost<TokenInfo>("/auth/password/inspect", { token: value })
       .then(setInfo)
       .catch(() =>
         setLinkError("This link has expired or was already used. Ask for a new one below."),
       );
+  };
+
+  useEffect(() => {
+    // Pasting the full link into a tab already on this page only changes the
+    // fragment — no reload — so pick the token up from hashchange too.
+    const readHash = () => {
+      const fromHash = tokenFrom(window.location.hash);
+      if (fromHash) {
+        window.history.replaceState(null, "", window.location.pathname);
+        checkToken(fromHash);
+      }
+    };
+    if (token.current === null) {
+      token.current = "";
+      readHash();
+      if (!token.current) {
+        setLinkError(INCOMPLETE);
+      }
+    }
+    window.addEventListener("hashchange", readHash);
+    return () => window.removeEventListener("hashchange", readHash);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const tooShort = password.length > 0 && password.length < MIN_LENGTH;
@@ -99,6 +127,30 @@ export function SetPasswordPage() {
                 Link not valid
               </Typography>
               <Alert severity="error">{linkError}</Alert>
+              {linkError === INCOMPLETE && (
+                <Box
+                  component="form"
+                  onSubmit={(e: FormEvent) => {
+                    e.preventDefault();
+                    const value = tokenFrom(pasted);
+                    if (value) checkToken(value);
+                  }}
+                >
+                  <Stack spacing={1.5}>
+                    <TextField
+                      label="Paste the link from your email"
+                      value={pasted}
+                      onChange={(e) => setPasted(e.target.value)}
+                      placeholder="https://…/auth/set-password#token=…"
+                      autoComplete="off"
+                      fullWidth
+                    />
+                    <Button type="submit" variant="outlined" disabled={!tokenFrom(pasted)}>
+                      Continue
+                    </Button>
+                  </Stack>
+                </Box>
+              )}
               <Typography variant="body2" color="text.secondary">
                 On the sign-in page, choose "Forgot password?" to get a new link, or ask your
                 OpsDesk administrator to resend your invite.
