@@ -144,10 +144,13 @@ describe("Linux installer (install.sh) rubric", () => {
     expect(body).not.toMatch(/"machineId":"\$\(cat/);
   });
 
-  it("R13: verifies config, service and connection", () => {
+  it("R13: verifies config and service, and Done only once the server confirms the agent", () => {
     expect(body).toContain('zabbix_agent2 -c "$CONF" -T');
     expect(body).toContain("systemctl is-active --quiet zabbix-agent2");
-    expect(body).toContain("started to fail");
+    expect(body).toContain('"$OPSDESK_API/enroll/$ENROLL_CODE/status"');
+    expect(body).toContain('[ "$state" = AVAILABLE ]');
+    // The success message is only reachable after a confirmed AVAILABLE.
+    expect(body.indexOf("exit 2")).toBeLessThan(body.indexOf("is now monitored by JSAN"));
   });
 
   it("R14: numbered steps, final message and a log file", () => {
@@ -248,6 +251,11 @@ describe("Windows installer (install.ps1) rubric", () => {
   it("R11 + R15: replaceable config block and uninstall", () => {
     expect(body).toContain("'# >>> OpsDesk'");
     expect(body).toContain("OPSDESK_UNINSTALL");
+  });
+
+  it("R13: Done only once the server confirms the agent", () => {
+    expect(body).toContain("/enroll/$EnrollCode/status");
+    expect(body).toContain("$state -ne 'AVAILABLE'");
   });
 
   it("R12: machine GUID is hashed", () => {

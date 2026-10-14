@@ -53,7 +53,7 @@ all of these. IDs are referenced by the tests in `installer-scripts.spec.ts`.
 | R10 | **Trusted downloads only** | `https` + TLS ≥ 1.2 from repo.zabbix.com (signed repo) | MSI from cdn.zabbix.com, Authenticode signature checked |
 | R11 | **Idempotent** | re-run = repair; one `opsdesk.conf`, stock keys commented, same host re-used | marked block replaced, MSI skipped when the version matches |
 | R12 | **No silent takeover** | another machine with the same name is refused (machine-id hash); hosts of another site are refused | same |
-| R13 | **Verifies the result** | config test (`-T`), service active, agent log watched for connection/TLS errors | service running, agent log watched |
+| R13 | **Verifies the result with the server** | config test (`-T`), service active, then "Done" only when the JSAN Zabbix server confirms the agent (`POST /enroll/:code/status`, up to 2 min); otherwise the agent log reason and exit 2 | service running, same server confirmation |
 | R14 | **Clear output** | numbered steps, final "Done … appears within a minute", log file | same, transcript log |
 | R15 | **Reversible** | `--uninstall` | `$env:OPSDESK_UNINSTALL='1'` |
 | R16 | **Served safely** | only `[A-Za-z0-9._:/-]` values are substituted into a script; unknown/expired/revoked code → 404; rate-limited | same |

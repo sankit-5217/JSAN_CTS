@@ -200,12 +200,14 @@ install_agent() {
 register_machine() {
   local name machine_hash address body resp http
   name=${NAME_OVERRIDE:-$(hostname -s 2>/dev/null || hostname)}
+  REG_NAME=$name
   [ -n "$name" ] || die "Cannot work out this machine's name; pass --name <NAME>."
   if [ -r /etc/machine-id ] && [ -s /etc/machine-id ]; then
     machine_hash=$(sha256sum /etc/machine-id | cut -c1-32)
   else
     machine_hash=$(printf '%s' "$name" | sha256sum | cut -c1-32)
   fi
+  MACHINE_HASH=$machine_hash
   address=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1)
   body=$(printf '{"hostname":"%s","os":"linux","osVersion":"%s","machineId":"%s","address":"%s"}' \
     "$(json_escape "$name")" "$(json_escape "$OS_PRETTY")" "$machine_hash" "$(json_escape "${address:-}")")
@@ -258,7 +260,7 @@ EOF
 }
 
 start_and_verify() {
-  local before=0
+  local before=0 state="" body resp
   CONNECTION_PROBLEM=""
   [ -f "$AGENT_LOG" ] && before=$(wc -l <"$AGENT_LOG")
   systemctl enable --quiet zabbix-agent2
@@ -266,13 +268,26 @@ start_and_verify() {
   sleep 3
   systemctl is-active --quiet zabbix-agent2 ||
     die "The agent did not start. See: journalctl -u zabbix-agent2 -n 50"
-  # Watch only what the agent logged since this restart (about 15 seconds).
-  for _ in 1 2 3 4 5; do
-    sleep 3
-    CONNECTION_PROBLEM=$(tail -n +"$((before + 1))" "$AGENT_LOG" 2>/dev/null |
-      grep -iE 'started to fail|cannot connect|connection refused|handshake|psk' | tail -n1 || true)
-    [ -n "$CONNECTION_PROBLEM" ] && break
+  # Done only when the JSAN Zabbix server itself confirms the agent (up to two
+  # minutes): after an enrollment the server needs a few seconds to load the key.
+  say "  Agent running - waiting for the JSAN Zabbix server to confirm it"
+  body=$(printf '{"hostname":"%s","machineId":"%s"}' "$(json_escape "$REG_NAME")" "$MACHINE_HASH")
+  for _ in $(seq 1 24); do
+    sleep 5
+    # shellcheck disable=SC2310 # a failed poll is simply retried
+    resp=$(curl_api -X POST -H 'Content-Type: application/json' --data-binary @- \
+      "$OPSDESK_API/enroll/$ENROLL_CODE/status" <<<"$body" || true)
+    state=$(json_field agent "$resp")
+    if [ "$state" = AVAILABLE ]; then
+      say "  Confirmed: the JSAN Zabbix server is receiving data from this machine"
+      return 0
+    fi
   done
+  CONNECTION_PROBLEM=$(tail -n +"$((before + 1))" "$AGENT_LOG" 2>/dev/null |
+    grep -iE 'started to fail|cannot connect|connection refused|handshake|psk|not found' | tail -n1 || true)
+  if [ -z "$CONNECTION_PROBLEM" ]; then
+    CONNECTION_PROBLEM="the JSAN Zabbix server did not confirm the agent within 2 minutes (state: ${state:-unknown})"
+  fi
   return 0
 }
 

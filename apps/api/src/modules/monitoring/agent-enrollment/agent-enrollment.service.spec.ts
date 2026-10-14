@@ -56,6 +56,7 @@ function setup() {
       serverAddress: "zbx.example.com:12762",
     })),
     upsertAgentHost: jest.fn(async () => ({ hostId: "10500", created: true })),
+    agentHostAvailability: jest.fn(async () => "AVAILABLE"),
   } as unknown as ZabbixService;
   const cmdb = {
     findByCode: jest.fn(async () => null),
@@ -186,6 +187,33 @@ describe("AgentEnrollmentService", () => {
     await expect(
       svc.register(code, { hostname: "web-01", os: "windows", machineId: MACHINE }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe("installer status check (R13)", () => {
+  it("reports what Zabbix sees for the machine that enrolled the name", async () => {
+    const { svc, cmdb } = setup();
+    (cmdb.findByCode as jest.Mock).mockResolvedValue({ id: "ci-1", siteId: SITE.id, metadata: { machineId: MACHINE } });
+    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    await expect(svc.status(code, { hostname: "web-01", machineId: MACHINE })).resolves.toEqual({
+      hostName: "SITE04-WEB-01",
+      agent: "AVAILABLE",
+    });
+  });
+
+  it("does not answer for another machine, another site or an unknown name", async () => {
+    const { svc, cmdb } = setup();
+    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    for (const ci of [
+      null,
+      { id: "ci-1", siteId: SITE.id, metadata: { machineId: "b".repeat(32) } },
+      { id: "ci-1", siteId: "other", metadata: { machineId: MACHINE } },
+    ]) {
+      (cmdb.findByCode as jest.Mock).mockResolvedValueOnce(ci);
+      await expect(svc.status(code, { hostname: "web-01", machineId: MACHINE })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    }
   });
 });
 

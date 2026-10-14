@@ -20,6 +20,7 @@ import { RolesGuard } from "../../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../../auth/types/jwt-payload.type";
 import { ZABBIX_ADMIN_ROLES } from "../zabbix/zabbix.controller";
 import {
+  AgentStatusDto,
   CreateAgentEnrollmentDto,
   ListAgentEnrollmentsQueryDto,
   RegisterAgentDto,
@@ -101,5 +102,13 @@ export class AgentEnrollmentPublicController {
   @ApiOperation({ summary: "Called by the installer: registers the machine, returns its agent settings" })
   register(@Param("code") code: string, @Body() dto: RegisterAgentDto) {
     return this.enrollments.register(code, dto);
+  }
+
+  @Post(":code/status")
+  @HttpCode(200)
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({ summary: "Called by the installer: does Zabbix see this machine's agent yet?" })
+  status(@Param("code") code: string, @Body() dto: AgentStatusDto) {
+    return this.enrollments.status(code, dto);
   }
 }

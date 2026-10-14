@@ -174,13 +174,26 @@
     Restart-Service -Name $ServiceName -Force
     Start-Sleep -Seconds 3
     if ((Get-Service -Name $ServiceName).Status -ne 'Running') { Fail "The '$ServiceName' service did not start; see $AgentLog" }
+    # Done only when the JSAN Zabbix server itself confirms the agent (up to two
+    # minutes): after an enrollment the server needs a few seconds to load the key.
+    Write-Host '  Agent running - waiting for the JSAN Zabbix server to confirm it'
+    $statusBody = @{ hostname = $name; machineId = $machineHash } | ConvertTo-Json
+    $state = 'UNKNOWN'
+    for ($i = 0; $i -lt 24 -and $state -ne 'AVAILABLE'; $i++) {
+      Start-Sleep -Seconds 5
+      try {
+        $state = (Invoke-RestMethod -Method Post -Uri "$OpsdeskApi/enroll/$EnrollCode/status" -ContentType 'application/json' -Body $statusBody -TimeoutSec 30).agent
+      } catch { $state = 'UNKNOWN' }
+    }
     $problem = $null
-    for ($i = 0; $i -lt 5 -and -not $problem; $i++) {
-      Start-Sleep -Seconds 3
+    if ($state -ne 'AVAILABLE') {
       if (Test-Path $AgentLog) {
         $problem = Get-Content $AgentLog | Select-Object -Skip $before |
-          Where-Object { $_ -match 'started to fail|cannot connect|connection refused|handshake|psk' } | Select-Object -Last 1
+          Where-Object { $_ -match 'started to fail|cannot connect|connection refused|handshake|psk|not found' } | Select-Object -Last 1
       }
+      if (-not $problem) { $problem = "the JSAN Zabbix server did not confirm the agent within 2 minutes (state: $state)" }
+    } else {
+      Write-Host '  Confirmed: the JSAN Zabbix server is receiving data from this machine'
     }
     if ($problem) {
       Write-Host "WARNING: the agent is running but reports a connection problem:" -ForegroundColor Yellow

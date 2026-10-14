@@ -16,7 +16,7 @@ import { ActorContext } from "../../../common/types/actor-context.type";
 import { AuditService } from "../../audit/audit.service";
 import { CmdbService } from "../../cmdb/cmdb.service";
 import { ZabbixService } from "../zabbix/zabbix.service";
-import { CreateAgentEnrollmentDto, RegisterAgentDto } from "./agent-enrollment.dto";
+import { AgentStatusDto, CreateAgentEnrollmentDto, RegisterAgentDto } from "./agent-enrollment.dto";
 
 export type InstallerOs = "linux" | "windows";
 
@@ -268,13 +268,28 @@ export class AgentEnrollmentService {
     return { hostName: host, serverActive: target.serverAddress, pskIdentity, psk };
   }
 
+  /**
+   * The installer's final check: does Zabbix see this machine's agent? Only
+   * answers for a usable link and the machine that registered the name.
+   */
+  async status(code: string, dto: AgentStatusDto) {
+    const { enrollment, siteCode } = await this.resolve(code);
+    const host = agentHostName(siteCode, dto.hostname);
+    const ci = await this.cmdb.findByCode(host);
+    const knownMachine = (ci?.metadata as { machineId?: string } | null)?.machineId;
+    if (!ci || ci.siteId !== enrollment.siteId || (knownMachine && knownMachine !== dto.machineId)) {
+      throw new NotFoundException({ code: "AGENT_NOT_ENROLLED", message: `${host} is not enrolled from this machine` });
+    }
+    return { hostName: host, agent: await this.zabbix.agentHostAvailability(host) };
+  }
+
   // -------------------------------------------------------------- helpers
 
   /** A usable link, or a uniform 404 (never says whether a code exists). */
   private async resolve(code: string): Promise<{ enrollment: AgentEnrollment; siteCode: string }> {
     const notFound = new NotFoundException({
       code: "ENROLLMENT_INVALID",
-      message: "This enrollment link is invalid, expired or revoked — ask JSAN for a new one",
+      message: "This enrollment link is invalid, expired or revoked. Ask JSAN for a new one.",
     });
     if (!CODE_PATTERN.test(code)) throw notFound;
     const row = await this.prisma.agentEnrollment.findUnique({

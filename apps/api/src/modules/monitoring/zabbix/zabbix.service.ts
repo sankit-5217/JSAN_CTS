@@ -757,6 +757,18 @@ export class ZabbixService {
     return { hostId: created.hostids[0], created: true };
   }
 
+  /** Whether Zabbix currently sees the host's active agent (for the installer's final check). */
+  async agentHostAvailability(host: string): Promise<"AVAILABLE" | "NOT_AVAILABLE" | "UNKNOWN"> {
+    const ep = await this.endpoint();
+    const [h] = await this.zbx<{ active_available?: string }[]>(ep, "host.get", {
+      output: ["active_available"],
+      filter: { host: [host] },
+    });
+    if (h?.active_available === "1") return "AVAILABLE";
+    if (h?.active_available === "2") return "NOT_AVAILABLE";
+    return "UNKNOWN";
+  }
+
   /** The configured endpoint, or a 503 the UI can explain. */
   private async endpoint(): Promise<ZabbixEndpoint> {
     const row = await this.prisma.zabbixConnection.findUnique({

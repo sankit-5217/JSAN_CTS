@@ -67,3 +67,18 @@ export class RegisterAgentDto {
   @Matches(/^$|^\d{1,3}(\.\d{1,3}){3}$/, { message: "address must be an IPv4 address" })
   address?: string;
 }
+
+/** The installer asking whether Zabbix sees its agent yet. */
+export class AgentStatusDto {
+  @ApiProperty({ example: "web-01" })
+  @IsString()
+  @Matches(/^[A-Za-z0-9._-]{1,60}$/, {
+    message: "hostname may only use letters, digits, '.', '_' and '-' (max 60)",
+  })
+  hostname!: string;
+
+  @ApiProperty()
+  @IsString()
+  @Matches(/^[a-f0-9]{32}$/, { message: "machineId must be 32 lowercase hex characters" })
+  machineId!: string;
+}
