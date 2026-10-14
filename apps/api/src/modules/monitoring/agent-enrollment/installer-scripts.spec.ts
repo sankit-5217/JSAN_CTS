@@ -196,6 +196,41 @@ describe("Linux installer ShellCheck (R18)", () => {
   });
 });
 
+/**
+ * Windows behaviour without an admin shell or a real machine: the real
+ * install.ps1 logic runs in a throwaway folder with only the machine-changing
+ * commands faked (test/install-ps1.sim.ps1), plus PSScriptAnalyzer (R18; only
+ * PSAvoidUsingWriteHost excluded — coloured console output is the installer's job).
+ */
+describe("Windows installer simulation and lint", () => {
+  const ps = process.platform === "win32" ? "powershell.exe" : "pwsh";
+  const hasPs = available(ps, ["-NoProfile", "-Command", "exit 0"]);
+  const hasAnalyzer =
+    hasPs &&
+    available(ps, ["-NoProfile", "-Command", "if (Get-Module -ListAvailable PSScriptAnalyzer) { exit 0 } else { exit 1 }"]);
+
+  (hasPs ? it : it.skip)("R1-R19: simulated install, re-run, no-confirmation, refusal and uninstall all pass", () => {
+    const sim = join(__dirname, "test", "install-ps1.sim.ps1");
+    const r = spawnSync(ps, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", sim], {
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    expect(r.stdout).toContain("0 check(s) failed");
+    expect(r.stdout).not.toMatch(/^FAIL/m);
+    expect(r.status).toBe(0);
+  }, 150_000);
+
+  (hasAnalyzer ? it : it.skip)("R18: PSScriptAnalyzer is clean", () => {
+    const f = join(__dirname, "scripts", "install.ps1");
+    const cmd =
+      `$r = Invoke-ScriptAnalyzer -Path '${f}' -Severity Error,Warning,Information -ExcludeRule PSAvoidUsingWriteHost;` +
+      `$r | ForEach-Object { "$($_.Line): $($_.RuleName)" }; exit $(if ($r) { 1 } else { 0 })`;
+    const r = spawnSync(ps, ["-NoProfile", "-Command", cmd], { encoding: "utf8", timeout: 120_000 });
+    expect(r.stdout.trim()).toBe("");
+    expect(r.status).toBe(0);
+  }, 150_000);
+});
+
 describe("Windows installer (install.ps1) rubric", () => {
   const body = code(ps1);
 

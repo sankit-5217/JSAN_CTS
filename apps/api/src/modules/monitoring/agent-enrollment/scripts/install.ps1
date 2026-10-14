@@ -62,7 +62,7 @@
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
   New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
-  try { Stop-Transcript | Out-Null } catch { }
+  try { Stop-Transcript | Out-Null } catch { Write-Verbose 'No transcript was running' }
   Start-Transcript -Path $LogFile -Append | Out-Null
   try {
     Write-Host ("JSAN OpsDesk monitoring agent installer - site {0} - {1:u}" -f $SiteCode, (Get-Date).ToUniversalTime())
@@ -208,6 +208,6 @@
     Write-Host ''
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
   } finally {
-    try { Stop-Transcript | Out-Null } catch { }
+    try { Stop-Transcript | Out-Null } catch { Write-Verbose 'No transcript was running' }
   }
 }
