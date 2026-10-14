@@ -33,6 +33,7 @@ interface Settings {
   webUrl: string | null;
   enabled: boolean;
   requestTimeoutMs: number;
+  agentServerAddress: string | null;
   tokenConfigured: boolean;
   tokenLast4: string | null;
   tokenUpdatedAt: string | null;
@@ -65,6 +66,7 @@ export function ZabbixSettingsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [apiUrl, setApiUrl] = useState("");
   const [timeoutMs, setTimeoutMs] = useState("10000");
+  const [agentServer, setAgentServer] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [token, setToken] = useState("");
   const [saving, setSaving] = useState(false);
@@ -79,6 +81,7 @@ export function ZabbixSettingsPage() {
         setSettings(s);
         setApiUrl(s.apiUrl ?? "");
         setTimeoutMs(String(s.requestTimeoutMs));
+        setAgentServer(s.agentServerAddress ?? "");
         setEnabled(s.enabled);
         setLoadError(null);
       })
@@ -95,6 +98,8 @@ export function ZabbixSettingsPage() {
   const timeoutInvalid =
     !Number.isInteger(timeoutNumber) || timeoutNumber < 1000 || timeoutNumber > 60000;
   const urlInvalid = !/^https?:\/\/.+/i.test(apiUrl.trim());
+  const agentServerInvalid =
+    agentServer.trim() !== "" && !/^[A-Za-z0-9.-]+:\d{1,5}$/.test(agentServer.trim());
 
   const save = async (extra: Record<string, unknown> = {}) => {
     setSaving(true);
@@ -104,6 +109,7 @@ export function ZabbixSettingsPage() {
         apiUrl: apiUrl.trim(),
         enabled,
         requestTimeoutMs: timeoutNumber,
+        agentServerAddress: agentServer.trim(),
         ...extra,
       };
       if (token.trim()) body.apiToken = token.trim();
@@ -200,6 +206,18 @@ export function ZabbixSettingsPage() {
                 }
                 sx={{ maxWidth: 240 }}
               />
+              <TextField
+                label="Agent server address"
+                value={agentServer}
+                onChange={(e) => setAgentServer(e.target.value)}
+                error={agentServerInvalid}
+                helperText={
+                  agentServerInvalid
+                    ? "Use host:port, e.g. monitor.example.com:10051"
+                    : "host:port that client agents connect out to (the Zabbix server's public port). Needed for the one-line agent installer."
+                }
+                fullWidth
+              />
               <FormControlLabel
                 control={
                   <Switch checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
@@ -212,7 +230,7 @@ export function ZabbixSettingsPage() {
               <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
                 <Button
                   variant="contained"
-                  disabled={saving || urlInvalid || timeoutInvalid}
+                  disabled={saving || urlInvalid || timeoutInvalid || agentServerInvalid}
                   onClick={() => save()}
                 >
                   {saving ? "Saving…" : "Save"}

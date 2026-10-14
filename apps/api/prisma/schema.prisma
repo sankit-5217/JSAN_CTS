@@ -317,6 +317,7 @@ model Site {
   racks              Rack[]
   engineerShifts     EngineerShift[]
   routingPolicy      RoutingPolicy?
+  agentEnrollments   AgentEnrollment[]
 
   @@map("sites")
 }
@@ -801,10 +802,36 @@ model ZabbixConnection {
   tokenCiphertext  String?   @map("token_ciphertext")
   tokenLast4       String?   @map("token_last4") @db.VarChar(4)
   tokenUpdatedAt   DateTime? @map("token_updated_at")
+  // host:port the client-site agents connect OUT to (the Zabbix server's
+  // public trapper address, e.g. a Railway TCP proxy). Admin-editable, so the
+  // one-line installer never hard-codes it.
+  agentServerAddress String? @map("agent_server_address") @db.VarChar(255)
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
   @@map("zabbix_connections")
+}
+
+/// A per-site enrollment link for the one-line monitoring agent installer
+/// (`curl .../enroll/<code>/install.sh | sudo bash`). Any number of the
+/// site's machines may use it until it expires or is revoked. Only a SHA-256
+/// of the code is stored; the code itself is shown once, when created.
+model AgentEnrollment {
+  id            String    @id @default(uuid())
+  siteId        String    @map("site_id")
+  label         String?   @db.VarChar(120)
+  codeHash      String    @unique @map("code_hash") @db.VarChar(64)
+  expiresAt     DateTime  @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  enrolledCount Int       @default(0) @map("enrolled_count")
+  lastUsedAt    DateTime? @map("last_used_at")
+  createdById   String    @map("created_by_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@index([siteId])
+  @@map("agent_enrollments")
 }
 
 model Warranty {

@@ -97,6 +97,14 @@ export class CmdbService {
     return { items, total, limit, offset };
   }
 
+  /** Exact CMDB code lookup for other modules (e.g. agent enrollment); null when absent. */
+  findByCode(ciCode: string) {
+    return this.prisma.configurationItem.findUnique({
+      where: { ciCode },
+      select: { id: true, siteId: true, metadata: true },
+    });
+  }
+
   async findOne(id: string) {
     const ci = await this.prisma.configurationItem.findUnique({ where: { id } });
     if (!ci) {

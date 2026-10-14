@@ -36,6 +36,14 @@ export const DEFAULT_CONNECTION_NAME = "default";
 export const SITE_TAG = "site";
 export const CI_TAG = "ci";
 
+/** Hosts enrolled by the one-line installer go into "Clients/<SITE>". */
+export const AGENT_HOST_GROUP_PREFIX = "Clients/";
+/** Zabbix's stock active-agent templates (shipped with every 7.x server). */
+export const AGENT_TEMPLATES: Record<"linux" | "windows", string> = {
+  linux: "Linux by Zabbix agent active",
+  windows: "Windows by Zabbix agent active",
+};
+
 export const SEVERITY_LABELS = [
   "Not classified",
   "Information",
@@ -173,6 +181,8 @@ export class ZabbixService {
       apiUrl: dto.apiUrl?.trim(),
       enabled: dto.enabled,
       requestTimeoutMs: dto.requestTimeoutMs,
+      agentServerAddress:
+        dto.agentServerAddress === undefined ? undefined : dto.agentServerAddress.trim() || null,
       ...tokenData,
     };
 
@@ -190,6 +200,7 @@ export class ZabbixService {
               apiUrl: fields.apiUrl as string,
               enabled: fields.enabled ?? true,
               requestTimeoutMs: fields.requestTimeoutMs ?? 10000,
+              agentServerAddress: fields.agentServerAddress ?? null,
               ...tokenData,
             },
           });
@@ -646,6 +657,106 @@ export class ZabbixService {
     }
   }
 
+  // ------------------------------------------------- agent enrollment support
+
+  /**
+   * What the one-line agent installer needs: the Zabbix server's version (the
+   * agent installed must match it) and the public host:port agents connect
+   * out to. 503 with a code the admin UI can explain when either is missing.
+   */
+  async agentInstallTarget(): Promise<{ version: string; serverAddress: string }> {
+    const ep = await this.endpoint();
+    const row = await this.prisma.zabbixConnection.findUnique({
+      where: { name: DEFAULT_CONNECTION_NAME },
+      select: { agentServerAddress: true },
+    });
+    if (!row?.agentServerAddress) {
+      throw new ServiceUnavailableException({
+        code: "AGENT_SERVER_ADDRESS_MISSING",
+        message:
+          "Set the agent server address (host:port agents connect to) in Monitoring → Zabbix settings first",
+      });
+    }
+    const version = await this.zbx<string>(ep, "apiinfo.version", []);
+    return { version, serverAddress: row.agentServerAddress };
+  }
+
+  /**
+   * Creates (or, on re-enrollment, updates) the Zabbix host for a machine
+   * enrolled with the one-line installer: active-only agent, PSK-encrypted,
+   * tagged with its site and CMDB code, in the site's host group, linked to
+   * the OS's "by Zabbix agent active" template. A host that already belongs to
+   * another site is never taken over.
+   */
+  async upsertAgentHost(input: {
+    host: string;
+    name: string;
+    siteCode: string;
+    ciCode: string;
+    os: "linux" | "windows";
+    pskIdentity: string;
+    psk: string;
+  }): Promise<{ hostId: string; created: boolean }> {
+    const ep = await this.endpoint();
+    const template = AGENT_TEMPLATES[input.os];
+    const [tpl] = await this.zbx<{ templateid: string }[]>(ep, "template.get", {
+      output: ["templateid"],
+      filter: { host: [template] },
+    });
+    if (!tpl) {
+      throw new ServiceUnavailableException({
+        code: "AGENT_TEMPLATE_MISSING",
+        message: `Zabbix has no template "${template}" — import it or restore the default templates`,
+      });
+    }
+    const groupName = `${AGENT_HOST_GROUP_PREFIX}${input.siteCode}`;
+    const [group] = await this.zbx<{ groupid: string }[]>(ep, "hostgroup.get", {
+      output: ["groupid"],
+      filter: { name: [groupName] },
+    });
+    const groupid =
+      group?.groupid ??
+      (await this.zbx<{ groupids: string[] }>(ep, "hostgroup.create", { name: groupName }))
+        .groupids[0];
+
+    const [existing] = await this.zbx<RawHost[]>(ep, "host.get", {
+      output: ["hostid", "host"],
+      selectTags: ["tag", "value"],
+      filter: { host: [input.host] },
+    });
+    const existingSite = existing ? tagValue(existing.tags, SITE_TAG) : null;
+    if (existing && existingSite !== input.siteCode) {
+      throw new ConflictException({
+        code: "AGENT_HOST_OTHER_SITE",
+        message: `Zabbix host ${input.host} already belongs to ${existingSite ?? "no site"}`,
+      });
+    }
+    const fields = {
+      name: input.name,
+      groups: [{ groupid }],
+      templates: [{ templateid: tpl.templateid }],
+      tags: [
+        { tag: SITE_TAG, value: input.siteCode },
+        { tag: CI_TAG, value: input.ciCode },
+        { tag: "source", value: "opsdesk-agent" },
+      ],
+      status: 0,
+      tls_connect: 2, // PSK
+      tls_accept: 2, // PSK only
+      tls_psk_identity: input.pskIdentity,
+      tls_psk: input.psk,
+    };
+    if (existing) {
+      await this.zbx(ep, "host.update", { hostid: existing.hostid, ...fields });
+      return { hostId: existing.hostid, created: false };
+    }
+    const created = await this.zbx<{ hostids: string[] }>(ep, "host.create", {
+      host: input.host,
+      ...fields,
+    });
+    return { hostId: created.hostids[0], created: true };
+  }
+
   /** The configured endpoint, or a 503 the UI can explain. */
   private async endpoint(): Promise<ZabbixEndpoint> {
     const row = await this.prisma.zabbixConnection.findUnique({
@@ -795,6 +906,7 @@ export class ZabbixService {
         webUrl: null,
         enabled: false,
         requestTimeoutMs: 10000,
+        agentServerAddress: null,
         tokenConfigured: false,
         tokenLast4: null,
         tokenUpdatedAt: null,
@@ -807,6 +919,7 @@ export class ZabbixService {
       webUrl: zabbixWebBaseUrl(row.apiUrl),
       enabled: row.enabled,
       requestTimeoutMs: row.requestTimeoutMs,
+      agentServerAddress: row.agentServerAddress,
       tokenConfigured: Boolean(row.tokenCiphertext),
       tokenLast4: row.tokenLast4,
       tokenUpdatedAt: row.tokenUpdatedAt?.toISOString() ?? null,

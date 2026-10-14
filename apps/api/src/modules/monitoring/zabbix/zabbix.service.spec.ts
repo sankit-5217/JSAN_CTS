@@ -368,6 +368,78 @@ describe("ZabbixService", () => {
       .mockRejectedValue(new TypeError("fetch failed")) as unknown as typeof fetch;
     await expect(service.listHosts(ADMIN)).rejects.toBeInstanceOf(BadGatewayException);
   });
+
+  describe("agent enrollment support", () => {
+    const INPUT = {
+      host: "SITE04-WEB-01",
+      name: "web-01 (SITE04)",
+      siteCode: "SITE04",
+      ciCode: "SITE04-WEB-01",
+      os: "linux" as const,
+      pskIdentity: "opsdesk-SITE04-WEB-01",
+      psk: "ab".repeat(32),
+    };
+    const base = {
+      "template.get": () => [{ templateid: "10343" }],
+      "hostgroup.get": () => [],
+      "hostgroup.create": () => ({ groupids: ["77"] }),
+    };
+
+    it("needs the agent server address before agents can be enrolled", async () => {
+      service.fetchFn = fakeZabbix({ "apiinfo.version": () => "7.0.31" })
+        .fetchFn as unknown as typeof fetch;
+      await expect(service.agentInstallTarget()).rejects.toMatchObject({
+        response: expect.objectContaining({ code: "AGENT_SERVER_ADDRESS_MISSING" }),
+      });
+      row.agentServerAddress = "zbx.example.com:12762";
+      await expect(service.agentInstallTarget()).resolves.toEqual({
+        version: "7.0.31",
+        serverAddress: "zbx.example.com:12762",
+      });
+    });
+
+    it("creates a PSK-only, site-tagged host in Clients/<SITE> with the active template", async () => {
+      const zbx = fakeZabbix({ ...base, "host.get": () => [], "host.create": () => ({ hostids: ["10500"] }) });
+      service.fetchFn = zbx.fetchFn as unknown as typeof fetch;
+      await expect(service.upsertAgentHost(INPUT)).resolves.toEqual({ hostId: "10500", created: true });
+      expect(zbx.calls.find((c) => c.method === "hostgroup.create")?.params).toEqual({
+        name: "Clients/SITE04",
+      });
+      expect(zbx.calls.find((c) => c.method === "host.create")?.params).toMatchObject({
+        host: "SITE04-WEB-01",
+        groups: [{ groupid: "77" }],
+        templates: [{ templateid: "10343" }],
+        tls_connect: 2,
+        tls_accept: 2,
+        tls_psk_identity: "opsdesk-SITE04-WEB-01",
+        tags: expect.arrayContaining([
+          { tag: "site", value: "SITE04" },
+          { tag: "ci", value: "SITE04-WEB-01" },
+        ]),
+      });
+    });
+
+    it("updates the same site's existing host (new PSK) instead of duplicating it", async () => {
+      const zbx = fakeZabbix({
+        ...base,
+        "host.get": () => [{ hostid: "10500", host: INPUT.host, tags: [{ tag: "site", value: "SITE04" }] }],
+        "host.update": () => ({ hostids: ["10500"] }),
+      });
+      service.fetchFn = zbx.fetchFn as unknown as typeof fetch;
+      await expect(service.upsertAgentHost(INPUT)).resolves.toEqual({ hostId: "10500", created: false });
+      expect(zbx.calls.some((c) => c.method === "host.create")).toBe(false);
+    });
+
+    it("never takes over a host that belongs to another site", async () => {
+      const zbx = fakeZabbix({
+        ...base,
+        "host.get": () => [{ hostid: "10500", host: INPUT.host, tags: [{ tag: "site", value: "SITE01" }] }],
+      });
+      service.fetchFn = zbx.fetchFn as unknown as typeof fetch;
+      await expect(service.upsertAgentHost(INPUT)).rejects.toBeInstanceOf(ConflictException);
+      expect(zbx.calls.some((c) => c.method === "host.update")).toBe(false);
+    });
+  });
 });
 
 describe("availabilityOf", () => {

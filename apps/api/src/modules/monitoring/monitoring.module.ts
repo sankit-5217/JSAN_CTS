@@ -1,6 +1,12 @@
 import { Module } from "@nestjs/common";
 import { AlertsModule } from "../alerts/alerts.module";
 import { AuthModule } from "../auth/auth.module";
+import { CmdbModule } from "../cmdb/cmdb.module";
+import {
+  AgentEnrollmentController,
+  AgentEnrollmentPublicController,
+} from "./agent-enrollment/agent-enrollment.controller";
+import { AgentEnrollmentService } from "./agent-enrollment/agent-enrollment.service";
 import { MonitoringController } from "./monitoring.controller";
 import { MonitoringService } from "./monitoring.service";
 import { ZabbixController } from "./zabbix/zabbix.controller";
@@ -24,6 +30,10 @@ import { ZabbixService } from "./zabbix/zabbix.service";
  * Zabbix re-sync (zabbix/zabbix-resync.service.ts): every 2 minutes, brings
  * OpsDesk's Zabbix alerts back in step with Zabbix's open problems, so a
  * missed webhook delivery never loses a problem or leaves a stale alert.
+ * Agent enrollment (agent-enrollment/): per-site links for the one-line
+ * installer (curl | sudo bash, or PowerShell). Each machine that registers
+ * gets its own Zabbix host + PSK (via ZabbixService) and a CMDB record (via
+ * CmdbService); links expire, can be revoked and are audited.
  * Zabbix (zabbix/): admin-editable connection (ZabbixConnection, token
  * encrypted at rest) plus live, site-scoped reads of hosts / problems / latest
  * values / history and an audited problem acknowledge — proxied, never stored.
@@ -40,9 +50,14 @@ import { ZabbixService } from "./zabbix/zabbix.service";
  * a failure here never fails the health-snapshot write itself.
  */
 @Module({
-  imports: [AuthModule, AlertsModule],
-  controllers: [MonitoringController, ZabbixController],
-  providers: [MonitoringService, ZabbixService, ZabbixResyncService],
+  imports: [AuthModule, AlertsModule, CmdbModule],
+  controllers: [
+    MonitoringController,
+    ZabbixController,
+    AgentEnrollmentController,
+    AgentEnrollmentPublicController,
+  ],
+  providers: [MonitoringService, ZabbixService, ZabbixResyncService, AgentEnrollmentService],
   exports: [MonitoringService],
 })
 export class MonitoringModule {}

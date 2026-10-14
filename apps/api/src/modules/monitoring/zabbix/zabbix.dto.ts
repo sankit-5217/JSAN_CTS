@@ -27,6 +27,17 @@ export class UpdateZabbixSettingsDto {
   @IsBoolean()
   enabled?: boolean;
 
+  @ApiPropertyOptional({
+    example: "monitor.example.com:10051",
+    description:
+      "host:port client agents connect OUT to (the Zabbix server's public trapper port). Empty string clears it.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  @Matches(/^$|^[A-Za-z0-9.-]+:\d{1,5}$/, { message: "agentServerAddress must look like host:port" })
+  agentServerAddress?: string;
+
   @ApiPropertyOptional({ minimum: 1000, maximum: 60000, example: 10000 })
   @IsOptional()
   @IsInt()
