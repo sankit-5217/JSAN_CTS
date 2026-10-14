@@ -63,6 +63,35 @@ all of these. IDs are referenced by the tests in `installer-scripts.spec.ts`.
 | R20 | **A bad link fails clearly** | invalid/expired/revoked link (or server not ready) → a script that prints the reason and `exit 1`, served with HTTP 200 because `curl -f … \| bash` would otherwise show only "error: 404" and exit 0 | prints the reason and throws |
 | R21 | **Every advertised one-liner really runs** | `curl -fsSL … \| sudo bash` run for real on a clean Ubuntu 24.04 (see Verification) | `irm … \| iex` and the curl.exe form verified; **not** `powershell -Command -`, which reads stdin line by line and silently skips the multi-line script |
 
+## Verification (2026-10-14, production)
+
+Automated (every build): `installer-scripts.spec.ts` + `agent-enrollment.service.spec.ts`
+check R1-R21 statically, run `bash -n`, ShellCheck (`-o all`) and the PowerShell parser
+on the scripts exactly as served, and execute the error script in bash.
+
+Live, against the production API and Railway Zabbix, on a clean Ubuntu 24.04 (fresh WSL
+image, checksum-verified), using the exact client command `curl -fsSL … | sudo bash`:
+
+| Check | Result |
+| --- | --- |
+| First install (incl. full `apt upgrade`) | 6/6 steps, no prompts, ~4 min, reboot-pending warning, no reboot |
+| Zabbix side | host `SITE03-ACME-WEB-01` active agent AVAILABLE, PSK both ways, tags `site`/`ci`, group `Clients/SITE03`, Linux active template, live CPU/uptime data |
+| OpsDesk side | host UP in Monitoring → Zabbix, linked to its CMDB record; link counts the machine |
+| Machine side | listens on `127.0.0.1:31050` only; PSK file `600 zabbix:zabbix`; an existing agent on 10050 untouched |
+| Re-run with `--skip-upgrade` | same host, new PSK, one config file, "Done" only after the server confirmed (16 s) |
+| Different machine, same name | refused (HTTP 409, clear message, exit 1) before any change on the machine |
+| `--uninstall` | service, package, key and config removed |
+| Bad and revoked links | clear "invalid, expired or revoked" message, exit 1 (bash, `irm \| iex`, curl.exe) |
+| Windows | production `install.ps1` parses with the site's values; Zabbix MSI signature Valid (Zabbix SIA); both one-liners deliver and fail correctly. A full Windows install was **not** run (no disposable Windows machine) |
+
+Found and fixed during verification: a false "connection problem" on re-enrollment
+(now confirmed by the server, R13), a cryptic 404 with exit 0 for bad links (R20), an
+existing agent on port 10050 blocking ours (R19), and the `powershell -Command -` form
+silently running nothing (R21).
+
+The test machine was then uninstalled, its Zabbix host disabled, its CMDB record set to
+RETIRED and the test link revoked.
+
 ## Troubleshooting
 
 | Message | Fix |

@@ -168,16 +168,10 @@ describe("Linux installer (install.sh) rubric", () => {
 
   it("R18: bash parses it", () => {
     if (!available("bash", ["-c", "true"])) return;
-    const dir = mkdtempSync(join(tmpdir(), "opsdesk-sh-"));
-    try {
-      const f = join(dir, "install.sh");
-      writeFileSync(f, sh);
-      const r = spawnSync("bash", ["-n", f], { encoding: "utf8" });
-      expect(r.stderr).toBe("");
-      expect(r.status).toBe(0);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    // On stdin, not a temp file: "bash" may be WSL's, which can't read Windows paths.
+    const r = spawnSync("bash", ["-n"], { input: sh, encoding: "utf8" });
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
   });
 });
 
