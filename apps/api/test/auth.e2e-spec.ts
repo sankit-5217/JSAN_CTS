@@ -1,6 +1,5 @@
 import { JwtService } from "@nestjs/jwt";
 import { PasswordAuthService } from "../src/modules/auth/password-auth.service";
-import { SocialIdentityService } from "../src/modules/auth/social/social-identity.service";
 import { createTestApp, TestApp } from "./app";
 import { E2E_PASSWORD, Fixture, resetSchema, seedFixture } from "./fixture";
 
@@ -228,62 +227,136 @@ describe("Auth API (e2e)", () => {
     });
   });
 
-  describe("social sign-in", () => {
-    it("advertises password sign-in and no social providers when none are configured", async () => {
-      const res = await t.http().get("/api/v1/auth/providers").expect(200);
-      expect(res.body).toEqual({ password: true, social: [] });
-    });
-
-    it("an unconfigured provider bounces back to the login page", async () => {
-      const res = await t.http().get("/api/v1/auth/social/google/login").expect(302);
-      expect(res.headers.location).toBe("http://web.e2e.test/login?social_error=provider_disabled");
-    });
-
-    it("a handoff code is exchangeable exactly once, for a working access token", async () => {
-      const code = await t.app.get(SocialIdentityService).createHandoffCode(fx.users.superAdmin.id);
-      const res = await t.http().post("/api/v1/auth/social/exchange").send({ code }).expect(201);
+  describe("password only: no Google / Microsoft / GitHub", () => {
+    it("the social sign-in routes are gone", async () => {
+      await t.http().get("/api/v1/auth/providers").expect(404);
+      await t.http().get("/api/v1/auth/social/google/login").expect(404);
       await t
         .http()
-        .get("/api/v1/sites")
-        .set("authorization", `Bearer ${res.body.accessToken}`)
-        .expect(200);
-      await t.http().post("/api/v1/auth/social/exchange").send({ code }).expect(401);
+        .post("/api/v1/auth/social/exchange")
+        .send({ code: "x".repeat(43) })
+        .expect(404);
+    });
+  });
+
+  describe("admin-set password, changed at first sign-in", () => {
+    const START = "starting pass 4 rack";
+    const MINE = "my own pass 7 cable";
+    let adminToken: string;
+    let userId: string;
+
+    beforeAll(async () => {
+      adminToken = (await login(fx.users.superAdmin.email, E2E_PASSWORD).expect(200)).body
+        .accessToken;
+    });
+    const asAdmin = (req: import("supertest").Test) =>
+      req.set("authorization", `Bearer ${adminToken}`);
+    const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+    it("an admin adds a user with a starting password — no invite email", async () => {
+      const res = await asAdmin(t.http().post("/api/v1/admin/users"))
+        .send({
+          email: "starter@example.com",
+          displayName: "Starter",
+          role: "SITE_ENGINEER",
+          siteIds: [fx.site.id],
+          password: START,
+        })
+        .expect(201);
+      expect(res.body).toMatchObject({ hasPassword: true, mustChangePassword: true, invite: null });
+      userId = res.body.id;
+      expect(await t.prisma.passwordToken.count({ where: { userId } })).toBe(0);
+      expect(
+        await t.prisma.auditEvent.count({
+          where: { entityId: userId, action: "USER_PASSWORD_SET_BY_ADMIN" },
+        }),
+      ).toBe(1);
     });
 
-    it("links a verified email to the existing user, then trusts only the linked identity", async () => {
-      const identities = t.app.get(SocialIdentityService);
-      const id = {
-        provider: "github" as const,
-        issuer: "https://github.com",
-        subject: "424242",
-        email: fx.users.siteEngineer.email.toUpperCase(),
-        emailVerified: true,
-        name: null,
-      };
-      const first = await identities.resolveUser(id);
-      expect(first.id).toBe(fx.users.siteEngineer.id);
-      // GitHub email changed later — the link still wins
-      await expect(
-        identities.resolveUser({ ...id, email: "renamed@example.com" }),
-      ).resolves.toMatchObject({
-        id: fx.users.siteEngineer.id,
-      });
-      // a different GitHub account claiming the same email is refused
-      await expect(identities.resolveUser({ ...id, subject: "999" })).rejects.toMatchObject({
-        reason: "identity_mismatch",
-      });
-      // a Google account for the same person links alongside it
-      await expect(
-        identities.resolveUser({
-          ...id,
-          provider: "google",
-          issuer: "https://accounts.google.com",
-          subject: "g-1",
-        }),
-      ).resolves.toMatchObject({ id: fx.users.siteEngineer.id });
-      expect(
-        await t.prisma.userIdentity.count({ where: { userId: fx.users.siteEngineer.id } }),
-      ).toBe(2);
+    it("a weak starting password is refused and no user is created", async () => {
+      await asAdmin(t.http().post("/api/v1/admin/users"))
+        .send({
+          email: "weak@example.com",
+          displayName: "Weak",
+          role: "SITE_ENGINEER",
+          password: "short",
+        })
+        .expect(400);
+      expect(await t.prisma.user.count({ where: { email: "weak@example.com" } })).toBe(0);
+    });
+
+    it("until they change it, the API refuses everything else (backend-enforced)", async () => {
+      const res = await login("starter@example.com", START).expect(200);
+      expect(res.body.mustChangePassword).toBe(true);
+      const blocked = await t
+        .http()
+        .get("/api/v1/sites")
+        .set(bearer(res.body.accessToken))
+        .expect(403);
+      expect(blocked.body.code).toBe("PASSWORD_CHANGE_REQUIRED");
+    });
+
+    it("changing it needs the current password, then unlocks the account with a fresh session", async () => {
+      const first = (await login("starter@example.com", START).expect(200)).body.accessToken;
+      await t
+        .http()
+        .post("/api/v1/auth/password/change")
+        .set(bearer(first))
+        .send({ currentPassword: "not it at all", newPassword: MINE })
+        .expect(400);
+      await t
+        .http()
+        .post("/api/v1/auth/password/change")
+        .set(bearer(first))
+        .send({ currentPassword: START, newPassword: START })
+        .expect(400);
+      const changed = await t
+        .http()
+        .post("/api/v1/auth/password/change")
+        .set(bearer(first))
+        .send({ currentPassword: START, newPassword: MINE })
+        .expect(200);
+      expect(changed.body.mustChangePassword).toBe(false);
+      await t.http().get("/api/v1/sites").set(bearer(first)).expect(401); // old session signed out
+      await t.http().get("/api/v1/sites").set(bearer(changed.body.accessToken)).expect(200);
+      await login("starter@example.com", START).expect(401);
+      expect((await login("starter@example.com", MINE).expect(200)).body.mustChangePassword).toBe(
+        false,
+      );
+    });
+
+    it("an admin can set the password again (e.g. forgotten): signs them out, change required again", async () => {
+      const session = (await login("starter@example.com", MINE).expect(200)).body.accessToken;
+      const res = await asAdmin(t.http().post(`/api/v1/admin/users/${userId}/password`))
+        .send({ password: START })
+        .expect(200);
+      expect(res.body.mustChangePassword).toBe(true);
+      await t.http().get("/api/v1/sites").set(bearer(session)).expect(401);
+      expect((await login("starter@example.com", START).expect(200)).body.mustChangePassword).toBe(
+        true,
+      );
+    });
+
+    it("only a Super Admin can set someone's password, and not their own this way", async () => {
+      const engineer = (await login(fx.users.siteEngineer.email, E2E_PASSWORD).expect(200)).body
+        .accessToken;
+      await t
+        .http()
+        .post(`/api/v1/admin/users/${userId}/password`)
+        .set(bearer(engineer))
+        .send({ password: START })
+        .expect(403);
+      await asAdmin(t.http().post(`/api/v1/admin/users/${fx.users.superAdmin.id}/password`))
+        .send({ password: START })
+        .expect(400);
+    });
+
+    it("the invite email route still works for admins who prefer it", async () => {
+      const res = await asAdmin(t.http().post("/api/v1/admin/users"))
+        .send({ email: "invited@example.com", displayName: "Invited", role: "SITE_ENGINEER" })
+        .expect(201);
+      expect(res.body.invite).toMatchObject({ purpose: "INVITE" });
+      expect(res.body.mustChangePassword).toBe(false);
     });
   });
 });

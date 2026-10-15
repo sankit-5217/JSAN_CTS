@@ -5,7 +5,6 @@ const GOOD = {
   WEB_APP_URL: "https://opsdesk.jsan.example",
   API_PUBLIC_URL: "https://opsdesk.jsan.example",
   REDIS_URL: "redis://redis:6379",
-  GOOGLE_CLIENT_SECRET: "GOCSPX-real-looking-secret",
 };
 
 describe("findProductionAuthConfigProblems", () => {
@@ -36,14 +35,6 @@ describe("findProductionAuthConfigProblems", () => {
     expect(findProductionAuthConfigProblems({ ...GOOD, API_PUBLIC_URL: undefined }).errors).toEqual(
       ["API_PUBLIC_URL is not set"],
     );
-  });
-
-  it("rejects placeholder provider secrets", () => {
-    const { errors } = findProductionAuthConfigProblems({
-      ...GOOD,
-      GITHUB_CLIENT_SECRET: "change-me",
-    });
-    expect(errors).toEqual([expect.stringContaining("GITHUB_CLIENT_SECRET")]);
   });
 
   it("warns (doesn't fail) without Redis", () => {

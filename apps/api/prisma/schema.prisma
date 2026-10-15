@@ -165,22 +165,26 @@ enum ChangeType {
 // ---------------------------------------------------------------------------
 
 model User {
-  id               String    @id @default(uuid())
-  email            String    @unique
-  displayName      String    @map("display_name")
-  role             UserRole
-  isActive         Boolean   @default(true) @map("is_active")
-  // Password sign-in. NULL until the user sets one through an invite/reset
-  // link (never set by an admin). scrypt, see auth/password-hasher.ts.
-  passwordHash     String?   @map("password_hash")
-  passwordSetAt    DateTime? @map("password_set_at")
-  failedLoginCount Int       @default(0) @map("failed_login_count")
-  lockedUntil      DateTime? @map("locked_until")
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  displayName        String    @map("display_name")
+  role               UserRole
+  isActive           Boolean   @default(true) @map("is_active")
+  // Password sign-in (the only way in). NULL until set — by the user from
+  // an invite/reset link, or by a Super Admin as a starting password.
+  // scrypt, see auth/password-hasher.ts.
+  passwordHash       String?   @map("password_hash")
+  passwordSetAt      DateTime? @map("password_set_at")
+  // True after a Super Admin set the password: until the user picks their
+  // own, every API call except changing it is refused (JwtAuthGuard).
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  failedLoginCount   Int       @default(0) @map("failed_login_count")
+  lockedUntil        DateTime? @map("locked_until")
   // Carried in every app JWT ("sv"); bumping it (password set/reset)
   // invalidates all of the user's existing sessions at once.
-  sessionVersion   Int       @default(0) @map("session_version")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  sessionVersion     Int       @default(0) @map("session_version")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   incidentsOwned      Incident[]           @relation("IncidentOwner")
   incidentsReported   Incident[]           @relation("IncidentReportedBy")
@@ -194,32 +198,10 @@ model User {
   userSkills          UserSkill[]
   inAppNotifications  InAppNotification[]
   routingOffers       RoutingOffer[]
-  loginHandoffCodes   LoginHandoffCode[]
-  identities          UserIdentity[]
   passwordTokens      PasswordToken[]      @relation("PasswordTokenUser")
   apiTokens           ApiToken[]           @relation("ApiTokenUser")
 
   @@map("users")
-}
-
-/// A social sign-in (Google / Microsoft / GitHub) linked to a user. Linked
-/// on the first sign-in whose verified email matches an existing user;
-/// afterwards only (issuer, subject) is trusted, never the email alone.
-model UserIdentity {
-  id          String    @id @default(uuid())
-  userId      String    @map("user_id")
-  provider    String // "google" | "microsoft" | "github"
-  issuer      String
-  subject     String
-  email       String?
-  createdAt   DateTime  @default(now()) @map("created_at")
-  lastLoginAt DateTime? @map("last_login_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([issuer, subject])
-  @@unique([userId, provider])
-  @@map("user_identities")
 }
 
 /// Single-use invite / password-reset link token. Only its SHA-256 is stored.
@@ -258,24 +240,6 @@ model ApiToken {
 
   @@index([userId])
   @@map("api_tokens")
-}
-
-/// Single-use handoff between a social sign-in callback (API origin) and the
-/// web app: the callback redirects the browser with a random code, the web
-/// app trades it for the app JWT via POST /auth/social/exchange. Only the
-/// SHA-256 of the code is stored; rows expire after ~60s and are consumed once.
-model LoginHandoffCode {
-  id         String    @id @default(uuid())
-  codeHash   String    @unique @map("code_hash")
-  userId     String    @map("user_id")
-  expiresAt  DateTime  @map("expires_at")
-  consumedAt DateTime? @map("consumed_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([expiresAt])
-  @@map("login_handoff_codes")
 }
 
 /// Explicit site-scope grants (spec §4: most roles are "assigned sites"
@@ -355,17 +319,17 @@ model SupportCalendar {
 }
 
 model SupportGroup {
-  id                String   @id @default(uuid())
-  name              String   @unique
+  id                 String   @id @default(uuid())
+  name               String   @unique
   // The "Assignee Group" a new client report lands in when the reporter
   // doesn't pick one (at most one group carries this, enforced by
   // SitesService.setDefaultSupportGroup). Nullable-unique so the partial
   // index only ever holds a single TRUE row.
-  isDefaultAssignee Boolean? @map("is_default_assignee")
+  isDefaultAssignee  Boolean? @map("is_default_assignee")
   // Offered as an "Assignee Group" on the client portal's issue template.
   // Staff pick from every group; a client only from these (and the default).
-  isClientSelectable Boolean @default(false) @map("is_client_selectable")
-  createdAt         DateTime @default(now()) @map("created_at")
+  isClientSelectable Boolean  @default(false) @map("is_client_selectable")
+  createdAt          DateTime @default(now()) @map("created_at")
 
   incidents     Incident[]
   members       SupportGroupMember[]
@@ -790,24 +754,24 @@ model HealthSnapshot {
 /// returns is persisted here (spec §3.2). One row per named connection; v1 uses
 /// the seeded "default" row, editable by admins on the Zabbix settings page.
 model ZabbixConnection {
-  id               String    @id @default(uuid())
-  name             String    @unique @db.VarChar(64)
+  id                 String    @id @default(uuid())
+  name               String    @unique @db.VarChar(64)
   // e.g. http://127.0.0.1/zabbix/api_jsonrpc.php
-  apiUrl           String    @map("api_url") @db.VarChar(500)
-  enabled          Boolean   @default(true)
-  requestTimeoutMs Int       @default(10000) @map("request_timeout_ms")
+  apiUrl             String    @map("api_url") @db.VarChar(500)
+  enabled            Boolean   @default(true)
+  requestTimeoutMs   Int       @default(10000) @map("request_timeout_ms")
   // Zabbix API token, AES-256-GCM encrypted with INTEGRATION_SECRETS_KEY
   // (common/crypto/secret-cipher.ts). Never returned by any endpoint; only the
   // last 4 characters are kept in clear so admins can tell which token is set.
-  tokenCiphertext  String?   @map("token_ciphertext")
-  tokenLast4       String?   @map("token_last4") @db.VarChar(4)
-  tokenUpdatedAt   DateTime? @map("token_updated_at")
+  tokenCiphertext    String?   @map("token_ciphertext")
+  tokenLast4         String?   @map("token_last4") @db.VarChar(4)
+  tokenUpdatedAt     DateTime? @map("token_updated_at")
   // host:port the client-site agents connect OUT to (the Zabbix server's
   // public trapper address, e.g. a Railway TCP proxy). Admin-editable, so the
   // one-line installer never hard-codes it.
-  agentServerAddress String? @map("agent_server_address") @db.VarChar(255)
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  agentServerAddress String?   @map("agent_server_address") @db.VarChar(255)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   @@map("zabbix_connections")
 }

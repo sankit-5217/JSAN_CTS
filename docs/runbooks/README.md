@@ -269,95 +269,55 @@ No secret-manager integration exists yet, so there's no rotation-without-
 restart and no audit trail of _who_ rotated a credential _when_ beyond
 whatever the OS/deployment platform logs for the env var change itself.
 
-## Sign-in: passwords, Google / Microsoft / GitHub, API tokens
+## Sign-in: passwords and API tokens
 
-**When to use this**: onboarding or offboarding someone, connecting a sign-in
-provider, fixing a refused sign-in, issuing a machine token, or the first
-production deploy of this sign-in system.
+**When to use this**: onboarding or offboarding someone, fixing a refused
+sign-in, issuing a machine token, or the first production deploy of this
+sign-in system.
 
-**How sign-in works**
+**How sign-in works** — email + password is the only way in for people
+(Google / Microsoft / GitHub sign-in was removed on 2026-10-15).
 
-- **Password.** A Super Admin adds the person under **Administration →
-  Users** (email, name, role, sites). OpsDesk emails them an invite link
-  (valid 3 days, single use) to choose their own password — admins never see
-  or set passwords. "Forgot password?" on the login page emails a 1-hour reset
-  link. Passwords: at least 12 characters, stored as scrypt hashes. 5 wrong
-  passwords lock the account for 15 minutes; login routes are also rate
-  limited per IP. Setting a new password signs the user out everywhere else.
-- **Google / Microsoft / GitHub.** Only for people who already exist in
-  OpsDesk: the first sign-in whose **verified** email matches a user links
-  that account; afterwards the linked account is trusted even if its email
-  changes. One account per provider per user; a user can use several
-  providers plus a password.
+- **Adding someone.** A Super Admin opens **Administration → Users → New
+  user** (email, name, role, sites) and picks how they'll sign in:
+  - **Set a starting password** — no email is sent; tell them the password
+    securely. At their first sign-in OpsDesk makes them choose their own
+    before anything else (the API refuses every other request until they
+    do, so this can't be skipped from the browser).
+  - **Email an invite link** (valid 3 days, single use) to choose their own.
+- **Forgotten password.** "Forgot password?" on the login page emails a
+  1-hour reset link, or a Super Admin uses **Set password** on the user's
+  row (signs them out everywhere; they choose their own at next sign-in).
+  Admins change their own password from the account menu → **Change
+  password**, like everyone else.
+- **Rules.** At least 12 characters, scrypt hashes, never shown to admins or
+  written to logs/audit. 5 wrong passwords lock the account for 15 minutes;
+  login routes are also rate limited per IP. Any password change signs the
+  user out everywhere else.
 - **Machines** (site collector, worker) use **API tokens** (`odk_...`)
   created under Users → **Tokens** for a dedicated service account. A token
   acts as that account (same role and sites), is shown once, and can be
-  revoked instantly. There is no email-only / passwordless login any more.
+  revoked instantly. Machine tokens are never blocked by a pending password
+  change.
 
-Every sign-in, failure, lockout, invite, reset, identity link and token
+Every sign-in, failure, lockout, invite, reset, password change and token
 change is an audit event (`USER_PASSWORD_LOGIN`, `USER_LOGIN_FAILED`,
 `USER_LOCKED_OUT`, `USER_INVITE_SENT`, `USER_PASSWORD_RESET_SENT`,
-`USER_PASSWORD_SET`, `USER_SOCIAL_LOGIN`, `USER_SOCIAL_LOGIN_REJECTED`,
-`USER_IDENTITY_LINKED`, `API_TOKEN_CREATED`, `API_TOKEN_REVOKED`).
+`USER_PASSWORD_SET`, `USER_PASSWORD_SET_BY_ADMIN`, `USER_PASSWORD_CHANGED`,
+`USER_PASSWORD_CHANGE_FAILED`, `API_TOKEN_CREATED`, `API_TOKEN_REVOKED`).
 
-**Email (needed for invites and resets).** Set on the **worker**:
-`SMTP_HOST`, `SMTP_PORT` (587 STARTTLS or 465 with `SMTP_SECURE=true`),
-`SMTP_USER`, `SMTP_PASS` (from the secret manager), `MAIL_FROM`. The API
-needs `REDIS_URL` to queue emails. Without SMTP the worker prints emails to
-its log; without Redis the admin screen says so and shows the link to copy
-and send by hand. Verify: send yourself a reset link from the login page.
+**Email (needed for invites and resets, not for admin-set passwords).** Set
+on the **worker**: `SMTP_HOST`, `SMTP_PORT` (587 STARTTLS or 465 with
+`SMTP_SECURE=true`), `SMTP_USER`, `SMTP_PASS` (from the secret manager),
+`MAIL_FROM`. The API needs `REDIS_URL` to queue emails. Without SMTP the
+worker prints emails to its log; without Redis the admin screen says so and
+shows the link to copy and send by hand. Verify: send yourself a reset link
+from the login page.
 
-**Connecting providers.** Each needs the API's callback URL,
-`<API_PUBLIC_URL>/api/v1/auth/social/<provider>/callback`, where
-`API_PUBLIC_URL` is the API origin the browser uses (same host as the web
-app's `VITE_API_BASE_URL`). Put the secrets in the secret manager; a
-provider switches on when both its `*_CLIENT_ID` and `*_CLIENT_SECRET` are
-set, then restart the API.
-
-- **Google** — Google Cloud Console → APIs & Services → Credentials →
-  Create OAuth client ID → _Web application_. Authorized redirect URI: the
-  callback above with `google`. (First configure the OAuth consent screen:
-  internal for a Google Workspace org, or external with your domain.) Set
-  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
-- **Microsoft** — Entra admin center → App registrations → New
-  registration. Supported account types: _this organizational directory
-  only_ (or _personal Microsoft accounts only_). Redirect URI (Web): the
-  callback with `microsoft`. Certificates & secrets → New client secret.
-  Set `MICROSOFT_CLIENT_ID` (Application ID), `MICROSOFT_CLIENT_SECRET`,
-  and `MICROSOFT_TENANT_ID` = your Directory (tenant) ID, or `consumers`
-  for personal accounts. `common`/`organizations` are refused on purpose:
-  any company's Microsoft admin could set an account's email to one of
-  your users' and sign in as them.
-- **GitHub** — GitHub → Settings → Developer settings → OAuth Apps → New
-  OAuth App (create it under the JSAN organization). Authorization callback
-  URL: the callback with `github`. Generate a client secret. Set
-  `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`. Only the account's
-  **verified primary** email is used for matching. (GitHub Enterprise
-  Server: also `GITHUB_WEB_URL`, `GITHUB_API_URL`.)
-
-Verify: `GET /api/v1/auth/providers` lists the provider and the login page
-shows its button; sign in with a test user.
-
-**Refused social sign-in** — the login page shows why (`?social_error=`):
-
-| Reason                 | Fix                                                                        |
-| ---------------------- | -------------------------------------------------------------------------- |
-| `not_provisioned`      | Add the user with exactly the email the provider sends.                    |
-| `inactive`             | Reactivate the user.                                                       |
-| `identity_mismatch`    | Another account from that provider is already linked (see below).          |
-| `email_unverified`     | They must verify the email with the provider first.                        |
-| `email_missing`        | The provider didn't release an email (check the app's scopes/permissions). |
-| `invalid_state`        | Blocked cookies or a sign-in left open >10 minutes; retry.                 |
-| `provider_unavailable` | The API can't reach the provider — check outbound HTTPS from the API.      |
-
-**Unlinking a social account** (someone changed Google/GitHub accounts).
-No UI yet — SQL, with the reason in the change ticket:
-
-```sql
-DELETE FROM user_identities
-WHERE provider = 'github'
-  AND user_id = (SELECT id FROM users WHERE email = 'person@example.com');
-```
+**Refused sign-in**: "Invalid email or password" is the same answer for a
+wrong password and an unknown email (on purpose). "Too many failed attempts"
+→ wait 15 minutes, or reset the password. "This account is deactivated" →
+reactivate the user.
 
 **Offboarding**: deactivate the user (takes effect on their next request,
 including their API tokens) and revoke any API tokens you no longer need.

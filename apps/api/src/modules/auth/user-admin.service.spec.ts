@@ -17,7 +17,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   isActive: true,
   passwordSetAt: null as Date | null,
   lockedUntil: null as Date | null,
-  identities: [] as { provider: string }[],
+  mustChangePassword: false,
   createdAt: new Date("2026-09-01"),
   updatedAt: new Date("2026-09-01"),
   siteAccess: [{ siteId: "site-b" }, { siteId: "site-a" }],
@@ -72,6 +72,7 @@ function makeService(opts: { existing?: unknown; clash?: unknown; blockers?: unk
       purpose: "INVITE",
       emailQueued: true,
     }),
+    setPasswordByAdmin: jest.fn().mockResolvedValue(undefined),
   } as unknown as PasswordAuthService;
   return {
     service: new UserAdminService(prisma, audit, events, passwords),
@@ -84,17 +85,15 @@ function makeService(opts: { existing?: unknown; clash?: unknown; blockers?: unk
 }
 
 describe("UserAdminService.list / findOne", () => {
-  it("reports sign-in methods without exposing secrets; site ids sorted", async () => {
+  it("reports password status without exposing secrets; site ids sorted", async () => {
     const { service } = makeService({
-      existing: row({
-        passwordSetAt: new Date(),
-        identities: [{ provider: "github" }, { provider: "google" }],
-      }),
+      existing: row({ passwordSetAt: new Date(), mustChangePassword: true }),
     });
     const view = await service.findOne("user-1");
+    expect(view).not.toHaveProperty("socialProviders");
     expect(view).toMatchObject({
       hasPassword: true,
-      socialProviders: ["github", "google"],
+      mustChangePassword: true,
       lockedUntil: null,
       allSites: false,
       siteIds: ["site-a", "site-b"],
@@ -163,6 +162,43 @@ describe("UserAdminService.create", () => {
     );
   });
 
+  it("with a starting password: sets it (must change at first sign-in) and sends no email", async () => {
+    const { service, passwords } = makeService();
+    const view = await service.create(
+      {
+        email: "new@example.com",
+        displayName: "New",
+        role: UserRole.SITE_ENGINEER,
+        password: "rack four cable green",
+      },
+      ACTOR,
+    );
+    expect(passwords.setPasswordByAdmin).toHaveBeenCalledWith(
+      "new-1",
+      "rack four cable green",
+      ACTOR,
+    );
+    expect(passwords.sendSignInLink).not.toHaveBeenCalled();
+    expect(view.invite).toBeNull();
+  });
+
+  it("refuses a weak starting password before creating anything", async () => {
+    const { service, tx, passwords } = makeService();
+    await expect(
+      service.create(
+        {
+          email: "new@example.com",
+          displayName: "New",
+          role: UserRole.SITE_ENGINEER,
+          password: "short",
+        },
+        ACTOR,
+      ),
+    ).rejects.toThrow(/at least 12/);
+    expect(tx.user.create).not.toHaveBeenCalled();
+    expect(passwords.setPasswordByAdmin).not.toHaveBeenCalled();
+  });
+
   it("refuses a duplicate email (case-insensitive) with 409", async () => {
     const { service, tx } = makeService({ clash: { id: "other" } });
     await expect(
@@ -185,6 +221,34 @@ describe("UserAdminService.create", () => {
         ACTOR,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe("UserAdminService.setPassword", () => {
+  it("sets another user's password through the password service", async () => {
+    const { service, passwords } = makeService();
+    const view = await service.setPassword("user-1", "rack four cable green", ACTOR);
+    expect(passwords.setPasswordByAdmin).toHaveBeenCalledWith(
+      "user-1",
+      "rack four cable green",
+      ACTOR,
+    );
+    expect(view.id).toBe("user-1");
+  });
+
+  it("refuses an admin's own account (they use Change password)", async () => {
+    const { service, passwords } = makeService();
+    await expect(service.setPassword("admin-1", "rack four cable green", ACTOR)).rejects.toThrow(
+      /Change password/,
+    );
+    expect(passwords.setPasswordByAdmin).not.toHaveBeenCalled();
+  });
+
+  it("404s an unknown user", async () => {
+    const { service } = makeService({ existing: null });
+    await expect(
+      service.setPassword("nope", "rack four cable green", ACTOR),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
 

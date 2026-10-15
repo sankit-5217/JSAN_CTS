@@ -10,8 +10,11 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControlLabel,
   MenuItem,
   Paper,
+  Radio,
+  RadioGroup,
   Stack,
   Table,
   TableBody,
@@ -36,7 +39,8 @@ interface AdminUser {
   role: string;
   isActive: boolean;
   hasPassword: boolean;
-  socialProviders: string[];
+  /** An admin set the password; they choose their own at next sign-in. */
+  mustChangePassword: boolean;
   lockedUntil: string | null;
   allSites: boolean;
   siteIds: string[];
@@ -49,11 +53,7 @@ interface SignInLinkResult {
   emailQueued: boolean;
 }
 
-const PROVIDER_LABEL: Record<string, string> = {
-  google: "Google",
-  microsoft: "Microsoft",
-  github: "GitHub",
-};
+const MIN_PASSWORD = 12;
 
 interface Site {
   id: string;
@@ -98,8 +98,9 @@ function errorText(err: unknown): string {
 
 /**
  * User administration (Super Admin only — the API enforces it; the nav just
- * hides the link for everyone else). Provisioning here is what lets someone
- * sign in with SSO: logins only ever match users that already exist.
+ * hides the link for everyone else). Sign-in is email + password only: an
+ * admin adds someone with a starting password (they choose their own at first
+ * sign-in) or emails them an invite link to choose one.
  */
 export function UsersPage() {
   const currentUserId = decodeJwtPayload(getStoredToken() ?? "")?.sub ?? null;
@@ -118,6 +119,8 @@ export function UsersPage() {
     result?: SignInLinkResult;
   } | null>(null);
   const [tokensFor, setTokensFor] = useState<AdminUser | null>(null);
+  const [passwordFor, setPasswordFor] = useState<AdminUser | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refetch = useCallback(() => {
     setError(null);
@@ -214,6 +217,11 @@ export function UsersPage() {
           Couldn't load users: {error}
         </Alert>
       )}
+      {notice && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setNotice(null)}>
+          {notice}
+        </Alert>
+      )}
 
       {users === null && !error ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
@@ -282,16 +290,20 @@ export function UsersPage() {
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                        {u.hasPassword && <Chip size="small" variant="outlined" label="Password" />}
-                        {u.socialProviders.map((p) => (
-                          <Chip
-                            key={p}
-                            size="small"
-                            variant="outlined"
-                            label={PROVIDER_LABEL[p] ?? p}
-                          />
-                        ))}
-                        {!u.hasPassword && u.socialProviders.length === 0 && (
+                        {u.hasPassword && !u.mustChangePassword && (
+                          <Chip size="small" variant="outlined" label="Password" />
+                        )}
+                        {u.mustChangePassword && (
+                          <Tooltip title="Signs in with the password you set, then must choose their own.">
+                            <Chip
+                              size="small"
+                              color="info"
+                              variant="outlined"
+                              label="Must change password"
+                            />
+                          </Tooltip>
+                        )}
+                        {!u.hasPassword && (
                           <Typography variant="caption" color="text.secondary">
                             Invite pending
                           </Typography>
@@ -326,6 +338,13 @@ export function UsersPage() {
                         >
                           <Button size="small" onClick={() => setLinkFor({ user: u })}>
                             {u.hasPassword ? "Reset link" : "Invite"}
+                          </Button>
+                        </Tooltip>
+                      )}
+                      {u.isActive && !isSelf && (
+                        <Tooltip title="Set their password yourself (no email); they choose their own at next sign-in">
+                          <Button size="small" onClick={() => setPasswordFor(u)}>
+                            Set password
                           </Button>
                         </Tooltip>
                       )}
@@ -364,7 +383,12 @@ export function UsersPage() {
           onSaved={(created) => {
             setEditing(null);
             refetch();
-            if (created) setLinkFor({ user: created, result: created.invite });
+            if (created?.invite) setLinkFor({ user: created, result: created.invite });
+            else if (created) {
+              setNotice(
+                `${created.displayName} can now sign in as ${created.email} with the password you set. Tell them the password; they'll choose their own at first sign-in.`,
+              );
+            }
           }}
         />
       )}
@@ -379,6 +403,19 @@ export function UsersPage() {
         />
       )}
       {tokensFor && <ApiTokensDialog user={tokensFor} onClose={() => setTokensFor(null)} />}
+      {passwordFor && (
+        <SetPasswordDialog
+          user={passwordFor}
+          onClose={() => setPasswordFor(null)}
+          onDone={() => {
+            setNotice(
+              `Password set for ${passwordFor.displayName}. They've been signed out and will choose their own at next sign-in.`,
+            );
+            setPasswordFor(null);
+            refetch();
+          }}
+        />
+      )}
       {toggling && (
         <ToggleActiveDialog
           user={toggling}
@@ -424,8 +461,11 @@ function UserDialog({
   sites: Site[];
   isSelf: boolean;
   onClose: () => void;
-  onSaved: (created?: AdminUser & { invite: SignInLinkResult }) => void;
+  onSaved: (created?: AdminUser & { invite: SignInLinkResult | null }) => void;
 }) {
+  const [method, setMethod] = useState<"password" | "invite">("password");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [email, setEmail] = useState(user?.email ?? "");
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [role, setRole] = useState(user?.role ?? "SITE_ENGINEER");
@@ -436,7 +476,11 @@ function UserDialog({
 
   const allSites = ALL_SITES_ROLES.includes(role);
   const selectedSites = sites.filter((s) => siteIds.includes(s.id));
-  const canSave = email.trim() !== "" && displayName.trim() !== "" && !saving;
+  const passwordOk =
+    user !== null ||
+    method === "invite" ||
+    (password.length >= MIN_PASSWORD && confirm === password);
+  const canSave = email.trim() !== "" && displayName.trim() !== "" && passwordOk && !saving;
 
   const save = async () => {
     setSaving(true);
@@ -444,12 +488,10 @@ function UserDialog({
     setBlockers([]);
     try {
       if (!user) {
-        const created = await apiPost<AdminUser & { invite: SignInLinkResult }>("/admin/users", {
-          email,
-          displayName,
-          role,
-          siteIds,
-        });
+        const created = await apiPost<AdminUser & { invite: SignInLinkResult | null }>(
+          "/admin/users",
+          { email, displayName, role, siteIds, ...(method === "password" ? { password } : {}) },
+        );
         onSaved(created);
         return;
       } else {
@@ -502,7 +544,7 @@ function UserDialog({
             helperText={
               user
                 ? "Changing it cancels any invite or reset link not used yet."
-                : "They'll get an invite here to choose a password. Google/Microsoft/GitHub sign-ins are matched on this address too."
+                : "They sign in with this email."
             }
           />
           <TextField
@@ -548,6 +590,36 @@ function UserDialog({
               )}
             />
           )}
+          {!user && (
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                How will they sign in?
+              </Typography>
+              <RadioGroup
+                value={method}
+                onChange={(e) => setMethod(e.target.value as "password" | "invite")}
+              >
+                <FormControlLabel
+                  value="password"
+                  control={<Radio size="small" />}
+                  label="Set a starting password (I'll tell them; they change it at first sign-in)"
+                />
+                <FormControlLabel
+                  value="invite"
+                  control={<Radio size="small" />}
+                  label="Email them an invite link to choose their own password"
+                />
+              </RadioGroup>
+              {method === "password" && (
+                <PasswordFields
+                  password={password}
+                  confirm={confirm}
+                  onPassword={setPassword}
+                  onConfirm={setConfirm}
+                />
+              )}
+            </Box>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions>
@@ -556,6 +628,104 @@ function UserDialog({
         </Button>
         <Button variant="contained" onClick={save} disabled={!canSave}>
           {saving ? "Saving…" : user ? "Save" : "Create user"}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+/** New password + confirmation, with the length rule shown as you type. */
+function PasswordFields({
+  password,
+  confirm,
+  onPassword,
+  onConfirm,
+}: {
+  password: string;
+  confirm: string;
+  onPassword: (v: string) => void;
+  onConfirm: (v: string) => void;
+}) {
+  const tooShort = password.length > 0 && password.length < MIN_PASSWORD;
+  const mismatch = confirm.length > 0 && confirm !== password;
+  return (
+    <Stack spacing={1.5} sx={{ mt: 1 }}>
+      <TextField
+        label="Starting password"
+        type="password"
+        autoComplete="new-password"
+        value={password}
+        onChange={(e) => onPassword(e.target.value)}
+        error={tooShort}
+        helperText={`At least ${MIN_PASSWORD} characters. Share it with them securely (not in a group chat).`}
+        fullWidth
+      />
+      <TextField
+        label="Confirm password"
+        type="password"
+        autoComplete="new-password"
+        value={confirm}
+        onChange={(e) => onConfirm(e.target.value)}
+        error={mismatch}
+        helperText={mismatch ? "Doesn't match" : " "}
+        fullWidth
+      />
+    </Stack>
+  );
+}
+
+/** Admin sets another user's password (no email): signs them out, change required at next sign-in. */
+function SetPasswordDialog({
+  user,
+  onClose,
+  onDone,
+}: {
+  user: AdminUser;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canSave = password.length >= MIN_PASSWORD && confirm === password && !busy;
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await apiPost(`/admin/users/${user.id}/password`, { password });
+      onDone();
+    } catch (err) {
+      setError(errorText(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onClose={busy ? undefined : onClose} fullWidth maxWidth="xs">
+      <DialogTitle>Set password for {user.displayName}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1.5} sx={{ mt: 0.5 }}>
+          <Typography variant="body2" color="text.secondary">
+            {user.email} will be signed out everywhere and must choose their own password the next
+            time they sign in. No email is sent.
+          </Typography>
+          {error && <Alert severity="error">{error}</Alert>}
+          <PasswordFields
+            password={password}
+            confirm={confirm}
+            onPassword={setPassword}
+            onConfirm={setConfirm}
+          />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button variant="contained" onClick={save} disabled={!canSave}>
+          {busy ? "Saving…" : "Set password"}
         </Button>
       </DialogActions>
     </Dialog>

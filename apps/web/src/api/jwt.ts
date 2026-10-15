@@ -7,6 +7,8 @@ export interface JwtPayload {
   role: string;
   iat: number;
   exp: number;
+  /** Present while an admin-set password must be replaced (the API enforces it). */
+  pwc?: boolean;
 }
 
 /**
@@ -39,5 +41,13 @@ export function getCurrentUserRole(): string | null {
 
 /** Where a freshly signed-in user lands — clients get their own portal. */
 export function landingPathFor(accessToken: string): string {
-  return decodeJwtPayload(accessToken)?.role === "CLIENT_MANAGER_VIEWER" ? "/client/home" : "/";
+  const payload = decodeJwtPayload(accessToken);
+  if (payload?.pwc) return "/auth/change-password";
+  return payload?.role === "CLIENT_MANAGER_VIEWER" ? "/client/home" : "/";
+}
+
+/** True when the stored session must change its admin-set password first (UX only). */
+export function passwordChangeRequired(): boolean {
+  const token = getStoredToken();
+  return Boolean(token && decodeJwtPayload(token)?.pwc);
 }

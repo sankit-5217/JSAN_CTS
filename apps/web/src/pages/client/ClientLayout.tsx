@@ -4,7 +4,7 @@ import { alpha } from "@mui/material/styles";
 import { AccountMenu, roleMeta } from "../../components/AccountMenu";
 import { NotificationBell } from "../../components/NotificationBell";
 import { getStoredToken, signOut } from "../../api/client";
-import { decodeJwtPayload, getCurrentUserRole } from "../../api/jwt";
+import { decodeJwtPayload, getCurrentUserRole, passwordChangeRequired } from "../../api/jwt";
 import { theme } from "../../theme/theme";
 
 function BrandMark() {
@@ -37,6 +37,9 @@ export function ClientLayout() {
   const location = useLocation();
   if (!getStoredToken()) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+  if (passwordChangeRequired()) {
+    return <Navigate to="/auth/change-password" replace />;
   }
   // A staff member who wanders onto a /client/* URL gets sent back to the
   // internal console rather than seeing a portal built for someone else's

@@ -164,8 +164,8 @@ function BrandMark({ height = 24, on = "dark" }: { height?: number; on?: "dark" 
 }
 
 /**
- * Sign-in page (signed-out landing site). The sign-in itself — password,
- * Google / Microsoft / GitHub, password reset — lives in SignInCard.
+ * Sign-in page (signed-out landing site). The sign-in itself — email +
+ * password, password reset — lives in SignInCard.
  */
 export function LoginPage() {
   // Contact form is decorative — nothing on a real page should look
@@ -364,7 +364,7 @@ export function LoginPage() {
           </Stack>
 
           <Typography sx={{ mt: 4, fontSize: 12, color: "text.disabled" }}>
-            Sign in with your password, or with Google, Microsoft or GitHub.
+            Sign in with the email and password from your OpsDesk administrator.
           </Typography>
         </Box>
 

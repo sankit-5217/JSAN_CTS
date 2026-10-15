@@ -41,7 +41,7 @@ import { AccountMenu, roleMeta } from "./components/AccountMenu";
 import { NotificationBell } from "./components/NotificationBell";
 import { SoundControl } from "./notifications/SoundControl";
 import { getStoredToken, signOut } from "./api/client";
-import { decodeJwtPayload, getCurrentUserRole } from "./api/jwt";
+import { decodeJwtPayload, getCurrentUserRole, passwordChangeRequired } from "./api/jwt";
 import { theme } from "./theme/theme";
 import { ClientHomePage } from "./pages/client/ClientHomePage";
 import { ClientLayout } from "./pages/client/ClientLayout";
@@ -65,7 +65,7 @@ import { KnowledgeDetailPage } from "./pages/KnowledgeDetailPage";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { LoginPage } from "./pages/LoginPage";
 import { SetPasswordPage } from "./pages/SetPasswordPage";
-import { SocialCallbackPage } from "./pages/SocialCallbackPage";
+import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { UsersPage } from "./pages/UsersPage";
 import { MonitoringPage } from "./pages/MonitoringPage";
 import { NotificationSoundsPage } from "./pages/NotificationSoundsPage";
@@ -418,6 +418,10 @@ function AuthenticatedLayout() {
   if (!getStoredToken()) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
+  // An admin-set password must be replaced first (the API enforces it too).
+  if (passwordChangeRequired()) {
+    return <Navigate to="/auth/change-password" replace />;
+  }
   // The client role gets a purpose-built portal (ClientLayout), not the
   // internal ops console — none of the fourteen modules below are theirs.
   if (getCurrentUserRole() === "CLIENT_MANAGER_VIEWER") {
@@ -440,7 +444,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/auth/callback" element={<SocialCallbackPage />} />
+      <Route path="/auth/change-password" element={<ChangePasswordPage />} />
       <Route path="/auth/set-password" element={<SetPasswordPage />} />
       <Route element={<ClientLayout />}>
         <Route path="/client" element={<Navigate to="/client/home" replace />} />

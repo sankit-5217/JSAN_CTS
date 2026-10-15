@@ -24,8 +24,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    * staying valid until their token expires (least-privilege, spec §6).
    */
   async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
-    // Other tokens signed with the same secret (e.g. the social sign-in
-    // cookie) carry no user subject — never let them through as a session.
+    // Any other token signed with the same secret carries no user subject —
+    // never let it through as a session.
     if (typeof payload?.sub !== "string" || !payload.sub) {
       throw new UnauthorizedException("Not an access token");
     }
@@ -38,6 +38,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (payload.sv !== user.sessionVersion) {
       throw new UnauthorizedException("Session has been signed out");
     }
-    return { id: user.id, email: user.email, role: user.role, isActive: user.isActive };
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      isActive: user.isActive,
+      mustChangePassword: user.mustChangePassword,
+    };
   }
 }

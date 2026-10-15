@@ -25,7 +25,7 @@ const normalizeEmail = ({ value }: { value: unknown }) =>
 export class CreateAdminUserDto {
   @ApiProperty({
     example: "person@jsan.example",
-    description: "Their sign-in email; also how Google/Microsoft/GitHub accounts are matched",
+    description: "Their sign-in email",
   })
   @Transform(normalizeEmail)
   @IsEmail()
@@ -53,6 +53,16 @@ export class CreateAdminUserDto {
   @ArrayMaxSize(500)
   @IsUUID("all", { each: true })
   siteIds?: string[];
+
+  @ApiProperty({
+    required: false,
+    description:
+      "Starting password (at least 12 characters). Given: no email is sent and the user must change it at first sign-in. Omitted: they're emailed an invite link to choose one.",
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 128)
+  password?: string;
 }
 
 export class UpdateAdminUserDto {

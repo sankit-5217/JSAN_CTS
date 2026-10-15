@@ -1,15 +1,20 @@
-import { Body, Controller, HttpCode, Post } from "@nestjs/common";
-import { ApiOperation, ApiTags } from "@nestjs/swagger";
+import { Body, Controller, HttpCode, Post, UseGuards } from "@nestjs/common";
+import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { AuthService } from "./auth.service";
+import { AllowWhilePasswordChangeRequired } from "./decorators/allow-while-password-change-required.decorator";
+import { CurrentUser } from "./decorators/current-user.decorator";
 import {
+  ChangePasswordDto,
   ForgotPasswordDto,
   PasswordLoginDto,
   PasswordTokenDto,
   SetPasswordDto,
 } from "./dto/password.dto";
+import { JwtAuthGuard } from "./guards/jwt-auth.guard";
 import { PasswordAuthService } from "./password-auth.service";
+import { AuthenticatedUser } from "./types/jwt-payload.type";
 
 /**
  * Email + password sign-in. Tokens travel in request bodies (never URLs),
@@ -58,6 +63,29 @@ export class PasswordAuthController {
   @ApiOperation({ summary: "Choose a password from an invite/reset link; signs you in" })
   async set(@Body() dto: SetPasswordDto, @CorrelationId() correlationId?: string) {
     const user = await this.passwords.setPassword(dto.token, dto.password, correlationId);
+    return this.authService.issueToken(user);
+  }
+
+  @Post("password/change")
+  @HttpCode(200)
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @AllowWhilePasswordChangeRequired()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: "Change your own password (required after an admin set it); returns a fresh session",
+  })
+  async change(
+    @Body() dto: ChangePasswordDto,
+    @CurrentUser() current: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    const user = await this.passwords.changePassword(
+      current.id,
+      dto.currentPassword,
+      dto.newPassword,
+      correlationId,
+    );
     return this.authService.issueToken(user);
   }
 }

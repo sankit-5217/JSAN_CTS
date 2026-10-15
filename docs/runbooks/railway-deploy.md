@@ -63,8 +63,7 @@ values use Railway references so they follow domain/credential changes:
   `REDIS_URL=${{Redis.REDIS_URL}}`, `API_PUBLIC_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}`,
   `WEB_APP_URL=https://${{web.RAILWAY_PUBLIC_DOMAIN}}`, `S3_ENDPOINT`, `S3_REGION`,
   `S3_BUCKET`, `S3_FORCE_PATH_STYLE=false`, and secrets `JWT_SECRET`,
-  `INTEGRATION_SECRETS_KEY`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`,
-  `GOOGLE_CLIENT_ID/SECRET`, `GITHUB_CLIENT_ID/SECRET`.
+  `INTEGRATION_SECRETS_KEY`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`.
 - **worker**: `NODE_ENV=production`, `REDIS_URL=${{Redis.REDIS_URL}}`, Gmail
   SMTP (`SMTP_HOST/PORT/SECURE`, secrets `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`).
   Outbound SMTP works because JSAN Projects is on the Pro plan (Railway blocks
@@ -108,16 +107,12 @@ needs an SSH key registered with Railway (`railway ssh keys add`).
 3. Create sites in the UI; give each site a support calendar (SLA business
    hours need one).
 
-## Social sign-in
+## Sign-in
 
-Register these callback URLs with each provider:
-
-- Google (Cloud Console → OAuth client → Authorized redirect URIs):
-  `https://api-production-8f7e.up.railway.app/api/v1/auth/social/google/callback`
-- GitHub (Developer settings → OAuth App → Authorization callback URL):
-  `https://api-production-8f7e.up.railway.app/api/v1/auth/social/github/callback`
-
-Microsoft sign-in is off (no credentials set).
+Email + password only (Google / GitHub sign-in removed 2026-10-15). Admins
+add users under Administration → Users with a starting password or an
+emailed invite. The old `GOOGLE_*` / `GITHUB_*` / `MICROSOFT_*` variables
+are no longer read and were removed from the api service.
 
 ## Zabbix
 

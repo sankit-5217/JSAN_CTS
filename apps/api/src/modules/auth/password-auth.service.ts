@@ -1,9 +1,16 @@
-import { BadRequestException, Injectable, Logger, UnauthorizedException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { User } from "@prisma/client";
 import { randomBytes } from "crypto";
 import { AccountMailPublisher } from "../../common/notifications/account-mail.publisher";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import { readAuthConfig } from "./auth.config";
 import {
@@ -12,7 +19,7 @@ import {
   passwordPolicyProblem,
   verifyPassword,
 } from "./password-hasher";
-import { sha256 } from "./social/social-identity.service";
+import { sha256 } from "./token-hash";
 
 export type PasswordTokenPurpose = "INVITE" | "RESET";
 
@@ -38,8 +45,9 @@ export interface SignInLinkResult {
 /**
  * Email + password sign-in (spec §17: no *weak* password store — scrypt
  * hashes, a length-first policy, per-account lockout, per-IP rate limits,
- * audited). Admins never see or set passwords: people choose their own via
- * a single-use emailed link (invite or reset).
+ * audited). People choose their own password via a single-use emailed link
+ * (invite or reset), or a Super Admin sets a starting password that the user
+ * must replace at first sign-in. Admins never see a password.
  */
 @Injectable()
 export class PasswordAuthService {
@@ -242,6 +250,7 @@ export class PasswordAuthService {
         data: {
           passwordHash,
           passwordSetAt: now,
+          mustChangePassword: false,
           failedLoginCount: 0,
           lockedUntil: null,
           sessionVersion: { increment: 1 },
@@ -259,6 +268,106 @@ export class PasswordAuthService {
         tx,
       );
       return user;
+    });
+  }
+
+  /**
+   * A Super Admin sets a user's starting password (no email needed). The
+   * user is signed out everywhere, any pending invite/reset link is
+   * cancelled, a lockout is cleared, and they must choose their own password
+   * at their next sign-in. The password itself is never logged or audited.
+   */
+  async setPasswordByAdmin(userId: string, password: string, actor: ActorContext): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException(`User ${userId} not found`);
+    if (!user.isActive) {
+      throw new BadRequestException(`${user.displayName} is inactive — reactivate them first`);
+    }
+    const problem = passwordPolicyProblem(password, user.email);
+    if (problem) throw new BadRequestException(problem);
+    const passwordHash = await hashPassword(password);
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.passwordToken.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          passwordHash,
+          passwordSetAt: now,
+          mustChangePassword: true,
+          failedLoginCount: 0,
+          lockedUntil: null,
+          sessionVersion: { increment: 1 },
+        },
+      });
+      await this.audit.record(
+        {
+          actorId: actor.actorId,
+          entityType: "USER",
+          entityId: userId,
+          action: "USER_PASSWORD_SET_BY_ADMIN",
+          after: { mustChangePassword: true },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+    });
+  }
+
+  /**
+   * A signed-in user replaces their password (required after an admin set
+   * it; allowed any time). Needs the current password; the new one must
+   * meet the policy and differ from it. Signs out every other session.
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    correlationId?: string,
+  ): Promise<User> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.isActive) throw new UnauthorizedException("Sign in again");
+    if (!user.passwordHash || !(await verifyPassword(currentPassword, user.passwordHash))) {
+      await this.audit.record({
+        actorId: user.id,
+        entityType: "USER",
+        entityId: user.id,
+        action: "USER_PASSWORD_CHANGE_FAILED",
+        after: { reason: "wrong_current_password" },
+        correlationId,
+      });
+      throw new BadRequestException("Your current password is not correct");
+    }
+    const problem = passwordPolicyProblem(newPassword, user.email);
+    if (problem) throw new BadRequestException(problem);
+    if (await verifyPassword(newPassword, user.passwordHash)) {
+      throw new BadRequestException("Choose a password different from your current one");
+    }
+    const passwordHash = await hashPassword(newPassword);
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: {
+          passwordHash,
+          passwordSetAt: now,
+          mustChangePassword: false,
+          sessionVersion: { increment: 1 },
+        },
+      });
+      await tx.passwordToken.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });
+      await this.audit.record(
+        {
+          actorId: user.id,
+          entityType: "USER",
+          entityId: user.id,
+          action: "USER_PASSWORD_CHANGED",
+          after: { wasRequired: user.mustChangePassword },
+          correlationId,
+        },
+        tx,
+      );
+      return updated;
     });
   }
 

@@ -1,10 +1,12 @@
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:3000/api/v1";
 
-// The app JWT lives here whichever way the user signed in: password
-// (SignInCard) or Google/Microsoft/GitHub (SocialCallbackPage, after the
-// API's social callback). Every request reads it back from this one key.
+// The app JWT from password sign-in (SignInCard), an invite/reset link
+// (SetPasswordPage) or a password change. Every request reads it back from
+// this one key.
 const TOKEN_STORAGE_KEY = "opsdesk_token";
+
+export const CHANGE_PASSWORD_PATH = "/auth/change-password";
 
 export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_STORAGE_KEY);
@@ -18,11 +20,6 @@ export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   // Tidy up the key the retired SSO flow used.
   localStorage.removeItem("opsdesk_auth_method");
-}
-
-/** Full-page navigation target that starts a Google/Microsoft/GitHub sign-in. */
-export function socialLoginUrl(provider: string): string {
-  return `${API_BASE_URL}/auth/social/${encodeURIComponent(provider)}/login`;
 }
 
 export function signOut(): void {
@@ -69,6 +66,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
+    // An admin set this user's password: the API refuses everything until
+    // they choose their own, so send them there from wherever they are.
+    if (
+      res.status === 403 &&
+      (body as { code?: unknown } | null)?.code === "PASSWORD_CHANGE_REQUIRED" &&
+      window.location.pathname !== CHANGE_PASSWORD_PATH
+    ) {
+      window.location.assign(CHANGE_PASSWORD_PATH);
+    }
     throw new ApiError(`${init?.method ?? "GET"} ${path} failed: ${res.status}`, res.status, body);
   }
   if (res.status === 204) {

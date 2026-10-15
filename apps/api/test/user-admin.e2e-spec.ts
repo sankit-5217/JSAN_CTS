@@ -70,7 +70,7 @@ describe("User admin API (e2e)", () => {
       displayName: "New Person",
       isActive: true,
       hasPassword: false,
-      socialProviders: [],
+      mustChangePassword: false,
       allSites: false,
       siteIds: [fx.site.id],
     });

@@ -17,6 +17,7 @@ import { CorrelationId } from "../../common/decorators/correlation-id.decorator"
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { Roles } from "./decorators/roles.decorator";
 import { ApiTokensService } from "./api-tokens.service";
+import { AdminSetPasswordDto } from "./dto/password.dto";
 import {
   CreateAdminUserDto,
   CreateApiTokenDto,
@@ -58,7 +59,10 @@ export class UserAdminController {
   }
 
   @Post()
-  @ApiOperation({ summary: "Add a user and email them an invite to choose a password" })
+  @ApiOperation({
+    summary:
+      "Add a user: with a starting password (changed at first sign-in), or emailed an invite to choose one",
+  })
   create(
     @Body() dto: CreateAdminUserDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -123,6 +127,21 @@ export class UserAdminController {
     @CorrelationId() correlationId?: string,
   ) {
     return this.userAdmin.sendSignInLink(id, { actorId: user.id, correlationId });
+  }
+
+  @Post(":id/password")
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      "Set a user's password (no email); signs them out and they must change it at next sign-in",
+  })
+  setPassword(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: AdminSetPasswordDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.userAdmin.setPassword(id, dto.password, { actorId: user.id, correlationId });
   }
 
   @Get(":id/api-tokens")
