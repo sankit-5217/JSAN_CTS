@@ -16,7 +16,7 @@ import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { KIT_DIR, OUT_DIR, loadConfig, parseArgs } from "./lib/config.mjs";
-import { validateInventory } from "./lib/inventory.mjs";
+import { deviceTemplates, validateInventory, zabbixHostSpec } from "./lib/inventory.mjs";
 import { opsdeskClient } from "./lib/opsdesk.mjs";
 import { WEBHOOK_USER_GROUP, zabbixCentral, zabbixClient, zabbixVersion } from "./lib/zabbix.mjs";
 
@@ -110,7 +110,7 @@ if (!problems.length) {
   if (!action || action.status !== "0") fail('Zabbix action "Send problems to OpsDesk" is missing or disabled — run setup-central.mjs');
 
   // Templates exist?
-  for (const t of new Set(devices.map((d) => d.template))) {
+  for (const t of new Set(devices.flatMap(deviceTemplates))) {
     const [tpl] = await zbx("template.get", { filter: { host: [t] }, output: ["templateid"] });
     if (!tpl) fail(`Zabbix template "${t}" not found${t.startsWith("OpsDesk") ? " — run setup-central.mjs" : ""}`);
   }
@@ -252,34 +252,11 @@ if (proxy) {
 }
 
 for (const d of devices) {
-  const templateid = await central.templateId(d.template);
-  const tags = [
-    { tag: "site", value: SITE },
-    { tag: "ci", value: d.host },
-    ...(d.kind ? [{ tag: "device", value: d.kind }] : []),
-  ];
-  const macros = [];
-  const interfaces = [];
-  if (d.iface === "snmp") {
-    const s = d.snmp;
-    if (s.version === 2) {
-      macros.push({ macro: "{$SNMP_COMMUNITY}", value: s.community, type: 1 });
-      interfaces.push({ type: 2, main: 1, useip: isIpLike(d.address) ? 1 : 0, ip: isIpLike(d.address) ? d.address : "", dns: isIpLike(d.address) ? "" : d.address,
-        port: String(d.port), details: { version: 2, bulk: 1, community: "{$SNMP_COMMUNITY}" } });
-    } else {
-      macros.push(
-        { macro: "{$SNMPV3.USER}", value: s.user, type: 0 },
-        { macro: "{$SNMPV3.AUTH}", value: s.authPass, type: 1 },
-        { macro: "{$SNMPV3.PRIV}", value: s.privPass, type: 1 },
-      );
-      interfaces.push({ type: 2, main: 1, useip: isIpLike(d.address) ? 1 : 0, ip: isIpLike(d.address) ? d.address : "", dns: isIpLike(d.address) ? "" : d.address,
-        port: String(d.port), details: { version: 3, bulk: 1, securityname: "{$SNMPV3.USER}", securitylevel: 2,
-          authprotocol: s.authProtocol, authpassphrase: "{$SNMPV3.AUTH}", privprotocol: s.privProtocol, privpassphrase: "{$SNMPV3.PRIV}", contextname: s.context } });
-    }
-  } else if (d.iface === "ping") {
-    interfaces.push({ type: 1, main: 1, useip: isIpLike(d.address) ? 1 : 0, ip: isIpLike(d.address) ? d.address : "", dns: isIpLike(d.address) ? "" : d.address, port: "10050" });
-  }
-  const common = { name: d.name, groups: [{ groupid }], templates: [{ templateid }], tags, monitored_by: 1, proxyid };
+  const spec = zabbixHostSpec(d, SITE);
+  const templates = [];
+  for (const name of spec.templates) templates.push({ templateid: await central.templateId(name) });
+  const { tags, macros, interfaces } = spec;
+  const common = { name: d.name, groups: [{ groupid }], templates, tags, monitored_by: 1, proxyid };
   const existing = existingHosts.get(d.host);
   if (existing) {
     // Secret macros are write-only in Zabbix; re-send them so a corrected
@@ -329,9 +306,6 @@ console.log("  install-proxy.sh  the client runs: sudo bash install-proxy.sh pro
 console.log("  CLIENT-README.txt instructions for the client");
 console.log(`Then check: node tools/onboarding-kit/check-site.mjs --site ${SITE}`);
 
-function isIpLike(a) {
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(a) || a.includes(":");
-}
 
 function clientReadme(servers) {
   return `JSAN OpsDesk monitoring — setup for ${args.name} (${SITE})

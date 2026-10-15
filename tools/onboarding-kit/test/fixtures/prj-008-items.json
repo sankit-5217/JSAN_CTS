@@ -1,0 +1,1642 @@
+[
+ {
+  "site": "ID",
+  "category": "Server",
+  "name": "Dell PowerEdge R7715_Rack Server1",
+  "model": "Dell R7715",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "server-dell"
+ },
+ {
+  "site": "ID",
+  "category": "Server",
+  "name": "Dell PowerEdge R7715_Rack Server2",
+  "model": "Dell R7715",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "server-dell"
+ },
+ {
+  "site": "ID",
+  "category": "Network",
+  "name": "Firewall_FG-201G",
+  "model": "FG-201G",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "firewall-fortigate"
+ },
+ {
+  "site": "ID",
+  "category": "Power",
+  "name": "APC UPS SRT3000XLI",
+  "model": "SRT3000XLI",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "ups-apc"
+ },
+ {
+  "site": "ID",
+  "category": "Power",
+  "name": "APC UPS Battery SRT96BP",
+  "model": "SRT96BP",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "ups-battery"
+ },
+ {
+  "site": "ID",
+  "category": "Network",
+  "name": "KVM Switch ATEN CS84U",
+  "model": "CS84U",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "kvm"
+ },
+ {
+  "site": "ID",
+  "category": "Monitor",
+  "name": "Monitor HP 322pe",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "monitor"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Mouse HP Wired Desktop 320M",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Keyboard HP Wired Desktop 320K",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Network",
+  "name": "Mikrotik CCR2004-16G-2S+",
+  "model": "",
+  "owner": "CBN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "isp-cpe"
+ },
+ {
+  "site": "ID",
+  "category": "Network",
+  "name": "Mikrotik CCR2116-12G-4S+",
+  "model": "",
+  "owner": "Lintasartha",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "isp-cpe"
+ },
+ {
+  "site": "ID",
+  "category": "Power",
+  "name": "PDU APC AR6020A",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "pdu-basic"
+ },
+ {
+  "site": "ID",
+  "category": "Power",
+  "name": "PDU APC AP9559",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Storage Racks",
+  "status": "InStock",
+  "expect": "pdu-basic"
+ },
+ {
+  "site": "ID",
+  "category": "CCTV",
+  "name": "DVR Hikvision iDS-7204HQHI-M1/XT 4-CH",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "cctv-hikvision"
+ },
+ {
+  "site": "ID",
+  "category": "CCTV",
+  "name": "Camera Hikvision DS-2CE76K0T-EXLPF",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "cctv-analog-camera"
+ },
+ {
+  "site": "ID",
+  "category": "CCTV",
+  "name": "Camera Hikvision DS-2CE76K0T-EXLPF",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "cctv-analog-camera"
+ },
+ {
+  "site": "ID",
+  "category": "Network",
+  "name": "UPS Network Management Card APC 3 AP9640",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Rack",
+  "status": "InUse",
+  "expect": "ups-nmc"
+ },
+ {
+  "site": "ID",
+  "category": "AC",
+  "name": "AC Portable Midea MPF2-09CRN1",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "ac"
+ },
+ {
+  "site": "ID",
+  "category": "Computer",
+  "name": "Desktop HP Elite Tower 800 G9",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "workstation"
+ },
+ {
+  "site": "ID",
+  "category": "Computer",
+  "name": "Laptop: Dell Pro 16 PC16250 16",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "workstation"
+ },
+ {
+  "site": "ID",
+  "category": "Printer",
+  "name": "Printer HP Colour LaserJet Pro MFP 3303sdw",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "printer-network"
+ },
+ {
+  "site": "ID",
+  "category": "Scanner",
+  "name": "Barcode Scanner Panda BT888-1D-USB",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "scanner"
+ },
+ {
+  "site": "ID",
+  "category": "Monitor",
+  "name": "Monitor Dell P2225H",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "monitor"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Headphone JBL Tune 520BT",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Docking Orico DD28U3",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Printer",
+  "name": "Barcode Printer iDPRT iD880",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "printer-label"
+ },
+ {
+  "site": "ID",
+  "category": "Scanner",
+  "name": "Barcode Scanner Wireless Honeywell 1472G2D",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "scanner"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Wired Keyboard Logitech K120",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Mouse Logitech M100",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Webcam-Logitech Brio 100",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Wired Keyboard Logitech K120",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Storage Racks",
+  "status": "InStock",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Electronic scale MS-K07",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "AC",
+  "name": "AC Portable Midea MPF2-09CRN1",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "ac"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "SanDisk Ultra USB 32GB",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Network",
+  "name": "Wireless Access Point Ruijie RG-AP640-L",
+  "model": "",
+  "owner": "CBN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "wifi-ap"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Wired Mouse Logitech M100",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Docking S/ USB HUB 3.0USB 3.0 HubAcer ODK350",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Storage",
+  "name": "SSD Samsung 870 EVO V-NAND SATA 4TB",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Storage Racks",
+  "status": "InStock",
+  "expect": "storage-disk"
+ },
+ {
+  "site": "ID",
+  "category": "Network",
+  "name": "SFP Modul +10G LR 3COPTICS",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Storage Racks",
+  "status": "InStock",
+  "expect": "sfp"
+ },
+ {
+  "site": "ID",
+  "category": "Storage",
+  "name": "SSD Dell SOLIDIGM D3-S4520 480GB",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Storage Racks",
+  "status": "InStock",
+  "expect": "storage-disk"
+ },
+ {
+  "site": "ID",
+  "category": "Storage",
+  "name": "SSD Dell Micron MTFDDAK480TGA 480GB",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Storage Racks",
+  "status": "InStock",
+  "expect": "storage-disk"
+ },
+ {
+  "site": "ID",
+  "category": "Access Control",
+  "name": "Access Door Finger and Card ZKTECO X6",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "access-terminal"
+ },
+ {
+  "site": "ID",
+  "category": "Rack",
+  "name": "Rack Server APC 42U AR3100 NetShelter SX",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "rack"
+ },
+ {
+  "site": "ID",
+  "category": "Cable",
+  "name": "Cable ATEN USB KVM 2L-5202U",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "ID",
+  "category": "Cable",
+  "name": "10G DAC Passive Direct Attach Cable SFP-10G-PC02",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "ID",
+  "category": "Cable",
+  "name": "Cable Power APC AP9877 C19 C20",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "ID",
+  "category": "Cable",
+  "name": "Cable HDMI",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "ID",
+  "category": "Furniture",
+  "name": "TACTIX Tool Box / Tool Cabinet 60 cm / 23-1/2 in",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "furniture"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "SSD Caddies",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Furniture",
+  "name": "Locker Size 46cm x 44cm x 4 (Full Size 90 x 40 x 100 cm)",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "furniture"
+ },
+ {
+  "site": "ID",
+  "category": "Cable",
+  "name": "Power Extension Boards Philips Power Strip CHP2164 6 Socket",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "ID",
+  "category": "Cable",
+  "name": "C13 - C14 Power Cord Cables",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "ID",
+  "category": "Cable",
+  "name": "Cat 6A Cables - 10G (2-3mitrs) (2 per Server)",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "ID",
+  "category": "Cable",
+  "name": "CEE7/7, Type F (Local Power Cable) to C13",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Cage Nut",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "ID",
+  "category": "Peripheral",
+  "name": "Screwdriver kit",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Server",
+  "name": "Dell PowerEdge R7715_Rack Server1",
+  "model": "Dell R7715",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "server-dell"
+ },
+ {
+  "site": "TH",
+  "category": "Server",
+  "name": "Dell PowerEdge R7715_Rack Server2",
+  "model": "Dell R7715",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "server-dell"
+ },
+ {
+  "site": "TH",
+  "category": "Network",
+  "name": "Firewall_FG-201G",
+  "model": "FG-201G",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "firewall-fortigate"
+ },
+ {
+  "site": "TH",
+  "category": "Power",
+  "name": "APC UPS SRT3000XLI",
+  "model": "SRT3000XLI",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "ups-apc"
+ },
+ {
+  "site": "TH",
+  "category": "Power",
+  "name": "APC UPS Battery SRT96BP",
+  "model": "APC SRT96BP",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "ups-battery"
+ },
+ {
+  "site": "TH",
+  "category": "Network",
+  "name": "KVM Switch ATEN CS84U",
+  "model": "CS84U",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "kvm"
+ },
+ {
+  "site": "TH",
+  "category": "Monitor",
+  "name": "Dell Monitor Professional P2425H 23.8 inch IPS FHD 1920",
+  "model": "P2425H",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "monitor"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "P7-001235 LOGITECH MK120 MEDIA KEYBOARD WITH MOUSE",
+  "model": "MK120",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Network",
+  "name": "Mikrotik CCR2116-12G-4S+",
+  "model": "CCR2116-12G-4S+",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "router-mikrotik"
+ },
+ {
+  "site": "TH",
+  "category": "Power",
+  "name": "1810-AP-P9565 APC RACK PDU BASIC 1U,16A 208/230V_(AP9565)",
+  "model": "1810-AP-P9565 APC RACK PDU BASIC 1U",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "pdu-basic"
+ },
+ {
+  "site": "TH",
+  "category": "CCTV",
+  "name": "HIKVISION-NVR 4-ch PoE 1U K Series AcuSense 4K NVR (DS-7604NXI-K1/4P(D) Harddisk 2TB",
+  "model": "DS-7604NXI-K1/4P(D)",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "cctv-hikvision"
+ },
+ {
+  "site": "TH",
+  "category": "CCTV",
+  "name": "2MP Dome IP Camera (DS-2CD1123G2-LIU2.8) ACCESS CONTROL 2 POINTS",
+  "model": "DS-2CD1123G2-LIU2.8",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "cctv-hikvision"
+ },
+ {
+  "site": "TH",
+  "category": "CCTV",
+  "name": "2MP Dome IP Camera (DS-2CD1123G2-LIU2.8) ACCESS CONTROL 2 POINTS",
+  "model": "DS-2CD1123G2-LIU2.8",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "cctv-hikvision"
+ },
+ {
+  "site": "TH",
+  "category": "Network",
+  "name": "UPS Network Management Card APC 3 AP9640",
+  "model": "AP9640",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "ups-nmc"
+ },
+ {
+  "site": "TH",
+  "category": "Computer",
+  "name": "Desktop HP Elite Tower 800 G9",
+  "model": "Dell Tower ECT1250",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "workstation"
+ },
+ {
+  "site": "TH",
+  "category": "Computer",
+  "name": "Laptop: Dell Pro 16 PC16250 16",
+  "model": "PC16250",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "workstation"
+ },
+ {
+  "site": "TH",
+  "category": "Printer",
+  "name": "Printer HP Colour LaserJet Pro MFP 3303sdw",
+  "model": "3303sdw",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "",
+  "expect": "printer-network"
+ },
+ {
+  "site": "TH",
+  "category": "Scanner",
+  "name": "Wireless 2D Barcode Scanner (Soonmark)",
+  "model": "MLH20G",
+  "owner": "JSAN",
+  "location": "Storage Racks",
+  "status": "",
+  "expect": "scanner"
+ },
+ {
+  "site": "TH",
+  "category": "Monitor",
+  "name": "Dell Monitor Professional P2425H 23.8 inch IPS FHD 1920",
+  "model": "P2425H",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "monitor"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "Headphone JBL Tune 520BT",
+  "model": "NA",
+  "owner": "JSAN",
+  "location": null,
+  "status": "NA",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "Docking Orico DD28U3",
+  "model": "DD28U3-C",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Printer",
+  "name": "BARIGAN Thermal Label Printer GG-IN10",
+  "model": "GG-IN10(T)",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "printer-label"
+ },
+ {
+  "site": "TH",
+  "category": "Scanner",
+  "name": "Barcode Scanner Wireless Honeywell 1472G2D",
+  "model": "NA",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "scanner"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "P7-001235 LOGITECH MK120 MEDIA KEYBOARD WITH MO",
+  "model": "K120",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "P7-001235 LOGITECH MK120 MEDIA KEYBOARD WITH MO",
+  "model": "K120",
+  "owner": "JSAN",
+  "location": "Desk Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "Mouse Logitech M100",
+  "model": "B100",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "Mouse Logitech M100",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "Webcam-Logitech Brio 100",
+  "model": "VU0072",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "Wired Keyboard Logitech K120",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "Electronic scale MS-K07",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "AC",
+  "name": "AC Portable Midea MPF2-09CRN1",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "ac"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "SanDisk Ultra USB 32GB",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Network",
+  "name": "Wireless Access Point Ruijie RG-AP640-L",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "wifi-ap"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "Wired Mouse Logitech M100",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "Docking S/ USB HUB 3.0USB 3.0 HubAcer ODK350",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Storage",
+  "name": "SSD Samsung 870 EVO V-NAND SATA 4TB",
+  "model": "MZ-77E4T0",
+  "owner": "JSAN",
+  "location": "Storage Racks",
+  "status": "NoUse",
+  "expect": "storage-disk"
+ },
+ {
+  "site": "TH",
+  "category": "Network",
+  "name": "SFP Modul +10G LR 3COPTICS",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "sfp"
+ },
+ {
+  "site": "TH",
+  "category": "Storage",
+  "name": "SSD Dell SOLIDIGM D3-S4520 480GB",
+  "model": "NA",
+  "owner": "JSAN",
+  "location": null,
+  "status": "NA",
+  "expect": "storage-disk"
+ },
+ {
+  "site": "TH",
+  "category": "Storage",
+  "name": "SSD Dell Micron MTFDDAK480TGA 480GB",
+  "model": "NA",
+  "owner": "JSAN",
+  "location": null,
+  "status": "NA",
+  "expect": "storage-disk"
+ },
+ {
+  "site": "TH",
+  "category": "Access Control",
+  "name": "Access Door Finger and Card ZKTECO X6",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "access-terminal"
+ },
+ {
+  "site": "TH",
+  "category": "Rack",
+  "name": "Rack Server APC 42U AR3100 NetShelter SX",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "rack"
+ },
+ {
+  "site": "TH",
+  "category": "Cable",
+  "name": "Cable ATEN USB KVM 2L-5202U",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "cable"
+ },
+ {
+  "site": "TH",
+  "category": "Cable",
+  "name": "10G DAC Passive Direct Attach Cable SFP-10G-PC02",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "cable"
+ },
+ {
+  "site": "TH",
+  "category": "Cable",
+  "name": "Cable Power APC AP9877 C19 C20",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "cable"
+ },
+ {
+  "site": "TH",
+  "category": "Cable",
+  "name": "Cable HDMI",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "cable"
+ },
+ {
+  "site": "TH",
+  "category": "Furniture",
+  "name": "TACTIX Tool Box / Tool Cabinet 60 cm / 23-1/2 in",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "furniture"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "SSD Caddies",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Furniture",
+  "name": "Locker Size 46cm x 44cm x 4 (Full Size 90 x 40 x 100 cm)",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "furniture"
+ },
+ {
+  "site": "TH",
+  "category": "Cable",
+  "name": "Power Extension Boards Philips Power Strip CHP2164 6 Socket",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "cable"
+ },
+ {
+  "site": "TH",
+  "category": "Cable",
+  "name": "C13 - C14 Power Cord Cables",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "cable"
+ },
+ {
+  "site": "TH",
+  "category": "Cable",
+  "name": "Cat 6A Cables - 10G (2-3mitrs) (2 per Server)",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "cable"
+ },
+ {
+  "site": "TH",
+  "category": "Cable",
+  "name": "CEE7/7, Type F (Local Power Cable) to C13",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "cable"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "Cage Nut",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "peripheral"
+ },
+ {
+  "site": "TH",
+  "category": "Peripheral",
+  "name": "Screwdriver kit",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "",
+  "expect": "peripheral"
+ },
+ {
+  "site": "SA",
+  "category": "Server",
+  "name": "Dell PowerEdge R7715_Rack Server1",
+  "model": "Dell R7715",
+  "owner": "JSAN",
+  "location": "Server Room Rack",
+  "status": "InUse",
+  "expect": "server-dell"
+ },
+ {
+  "site": "SA",
+  "category": "Server",
+  "name": "Dell PowerEdge R7715_Rack Server2",
+  "model": "Dell R7715",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "server-dell"
+ },
+ {
+  "site": "SA",
+  "category": "Network",
+  "name": "Firewall_ FG-201G",
+  "model": "FG-201G",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "firewall-fortigate"
+ },
+ {
+  "site": "SA",
+  "category": "Power",
+  "name": "APC SRT 3KVA 230V",
+  "model": "SRT3000XLi",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "ups-apc"
+ },
+ {
+  "site": "SA",
+  "category": "Power",
+  "name": "APC SRT Battery 3KVA BP",
+  "model": "SRT96BP",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "ups-battery"
+ },
+ {
+  "site": "SA",
+  "category": "Network",
+  "name": "KVM Switch ATEN CS84U",
+  "model": "CS84U",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "kvm"
+ },
+ {
+  "site": "SA",
+  "category": "Monitor",
+  "name": "Monitor DELL",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "monitor"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "Keyboard HP wireless",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "SA",
+  "category": "Network",
+  "name": "Mikrotik CCR2116-12G-4S+",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "router-mikrotik"
+ },
+ {
+  "site": "SA",
+  "category": "Network",
+  "name": "Mikrotik CCR2004-1G-12S+2XS",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "router-mikrotik"
+ },
+ {
+  "site": "SA",
+  "category": "Power",
+  "name": "PDU APC AP6020A",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "pdu-basic"
+ },
+ {
+  "site": "SA",
+  "category": "CCTV",
+  "name": "HIKVISION H.265+",
+  "model": "DS-2CD1123G0E-I",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "cctv-hikvision"
+ },
+ {
+  "site": "SA",
+  "category": "CCTV",
+  "name": "HIKVISION H.265+",
+  "model": "DS-2CD1123G0E-I",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "cctv-hikvision"
+ },
+ {
+  "site": "SA",
+  "category": "CCTV",
+  "name": "HIKVISION DS-7100 Series Network Video Recorder",
+  "model": "DS-7104NI-Q1/4P",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "cctv-hikvision"
+ },
+ {
+  "site": "SA",
+  "category": "CCTV",
+  "name": "HIKVISION Face Recognition Terminal",
+  "model": "DS-K1T342MFWX-E1",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "access-terminal"
+ },
+ {
+  "site": "SA",
+  "category": "CCTV",
+  "name": "HIKVISION Face Recognition Terminal",
+  "model": "DS-K1T342MFWX-E2",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "access-terminal"
+ },
+ {
+  "site": "SA",
+  "category": "Network",
+  "name": "UPS Network Management Card APC 3 AP9640",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "ups-nmc"
+ },
+ {
+  "site": "SA",
+  "category": "Computer",
+  "name": "Desktop HP Elite Tower intel Core i7",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "workstation"
+ },
+ {
+  "site": "SA",
+  "category": "Computer",
+  "name": "Laptop: Dell Pro 16 PC16250",
+  "model": "P134F",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "workstation"
+ },
+ {
+  "site": "SA",
+  "category": "Monitor",
+  "name": "Monitor DELL",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "monitor"
+ },
+ {
+  "site": "SA",
+  "category": "Printer",
+  "name": "Printer Hp Colour Laser Jet Pro MFP 3303sdw",
+  "model": "SHNGC-2201-01",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "printer-network"
+ },
+ {
+  "site": "SA",
+  "category": "Scanner",
+  "name": "Barcode Scanner Zebra DS 22 + Stand Base",
+  "model": "DS2278A",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "scanner"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "Headphone JLAB",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "Docking Orico DD28U3",
+  "model": "DD28U3",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "Logitech webcam",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "UPC PRIME A529M-K",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "SA",
+  "category": "Network",
+  "name": "Wireles Access point",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "InUse",
+  "expect": "wifi-ap"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "Wired keyboard Logitech K120",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "Wired Mouse Logitech M100",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "SA",
+  "category": "Storage",
+  "name": "SSD Samsung 870 EVO V-NAND SATA 4TB",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "InUse",
+  "expect": "storage-disk"
+ },
+ {
+  "site": "SA",
+  "category": "Network",
+  "name": "SFP Modul + 10G LR 3COPTICS",
+  "model": "SM331T",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "",
+  "expect": "sfp"
+ },
+ {
+  "site": "SA",
+  "category": "Storage",
+  "name": "SSD Dell SOLIDIGM D3-S4520 480GB",
+  "model": "",
+  "owner": "",
+  "location": null,
+  "status": "",
+  "expect": "storage-disk"
+ },
+ {
+  "site": "SA",
+  "category": "Storage",
+  "name": "SSD Dell Micron MTFDDAK480TGA 480GB",
+  "model": "",
+  "owner": "",
+  "location": null,
+  "status": "",
+  "expect": "storage-disk"
+ },
+ {
+  "site": "SA",
+  "category": "Access Control",
+  "name": "Exit Sensor 12VDC-NC/NO",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "access-wired"
+ },
+ {
+  "site": "SA",
+  "category": "Access Control",
+  "name": "CALL POINT MODELS BOPB",
+  "model": "AC-EBGG",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "access-wired"
+ },
+ {
+  "site": "SA",
+  "category": "Rack",
+  "name": "Rack Server APC 42U AR3100 Netshelter SX",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "rack"
+ },
+ {
+  "site": "SA",
+  "category": "Cable",
+  "name": "Cable ATEN USB KVM 2L-5202U",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "SA",
+  "category": "Cable",
+  "name": "10G SFP+ Passive Direct Attach Copper Twinax Cable",
+  "model": "64254",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "SA",
+  "category": "Cable",
+  "name": "CAT 6A Cables",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "SA",
+  "category": "Cable",
+  "name": "HP Elite tower 800 G9 power cable",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "",
+  "expect": "cable"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "4G LTE Mobile Wi-Fi",
+  "model": "M7350",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "lte-hotspot"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "Ceiling Mount Wi-Fi7 Access Point BE3600",
+  "model": "EAP723",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "wifi-ap"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "OMada PoE Injector",
+  "model": "POE150S",
+  "owner": "",
+  "location": "Server Room",
+  "status": "",
+  "expect": "poe-injector"
+ },
+ {
+  "site": "SA",
+  "category": "Cable",
+  "name": "OM4 Multimode Fiber Patch Cable",
+  "model": "40236",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "SA",
+  "category": "Cable",
+  "name": "Cable HDMI",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "SSD Caddies",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "SA",
+  "category": "Furniture",
+  "name": "Locker",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "furniture"
+ },
+ {
+  "site": "SA",
+  "category": "Cable",
+  "name": "Power extensions",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "SA",
+  "category": "Cable",
+  "name": "C13-C14 Power cord cable",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Office",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "SA",
+  "category": "Cable",
+  "name": "CEE7/7 Type F (Local Power Cable C13",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "cable"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "Cage Nut",
+  "model": "",
+  "owner": "JSAN",
+  "location": null,
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "SA",
+  "category": "Peripheral",
+  "name": "Screwdriver Kit",
+  "model": "",
+  "owner": "JSAN",
+  "location": "Server Room",
+  "status": "InUse",
+  "expect": "peripheral"
+ },
+ {
+  "site": "SA",
+  "category": "Furniture",
+  "name": "Tables",
+  "model": "",
+  "owner": "",
+  "location": null,
+  "status": "",
+  "expect": "furniture"
+ },
+ {
+  "site": "SA",
+  "category": "Furniture",
+  "name": "Chairs",
+  "model": "",
+  "owner": "",
+  "location": null,
+  "status": "",
+  "expect": "furniture"
+ }
+]

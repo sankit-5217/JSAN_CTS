@@ -24,6 +24,22 @@ export const DEVICE_TYPES = {
   "ping-only": { template: "ICMP Ping", ciType: "SERVICE", iface: "ping" },
   "server-linux": { template: "Linux by Zabbix agent active", ciType: "SERVER", iface: "agent-active" },
   "server-windows": { template: "Windows by Zabbix agent active", ciType: "SERVER", iface: "agent-active" },
+  // Added for the site inventory workbooks (see lib/coverage.mjs).
+  "server-idrac": { template: "Dell iDRAC by SNMP", ciType: "SERVER", iface: "snmp", kind: "server-bmc" },
+  "router-mikrotik": { template: "Mikrotik by SNMP", ciType: "SWITCH", iface: "snmp", kind: "router" },
+  "ups-apc": { template: "APC UPS by SNMP", ciType: "UPS", iface: "snmp" },
+  "wifi-ap": { template: "Network Generic Device by SNMP", ciType: "SERVICE", iface: "snmp", kind: "wifi-ap" },
+  printer: { template: "Generic by SNMP", ciType: "SERVICE", iface: "snmp", kind: "printer" },
+  "lte-hotspot": { template: "ICMP Ping", ciType: "CIRCUIT", iface: "ping", kind: "lte-backup" },
+  // Hikvision's template has no up/down check of its own, so ICMP Ping goes with it.
+  "cctv-hikvision": {
+    template: "ICMP Ping",
+    extraTemplates: ["Hikvision camera by HTTP"],
+    ciType: "SERVICE",
+    iface: "http",
+    kind: "cctv",
+  },
+  "workstation-windows": { template: "Windows by Zabbix agent active", ciType: "SERVICE", iface: "agent-active", kind: "workstation" },
 };
 
 export const CRITICALITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
@@ -35,6 +51,7 @@ const COLUMNS = [
   "host", "name", "type", "address", "port", "snmp_version", "snmp_community",
   "v3_user", "v3_auth_protocol", "v3_auth_pass", "v3_priv_protocol", "v3_priv_pass", "v3_context",
   "template", "manufacturer", "model", "criticality", "location",
+  "http_user", "http_pass", "inventory_number",
 ];
 
 /**
@@ -119,6 +136,7 @@ export function validateInventory(text, siteCode) {
       name: r.name,
       type: r.type,
       template: r.template || type.template,
+      extraTemplates: type.extraTemplates ?? [],
       ciType: type.ciType,
       kind: type.kind ?? null,
       iface: type.iface,
@@ -126,6 +144,7 @@ export function validateInventory(text, siteCode) {
       model: r.model || null,
       criticality,
       location: r.location || null,
+      inventoryNumber: r.inventory_number || null,
     };
 
     if (type.iface === "agent-active") {
@@ -178,7 +197,78 @@ export function validateInventory(text, siteCode) {
     } else if (r.snmp_community || r.v3_user) {
       warn(`SNMP credentials are ignored for type "${r.type}"`);
     }
+
+    if (type.iface === "http") {
+      // Read-only device API user (e.g. Hikvision ISAPI); the password is a Zabbix secret macro.
+      const port = r.port ? Number(r.port) : 80;
+      if (!Number.isInteger(port) || port < 1 || port > 65535) err(`port "${r.port}" is not valid`);
+      if (!r.http_user) err("http_user is required (a read-only user on the device)");
+      if ((r.http_pass ?? "").length < 8) err("http_pass must be at least 8 characters");
+      if (r.http_user === "admin") warn('http_user "admin" — create a separate read-only user for monitoring');
+      dev.port = port;
+      dev.http = { user: r.http_user, pass: r.http_pass };
+    } else if (r.http_user || r.http_pass) {
+      warn(`http_user/http_pass are ignored for type "${r.type}"`);
+    }
     devices.push(dev);
   });
   return { devices, errors, warnings };
+}
+
+/** True for an IPv4 or IPv6 literal (otherwise the address is a DNS name). */
+export function isIpLike(a) {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(a) || a.includes(":");
+}
+
+/** Every Zabbix template a device links: its main one plus any companions. */
+export function deviceTemplates(d) {
+  return [d.template, ...(d.extraTemplates ?? [])];
+}
+
+/**
+ * The Zabbix host for one validated device: tags (site, CMDB code, kind,
+ * where it sits), secret/user macros and the main interface. Template ids are
+ * resolved by the caller. Passwords only ever travel as secret macros (type 1).
+ */
+export function zabbixHostSpec(d, siteCode) {
+  const tags = [
+    { tag: "site", value: siteCode },
+    { tag: "ci", value: d.host },
+    ...(d.kind ? [{ tag: "device", value: d.kind }] : []),
+    ...(d.location ? [{ tag: "location", value: d.location }] : []),
+    ...(d.inventoryNumber ? [{ tag: "inventory", value: d.inventoryNumber }] : []),
+  ];
+  const macros = [];
+  const interfaces = [];
+  const addr = d.address ?? "";
+  const where = { useip: isIpLike(addr) ? 1 : 0, ip: isIpLike(addr) ? addr : "", dns: isIpLike(addr) ? "" : addr };
+  if (d.iface === "snmp") {
+    const s = d.snmp;
+    if (s.version === 2) {
+      macros.push({ macro: "{$SNMP_COMMUNITY}", value: s.community, type: 1 });
+      interfaces.push({ type: 2, main: 1, ...where, port: String(d.port), details: { version: 2, bulk: 1, community: "{$SNMP_COMMUNITY}" } });
+    } else {
+      macros.push(
+        { macro: "{$SNMPV3.USER}", value: s.user, type: 0 },
+        { macro: "{$SNMPV3.AUTH}", value: s.authPass, type: 1 },
+        { macro: "{$SNMPV3.PRIV}", value: s.privPass, type: 1 },
+      );
+      interfaces.push({ type: 2, main: 1, ...where, port: String(d.port), details: { version: 3, bulk: 1, securityname: "{$SNMPV3.USER}", securitylevel: 2,
+        authprotocol: s.authProtocol, authpassphrase: "{$SNMPV3.AUTH}", privprotocol: s.privProtocol, privpassphrase: "{$SNMPV3.PRIV}", contextname: s.context } });
+    }
+  } else if (d.iface === "ping") {
+    interfaces.push({ type: 1, main: 1, ...where, port: "10050" });
+  } else if (d.iface === "http") {
+    // The agent-type interface carries the address for ICMP ping; no agent is
+    // installed on the device. Zabbix doesn't expand {HOST.CONN} inside a user
+    // macro's value, so the ISAPI host is the literal address.
+    interfaces.push({ type: 1, main: 1, ...where, port: "10050" });
+    macros.push(
+      { macro: "{$HIKVISION_ISAPI_HOST}", value: addr, type: 0 },
+      { macro: "{$HIKVISION_ISAPI_PORT}", value: String(d.port ?? 80), type: 0 },
+      { macro: "{$USER}", value: d.http.user, type: 0 },
+      { macro: "{$PASSWORD}", value: d.http.pass, type: 1 },
+    );
+  }
+  return { tags, macros, interfaces, templates: deviceTemplates(d) };
 }

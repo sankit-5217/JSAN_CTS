@@ -51,14 +51,21 @@ setup-central.mjs  ──►  onboard-site.mjs --inventory devices.csv  ──�
 
 Columns: `host,name,type,address,port,snmp_version,snmp_community,v3_user,
 v3_auth_protocol,v3_auth_pass,v3_priv_protocol,v3_priv_pass,v3_context,
-manufacturer,model,criticality,location`. Lines starting with `#` are ignored.
+manufacturer,model,criticality,location,http_user,http_pass,inventory_number`.
+Lines starting with `#` are ignored.
 
 - `host` must start with the site code (`SITE04-FW-001`) and becomes both the
   Zabbix host name and the OpsDesk CMDB code.
 - `type`: `firewall-fortigate`, `firewall`, `switch`, `router`, `ups`, `pdu`,
   `wifi-controller`, `cctv-nvr`, `access-control`, `isp-link`, `generic-snmp`,
-  `ping-only`, `server-linux`, `server-windows`. `template` can override the
-  Zabbix template.
+  `ping-only`, `server-linux`, `server-windows`, and (for the site inventory
+  workbooks) `server-idrac`, `router-mikrotik`, `ups-apc`, `wifi-ap`, `printer`,
+  `lte-hotspot`, `cctv-hikvision`, `workstation-windows`. `template` can override
+  the Zabbix template.
+- `cctv-hikvision` needs `http_user`/`http_pass` (a read-only ISAPI user on the
+  device); it links ICMP Ping + "Hikvision camera by HTTP".
+- `location` and `inventory_number` become Zabbix host tags, so every alert
+  says where the device is and which asset it is.
 - SNMP: `snmp_version` 3 (default; `authPriv`, SHA256/AES128 unless given) or
   `2c` with `snmp_community`. Credentials are stored as **secret** Zabbix macros.
 - Wi-Fi, CCTV and access control are stored in the CMDB as `SERVICE` with the
@@ -79,6 +86,16 @@ Warnings (not fatal): SNMP v2c, well-known communities, MD5/SHA1/DES.
 
 Re-running `onboard-site.mjs` is safe: existing objects are updated, nothing is
 duplicated, and the proxy key stays the same unless `--rotate-psk` is given.
+
+## Coverage check for a site inventory workbook
+
+Before onboarding, check what Zabbix can watch in a site's asset workbook (.xlsx):
+
+```bash
+node tools/onboarding-kit/coverage-report.mjs --xlsx "<workbook>.xlsx" [--live]
+```
+
+Rubric, rules and results: `docs/runbooks/inventory-monitoring-coverage.md`.
 
 ## Client installer
 
@@ -103,7 +120,8 @@ node tools/onboarding-kit/onboard-site.mjs --site SITE03 --name "Acme Pune offic
 # copy out/SITE03/{install-proxy.sh,proxy.env} into the client machine and run the installer there
 node tools/onboarding-kit/check-site.mjs --site SITE03
 node tools/onboarding-kit/test/e2e-site03.mjs
-node --test tools/onboarding-kit/test/inventory.test.mjs
+node --test tools/onboarding-kit/test/inventory.test.mjs tools/onboarding-kit/test/coverage.test.mjs
+node --test tools/onboarding-kit/test/coverage.live.test.mjs   # needs a reachable Zabbix
 ```
 
 All WSL machines share one network, so the test proxy uses port 10063 instead
