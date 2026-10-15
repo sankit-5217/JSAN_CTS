@@ -1,4 +1,5 @@
 import { ApiError } from "./client";
+import { formatDateTime } from "../time/clock";
 
 // Mirrors ZABBIX_*_ROLES in apps/api/src/modules/monitoring/zabbix/zabbix.controller.ts.
 // UI-only show/hide; the API re-checks every request.
@@ -132,7 +133,7 @@ export function formatValue(raw: string | number | null, units: string): string 
     return `${(Math.sign(n) * v).toFixed(v < 10 && i > 0 ? 2 : 1)} ${steps[i]}${units}`;
   }
   if (units === "s" || units === "uptime") return formatAge(Math.round(n));
-  if (units === "unixtime") return new Date(n * 1000).toLocaleString();
+  if (units === "unixtime") return formatDateTime(n * 1000);
   const rounded = Number.isInteger(n) ? n.toString() : n.toFixed(Math.abs(n) < 10 ? 2 : 1);
   return units ? `${rounded} ${units}` : rounded;
 }

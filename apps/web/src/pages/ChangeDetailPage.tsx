@@ -16,6 +16,7 @@ import {
   Typography,
 } from "@mui/material";
 import { apiGet, apiPatch, apiPost } from "../api/client";
+import { formatDateTime } from "../time/clock";
 
 interface Change {
   id: string;
@@ -138,8 +139,7 @@ export function ChangeDetailPage() {
             {change.reason}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Window: {new Date(change.windowStart).toLocaleString()} →{" "}
-            {new Date(change.windowEnd).toLocaleString()}
+            Window: {formatDateTime(change.windowStart)} → {formatDateTime(change.windowEnd)}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Approver: {change.approverId ?? "not approved"} · Affected CIs:{" "}
@@ -187,7 +187,10 @@ export function ChangeDetailPage() {
                   You'll be recorded as the approver. A change can't be approved by whoever raised
                   it (separation of duties).
                 </Typography>
-                <Button variant="contained" onClick={() => call(() => apiPost(`/changes/${id}/approve`, {}))}>
+                <Button
+                  variant="contained"
+                  onClick={() => call(() => apiPost(`/changes/${id}/approve`, {}))}
+                >
                   Approve
                 </Button>
               </Stack>

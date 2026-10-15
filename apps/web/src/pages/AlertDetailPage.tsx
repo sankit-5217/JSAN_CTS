@@ -11,6 +11,7 @@ import {
   Typography,
 } from "@mui/material";
 import { apiGet } from "../api/client";
+import { formatDateTime } from "../time/clock";
 
 interface AlertRecord {
   id: string;
@@ -98,8 +99,8 @@ export function AlertDetailPage() {
           {row("Site", alert.siteId ?? "unresolved")}
           {row("CI", alert.ciId ?? "unresolved")}
           {row("Fingerprint", <code>{alert.fingerprint}</code>)}
-          {row("First seen", new Date(alert.firstSeenAt).toLocaleString())}
-          {row("Last seen", new Date(alert.lastSeenAt).toLocaleString())}
+          {row("First seen", formatDateTime(alert.firstSeenAt))}
+          {row("Last seen", formatDateTime(alert.lastSeenAt))}
           {row("Raw reference", alert.rawReference ?? "—")}
           {row(
             "Correlated incident",

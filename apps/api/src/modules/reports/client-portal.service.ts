@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { SITE_ARCHIVED } from "../sites/site-status";
 import { IncidentStatus, Priority } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
@@ -70,7 +71,7 @@ export class ClientPortalService {
   ): Promise<ClientPortalOverview> {
     const [sites, openBySite, tickets] = await Promise.all([
       this.prisma.site.findMany({
-        where: { id: { in: accessibleSiteIds } },
+        where: { id: { in: accessibleSiteIds }, status: { not: SITE_ARCHIVED } },
         select: {
           id: true,
           code: true,

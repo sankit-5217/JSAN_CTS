@@ -77,6 +77,9 @@ interface IssueTemplateFormProps {
   /** Who owns the ticket now, when they aren't in the group's roster. */
   currentOwner?: { id: string; displayName: string } | null;
   priorityHelper?: string;
+  /** No Template row: on the client's ticket page once the report exists
+   *  (the issue type is still editable on its own). */
+  hideTemplate?: boolean;
 }
 
 /**
@@ -103,6 +106,7 @@ export function IssueTemplateForm({
   locked = false,
   currentOwner,
   priorityHelper,
+  hideTemplate,
 }: IssueTemplateFormProps) {
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [ccInput, setCcInput] = useState("");
@@ -199,35 +203,39 @@ export function IssueTemplateForm({
         <Stack spacing={2}>
           {topLeft}
 
-          <FieldRow label="Template">
-            <TextField
-              select
-              size="small"
-              fullWidth
-              value={draft.templateId}
-              onChange={(e) => pickTemplate(e.target.value)}
-              disabled={locked}
-              helperText={
-                catalog.templates.length === 0
-                  ? "No templates configured yet — pick an issue type on the right"
-                  : mode === "create"
-                    ? "Fills a draft subject, description and defaults"
-                    : "Switching the template changes the issue type"
-              }
-              sx={selectSx}
-            >
-              {(mode === "create" || !draft.templateId) && (
-                <MenuItem value="" disabled={mode === "edit"}>
-                  <em>{mode === "create" ? "No template" : "None (issue type has no template)"}</em>
-                </MenuItem>
-              )}
-              {templateOptions.map((t) => (
-                <MenuItem key={t.value} value={t.value}>
-                  {t.label}
-                </MenuItem>
-              ))}
-            </TextField>
-          </FieldRow>
+          {!hideTemplate && (
+            <FieldRow label="Template">
+              <TextField
+                select
+                size="small"
+                fullWidth
+                value={draft.templateId}
+                onChange={(e) => pickTemplate(e.target.value)}
+                disabled={locked}
+                helperText={
+                  catalog.templates.length === 0
+                    ? "No templates configured yet — pick an issue type on the right"
+                    : mode === "create"
+                      ? "Fills a draft subject, description and defaults"
+                      : "Switching the template changes the issue type"
+                }
+                sx={selectSx}
+              >
+                {(mode === "create" || !draft.templateId) && (
+                  <MenuItem value="" disabled={mode === "edit"}>
+                    <em>
+                      {mode === "create" ? "No template" : "None (issue type has no template)"}
+                    </em>
+                  </MenuItem>
+                )}
+                {templateOptions.map((t) => (
+                  <MenuItem key={t.value} value={t.value}>
+                    {t.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </FieldRow>
+          )}
 
           <FieldRow label="Subject">
             <TextField

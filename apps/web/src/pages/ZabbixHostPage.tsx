@@ -42,6 +42,7 @@ import {
   zabbixErrorMessage,
 } from "../api/zabbix";
 import { AcknowledgeDialog } from "./ZabbixPage";
+import { formatTime } from "../time/clock";
 
 const RANGES = [
   { key: "1h", label: "1 h", seconds: 3600 },
@@ -260,9 +261,7 @@ export function ZabbixHostPage() {
                         ? formatDelta(Number(i.lastValue) - Number(i.previousValue), i.units)
                         : "—"}
                     </TableCell>
-                    <TableCell>
-                      {i.lastSeenAt ? new Date(i.lastSeenAt).toLocaleTimeString() : "never"}
-                    </TableCell>
+                    <TableCell>{i.lastSeenAt ? formatTime(i.lastSeenAt) : "never"}</TableCell>
                     <TableCell align="right">
                       {i.numeric && (
                         <Button

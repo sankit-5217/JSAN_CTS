@@ -1,5 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import { Site, UserRole } from "@prisma/client";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
+import { Prisma, Site, UserRole } from "@prisma/client";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { Paginated } from "../../common/types/paginated.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -10,6 +16,13 @@ import { CreateSiteDto } from "./dto/create-site.dto";
 import { CreateSupportCalendarDto } from "./dto/create-support-calendar.dto";
 import { CreateSupportGroupDto } from "./dto/create-support-group.dto";
 import { ListSitesQueryDto } from "./dto/list-sites-query.dto";
+import {
+  SITE_ACTIVE,
+  SITE_ARCHIVE_CHECK_EVENT,
+  SITE_ARCHIVED,
+  SiteArchiveBlocker,
+  SiteArchiveCheck,
+} from "./site-status";
 
 /**
  * Owns: sites, timezone, contacts, support calendars (spec §12).
@@ -20,10 +33,12 @@ export class SitesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
-   * `accessibleSiteIds`: `null` (or omitted) = unrestricted (caller has an
+   * Archived sites are left out unless `includeArchived` (Super Admin's
+   * Sites page). `accessibleSiteIds`: `null` (or omitted) = unrestricted (caller has an
    * "all sites" role, see AuthzService); an array = filter to exactly
    * those sites. List endpoints filter rather than 403 — a scoped user
    * asking for "all sites" should just see their sites, not get rejected.
@@ -34,7 +49,10 @@ export class SitesService {
   ): Promise<Paginated<Site>> {
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;
-    const where = accessibleSiteIds ? { id: { in: accessibleSiteIds } } : undefined;
+    const where: Prisma.SiteWhereInput = {
+      ...(accessibleSiteIds ? { id: { in: accessibleSiteIds } } : {}),
+      ...(query.includeArchived ? {} : { status: { not: SITE_ARCHIVED } }),
+    };
 
     const [items, total] = await Promise.all([
       this.prisma.site.findMany({ where, orderBy: { code: "asc" }, take: limit, skip: offset }),
@@ -74,6 +92,56 @@ export class SitesService {
         tx,
       );
       return site;
+    });
+  }
+
+  /**
+   * "Delete site": archives it (no hard delete — tickets, CIs, alerts and
+   * audit history point at it). Other modules may veto (e.g. open tickets);
+   * their reasons come back as `blockers` in a 409.
+   */
+  async archive(id: string, actor: ActorContext): Promise<Site> {
+    const before = await this.findOne(id);
+    if (before.status === SITE_ARCHIVED) return before;
+    const answers = await this.events.emitAsync(SITE_ARCHIVE_CHECK_EVENT, {
+      siteId: id,
+    } satisfies SiteArchiveCheck);
+    const blockers = (answers as (SiteArchiveBlocker | null)[]).filter(
+      (b): b is SiteArchiveBlocker => !!b,
+    );
+    if (blockers.length > 0) {
+      throw new ConflictException({
+        statusCode: 409,
+        message: `Site ${before.code} can't be deleted yet: ${blockers.map((b) => b.message).join("; ")}`,
+        blockers,
+      });
+    }
+    return this.setStatus(before, SITE_ARCHIVED, "SITE_ARCHIVED", actor);
+  }
+
+  /** Undo "Delete site": the site is back in lists and takes new work again. */
+  async restore(id: string, actor: ActorContext): Promise<Site> {
+    const before = await this.findOne(id);
+    if (before.status !== SITE_ARCHIVED) return before;
+    return this.setStatus(before, SITE_ACTIVE, "SITE_RESTORED", actor);
+  }
+
+  private setStatus(before: Site, status: string, action: string, actor: ActorContext) {
+    return this.prisma.$transaction(async (tx) => {
+      const after = await tx.site.update({ where: { id: before.id }, data: { status } });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Site",
+          entityId: before.id,
+          action,
+          before: { status: before.status },
+          after: { status: after.status },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return after;
     });
   }
 

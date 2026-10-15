@@ -6,6 +6,7 @@ import { SlaModule } from "../sla/sla.module";
 import { IncidentCustomerService } from "./incident-customer.service";
 import { IncidentsController } from "./incidents.controller";
 import { IncidentsService } from "./incidents.service";
+import { IncidentSiteChecksListener } from "./incident-site-checks.listener";
 import { IncidentUserChecksListener } from "./incident-user-checks.listener";
 import { IssueReportingController } from "./issue-reporting.controller";
 import { IssueReportingService } from "./issue-reporting.service";
@@ -43,6 +44,7 @@ import { IssueReportingService } from "./issue-reporting.service";
     IncidentsService,
     IncidentCustomerService,
     IncidentUserChecksListener,
+    IncidentSiteChecksListener,
     IssueReportingService,
   ],
   exports: [IncidentsService, IssueReportingService],

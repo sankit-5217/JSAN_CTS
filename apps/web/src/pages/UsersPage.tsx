@@ -31,6 +31,7 @@ import PersonAddAltOutlinedIcon from "@mui/icons-material/PersonAddAltOutlined";
 import { ApiError, apiGet, apiPatch, apiPost, apiPut, getStoredToken } from "../api/client";
 import { decodeJwtPayload } from "../api/jwt";
 import { roleMeta } from "../components/AccountMenu";
+import { formatDateTime, formatTime } from "../time/clock";
 
 interface AdminUser {
   id: string;
@@ -310,7 +311,7 @@ export function UsersPage() {
                         )}
                         {u.lockedUntil && (
                           <Tooltip
-                            title={`Too many wrong passwords — locked until ${new Date(u.lockedUntil).toLocaleTimeString()}. Sending a reset link lets them in sooner.`}
+                            title={`Too many wrong passwords — locked until ${formatTime(u.lockedUntil)}. Sending a reset link lets them in sooner.`}
                           >
                             <Chip size="small" color="warning" label="Locked" />
                           </Tooltip>
@@ -877,13 +878,13 @@ function SignInLinkDialog({
             {result.emailQueued ? (
               <Alert severity="success">
                 Queued to email to {user.email}. The link works once and expires{" "}
-                {new Date(result.expiresAt).toLocaleString()}. If it doesn&apos;t arrive, copy the
-                link below and send it to them yourself.
+                {formatDateTime(result.expiresAt)}. If it doesn&apos;t arrive, copy the link below
+                and send it to them yourself.
               </Alert>
             ) : (
               <Alert severity="warning">
                 The email couldn&apos;t be sent from here. Copy the link below and send it to{" "}
-                {user.email} yourself (it expires {new Date(result.expiresAt).toLocaleString()}).
+                {user.email} yourself (it expires {formatDateTime(result.expiresAt)}).
               </Alert>
             )}
             <CopyField label="Sign-in link (works once)" value={result.link} />

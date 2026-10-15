@@ -8,6 +8,7 @@ import { InboxService } from "../inbox/inbox.service";
 import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import { CustomerFeedbackDto, CustomerFeedbackOutcome } from "./dto/customer-feedback.dto";
 import { IncidentsService } from "./incidents.service";
+import { REPORT_FIELDS } from "./report-changes";
 
 export interface IncidentProgress {
   status: IncidentStatus;
@@ -21,6 +22,20 @@ export interface IncidentProgress {
   customerRepliedWhileWaiting: boolean;
   /** The reporter's answer to "is this fixed?" for the latest resolution. */
   feedback: { outcome: CustomerFeedbackOutcome; at: Date } | null;
+  /**
+   * Every edit the reporter made to their report after raising it, oldest
+   * first, for the conversation both portals show: who, when, and each
+   * field's old → new value. Edits saved before values were recorded list
+   * the changed fields only (from/to null, `detailed: false`).
+   */
+  reportEdits: ReportEdit[];
+}
+
+export interface ReportEdit {
+  at: Date;
+  by: { name: string; role: UserRole | null } | null;
+  detailed: boolean;
+  changes: { label: string; from: string | null; to: string | null }[];
 }
 
 /**
@@ -49,7 +64,10 @@ export class IncidentCustomerService {
     const incident = await this.incidents.findOneScoped(incidentId, user);
     const [events, owner, group] = await Promise.all([
       this.prisma.incidentEvent.findMany({
-        where: { incidentId, eventType: { in: ["STATUS_CHANGE", "CUSTOMER_FEEDBACK"] } },
+        where: {
+          incidentId,
+          eventType: { in: ["STATUS_CHANGE", "CUSTOMER_FEEDBACK", "REPORT_EDITED"] },
+        },
         orderBy: { createdAt: "asc" },
       }),
       incident.ownerUserId
@@ -70,6 +88,7 @@ export class IncidentCustomerService {
       { status: IncidentStatus.NEW, at: incident.createdAt },
     ];
     let feedback: IncidentProgress["feedback"] = null;
+    const editEvents: typeof events = [];
     for (const e of events) {
       const payload = (e.payload ?? {}) as Record<string, unknown>;
       if (e.eventType === "STATUS_CHANGE" && typeof payload.to === "string") {
@@ -79,8 +98,11 @@ export class IncidentCustomerService {
         }
       } else if (e.eventType === "CUSTOMER_FEEDBACK") {
         feedback = { outcome: payload.outcome as CustomerFeedbackOutcome, at: e.createdAt };
+      } else if (e.eventType === "REPORT_EDITED") {
+        editEvents.push(e);
       }
     }
+    const reportEdits = await this.describeReportEdits(editEvents);
 
     const last = milestones[milestones.length - 1];
     const waitingOnCustomerSince =
@@ -107,7 +129,45 @@ export class IncidentCustomerService {
       waitingOnCustomerSince,
       customerRepliedWhileWaiting,
       feedback,
+      reportEdits,
     };
+  }
+
+  /** REPORT_EDITED timeline entries → who/when/what for the conversation. */
+  private async describeReportEdits(
+    events: { actorId: string | null; createdAt: Date; payload: Prisma.JsonValue }[],
+  ): Promise<ReportEdit[]> {
+    if (events.length === 0) return [];
+    const actorIds = [...new Set(events.map((e) => e.actorId).filter((v): v is string => !!v))];
+    const actors = actorIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: actorIds } },
+          select: { id: true, displayName: true, role: true },
+        })
+      : [];
+    const byId = new Map(actors.map((a) => [a.id, a]));
+    const labelOf = new Map(REPORT_FIELDS.map((f) => [f.field as string, f.label]));
+    return events.map((e) => {
+      const payload = (e.payload ?? {}) as { changes?: unknown; fields?: unknown };
+      const actor = e.actorId ? byId.get(e.actorId) : undefined;
+      const by = actor ? { name: actor.displayName, role: actor.role } : null;
+      if (Array.isArray(payload.changes)) {
+        const changes = (payload.changes as { label?: unknown; from?: unknown; to?: unknown }[])
+          .filter((c) => typeof c?.label === "string")
+          .map((c) => ({
+            label: c.label as string,
+            from: typeof c.from === "string" ? c.from : null,
+            to: typeof c.to === "string" ? c.to : null,
+          }));
+        return { at: e.createdAt, by, detailed: true, changes };
+      }
+      const fields = Array.isArray(payload.fields) ? (payload.fields as unknown[]) : [];
+      const changes = fields
+        .map((f) => labelOf.get(String(f)))
+        .filter((l): l is string => !!l)
+        .map((label) => ({ label, from: null, to: null }));
+      return { at: e.createdAt, by, detailed: false, changes };
+    });
   }
 
   /**

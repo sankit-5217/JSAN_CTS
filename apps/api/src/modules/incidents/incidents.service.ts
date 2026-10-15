@@ -34,6 +34,8 @@ import { ownIncidentsFilter } from "./incident-visibility";
 import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import { SlaService } from "../sla/sla.service";
 import { isAllowedAttachment, MAX_ATTACHMENT_SIZE_BYTES } from "./attachment.constants";
+import { assertSiteAcceptsNewWork } from "../sites/site-status";
+import { REPORT_FIELDS, ReportNames, ReportValues, diffReport, idsToName } from "./report-changes";
 import { IssueReportingService } from "./issue-reporting.service";
 import {
   INCIDENT_CREATED_EVENT,
@@ -88,6 +90,19 @@ const CUSTOMER_FROZEN_STATUSES: IncidentStatus[] = [
   IncidentStatus.CANCELLED,
   IncidentStatus.DUPLICATE,
 ];
+
+/** The report as it will be after `data` is applied (undefined = unchanged). */
+function applyReportData(
+  before: Incident,
+  data: Prisma.IncidentUncheckedUpdateInput,
+): ReportValues {
+  const out = { ...before } as Record<string, unknown>;
+  for (const { field } of REPORT_FIELDS) {
+    const value = (data as Record<string, unknown>)[field];
+    if (value !== undefined) out[field] = value;
+  }
+  return out as unknown as ReportValues;
+}
 
 /** Field equality for the REPORT_EDITED timeline entry (arrays by content). */
 function sameValue(a: unknown, b: unknown): boolean {
@@ -372,6 +387,7 @@ export class IncidentsService {
     reportedByUserId?: string,
     intake?: IncidentIntake,
   ) {
+    await assertSiteAcceptsNewWork(this.prisma, dto.siteId);
     const incident = await this.prisma.$transaction((tx) =>
       this.createInTx(
         tx,
@@ -538,6 +554,7 @@ export class IncidentsService {
     user: AuthenticatedUser,
   ): Promise<Incident> {
     await this.assertSiteAccess(user, dto.siteId);
+    await assertSiteAcceptsNewWork(this.prisma, dto.siteId);
     await this.issueReporting.assertValidSelections(dto, { requireIssueType: true });
     const assignment = await this.issueReporting.resolveAssignment(
       dto.ownerGroupId,
@@ -780,10 +797,15 @@ export class IncidentsService {
     if (issueType && before.category === before.issueType) {
       data.category = issueType;
     }
+    // Old → new per field, with names: shown in the ticket's conversation
+    // to the client and the service desk (REPORT_EDITED timeline entry).
+    const preview = applyReportData(before, data);
+    const reportChanges = diffReport(before, preview, await this.reportNames(before, preview));
     const after = await this.persistUpdate(before, data, actor, {
       ownerChanged,
       priorityChanged,
       timelineEvent: "REPORT_EDITED",
+      timelinePayload: { changes: reportChanges },
     });
     const changes = await this.describeCustomerChanges(before, after);
     if (changes.length > 0) {
@@ -825,7 +847,13 @@ export class IncidentsService {
     before: Incident,
     data: Prisma.IncidentUncheckedUpdateInput,
     actor: ActorContext,
-    opts: { ownerChanged: boolean; priorityChanged: boolean; timelineEvent?: string },
+    opts: {
+      ownerChanged: boolean;
+      priorityChanged: boolean;
+      timelineEvent?: string;
+      /** Extra payload for the timeline entry (e.g. a report edit's old → new values). */
+      timelinePayload?: Record<string, unknown>;
+    },
   ): Promise<Incident> {
     const id = before.id;
     const after = await this.prisma.$transaction(async (tx) => {
@@ -857,7 +885,7 @@ export class IncidentsService {
               incidentId: id,
               eventType: opts.timelineEvent,
               actorId: actor.actorId,
-              payload: { fields } as Prisma.InputJsonValue,
+              payload: { fields, ...opts.timelinePayload } as Prisma.InputJsonValue,
             },
           });
         }
@@ -895,6 +923,29 @@ export class IncidentsService {
     }
     this.emitUpdated(after, actor);
     return after;
+  }
+
+  /** Group and user names for a report diff. */
+  private async reportNames(before: ReportValues, after: ReportValues): Promise<ReportNames> {
+    const { groupIds, userIds } = idsToName(before, after);
+    const [groups, users] = await Promise.all([
+      groupIds.length
+        ? this.prisma.supportGroup.findMany({
+            where: { id: { in: groupIds } },
+            select: { id: true, name: true },
+          })
+        : [],
+      userIds.length
+        ? this.prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, displayName: true },
+          })
+        : [],
+    ]);
+    return {
+      groups: new Map(groups.map((g) => [g.id, g.name])),
+      users: new Map(users.map((u) => [u.id, u.displayName])),
+    };
   }
 
   /** The desk hears when the reporter changes their own ticket. */

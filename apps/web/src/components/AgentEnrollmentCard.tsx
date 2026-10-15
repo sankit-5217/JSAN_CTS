@@ -21,6 +21,7 @@ import {
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { apiGet, apiPost } from "../api/client";
 import { zabbixErrorMessage } from "../api/zabbix";
+import { formatDateTime } from "../time/clock";
 
 interface Enrollment {
   id: string;
@@ -144,8 +145,8 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
       <Typography variant="h6">Monitoring agents</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 820 }}>
         Create a link and send the command to {siteCode}&apos;s IT team. They run it on each server
-        they want monitored (any number of servers, until the link expires). The agent connects
-        out to JSAN over an encrypted channel — no inbound port or VPN is needed. On Linux it also
+        they want monitored (any number of servers, until the link expires). The agent connects out
+        to JSAN over an encrypted channel — no inbound port or VPN is needed. On Linux it also
         updates the OS packages first (add <code>-s -- --skip-upgrade</code> after <code>bash</code>{" "}
         to skip that).
       </Typography>
@@ -187,8 +188,8 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
       {created && (
         <Alert severity="success" sx={{ mb: 2 }} onClose={() => setCreated(null)}>
           <Typography variant="body2" sx={{ mb: 1 }}>
-            Link created, valid until {new Date(created.expiresAt).toLocaleString()}. Copy the
-            commands now — they are not shown again.
+            Link created, valid until {formatDateTime(created.expiresAt)}. Copy the commands now —
+            they are not shown again.
           </Typography>
           <Stack spacing={1.5}>
             <CommandBox label="Linux (as root / with sudo)" command={created.commands.linux} />
@@ -196,7 +197,10 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
               label="Windows (PowerShell, Run as administrator)"
               command={created.commands.windowsPowerShell}
             />
-            <CommandBox label="Windows (curl.exe alternative)" command={created.commands.windowsCurl} />
+            <CommandBox
+              label="Windows (curl.exe alternative)"
+              command={created.commands.windowsCurl}
+            />
           </Stack>
         </Alert>
       )}
@@ -226,9 +230,9 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
                 <TableCell>
                   <Chip size="small" label={r.status} color={STATUS_COLOR[r.status]} />
                 </TableCell>
-                <TableCell>{new Date(r.expiresAt).toLocaleString()}</TableCell>
+                <TableCell>{formatDateTime(r.expiresAt)}</TableCell>
                 <TableCell align="right">{r.enrolledCount}</TableCell>
-                <TableCell>{r.lastUsedAt ? new Date(r.lastUsedAt).toLocaleString() : "—"}</TableCell>
+                <TableCell>{r.lastUsedAt ? formatDateTime(r.lastUsedAt) : "—"}</TableCell>
                 <TableCell align="right">
                   {r.status === "ACTIVE" && (
                     <Button size="small" color="error" onClick={() => revoke(r.id)}>

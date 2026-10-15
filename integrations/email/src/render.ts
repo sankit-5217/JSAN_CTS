@@ -1,3 +1,4 @@
+import { formatUtc } from "./time";
 import type { EntityRef, NotificationEvent, Party, RenderedEmail, RenderOptions } from "./types";
 
 /** Thrown when a notification event cannot be rendered into an email. */
@@ -128,7 +129,7 @@ function renderBody(event: NotificationEvent): Rendered {
         urgent: true,
         lines: [
           `${event.entity.key} matches your skills and shift, so it has been offered to ${addr(event.offeredTo)}.`,
-          `Accept or decline it in the portal before ${event.expiresAt}. If you don't respond, it goes to the next engineer.`,
+          `Accept or decline it in the portal before ${formatUtc(event.expiresAt)}. If you don't respond, it goes to the next engineer.`,
         ],
       };
     case "INCIDENT_OFFER_UNACCEPTED":

@@ -28,7 +28,14 @@ function makeService(prismaOverrides: Record<string, unknown> = {}) {
   const auditService = {
     record: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
-  return { service: new SitesService(prisma, auditService), prisma, auditService, tx };
+  return {
+    service: new SitesService(prisma, auditService, {
+      emitAsync: jest.fn().mockResolvedValue([]),
+    } as never),
+    prisma,
+    auditService,
+    tx,
+  };
 }
 
 describe("SitesService.create", () => {
@@ -48,7 +55,9 @@ describe("SitesService.create", () => {
       record: jest.fn().mockResolvedValue(undefined),
     } as unknown as AuditService;
 
-    const service = new SitesService(prisma, auditService);
+    const service = new SitesService(prisma, auditService, {
+      emitAsync: jest.fn().mockResolvedValue([]),
+    } as never);
     const result = await service.create(
       { code: "SITE01", name: "Demo", timezone: "UTC", is247: false },
       { actorId: "user-1", correlationId: "corr-1" },

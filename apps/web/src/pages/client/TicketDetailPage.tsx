@@ -43,7 +43,10 @@ import {
   type TicketAttachment,
 } from "./conversation";
 import { MessageBubble, StagedFiles } from "./MessageBubble";
+import { ReportEditNote } from "./ReportEditNote";
 import {
+  buildConversation,
+  type ConversationItem,
   isFinished,
   JOURNEY,
   journeyStep,
@@ -62,6 +65,7 @@ import {
   type SlaStatus,
 } from "./clientPortal";
 import { SiteContacts } from "./SitePanel";
+import { formatDateTime } from "../../time/clock";
 
 interface Incident extends TicketFields {
   id: string;
@@ -76,9 +80,7 @@ type Comment = ConversationMessage;
 type Attachment = TicketAttachment;
 type SupportGroup = TemplateGroup & { isClientSelectable: boolean };
 
-type ThreadItem =
-  | { type: "comment"; at: string; comment: Comment }
-  | { type: "status"; at: string; status: IncidentStatus };
+type ThreadItem = ConversationItem<Comment>;
 
 // Same cadence as the staff incident page's comment thread would need to
 // feel live, but gentler: a customer page open in a tab all day.
@@ -164,18 +166,11 @@ export function TicketDetailPage() {
     };
   }, [refetch]);
 
-  const thread = useMemo<ThreadItem[]>(() => {
-    const items: ThreadItem[] = comments.map((c) => ({
-      type: "comment",
-      at: c.createdAt,
-      comment: c,
-    }));
-    // The first milestone is the ticket being created: the report itself.
-    for (const m of progress?.milestones.slice(1) ?? []) {
-      items.push({ type: "status", at: m.at, status: m.status });
-    }
-    return items.sort((a, b) => a.at.localeCompare(b.at));
-  }, [comments, progress]);
+  // Messages, status changes and the reporter's report edits, in time order.
+  const thread = useMemo<ThreadItem[]>(
+    () => buildConversation(comments, progress),
+    [comments, progress],
+  );
 
   const latestDeskMessage = useMemo(
     () => [...comments].reverse().find((c) => c.authorId !== myUserId) ?? null,
@@ -283,7 +278,7 @@ export function TicketDetailPage() {
             <Chip size="small" variant="outlined" label={PRIORITY_LABEL[incident.priority]} />
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            {incident.incidentNo} · reported {new Date(incident.createdAt).toLocaleString()}
+            {incident.incidentNo} · reported {formatDateTime(incident.createdAt)}
           </Typography>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 2 }}>
             <EngineeringOutlinedIcon fontSize="small" color="action" />
@@ -365,8 +360,10 @@ export function TicketDetailPage() {
               key={`s-${item.at}-${item.status}`}
               sx={{ fontSize: 12, color: "text.secondary" }}
             >
-              {STATUS_LABEL[item.status]} · {relativeTime(item.at)}
+              {STATUS_LABEL[item.status]} · {formatDateTime(item.at)}
             </Divider>
+          ) : item.type === "edit" ? (
+            <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
           ) : (
             <MessageBubble
               key={item.comment.id}
@@ -581,6 +578,7 @@ function TicketReportEditor({
         )}
         <IssueTemplateForm
           mode="edit"
+          hideTemplate
           catalog={catalog}
           draft={draft}
           update={update}

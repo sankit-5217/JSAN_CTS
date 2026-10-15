@@ -6,6 +6,7 @@ import {
   type ConversationMessage,
   type TicketAttachment,
 } from "./conversation";
+import { formatDateTime } from "../../time/clock";
 
 /**
  * One message on a ticket's conversation, the same on the client portal
@@ -44,7 +45,7 @@ export function MessageBubble({
           {mine ? " (you)" : ""}
         </Typography>
         <Typography variant="caption" sx={{ opacity: 0.8 }}>
-          {roleLabel(message.author.role)} · {new Date(message.createdAt).toLocaleString()}
+          {roleLabel(message.author.role)} · {formatDateTime(message.createdAt)}
         </Typography>
         {tag && (
           <Chip

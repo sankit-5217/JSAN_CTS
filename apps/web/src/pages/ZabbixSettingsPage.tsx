@@ -26,6 +26,7 @@ import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
 import { apiGet, apiPost, apiPut } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
 import { ZABBIX_ADMIN_ROLES, ZABBIX_BASE, zabbixErrorMessage } from "../api/zabbix";
+import { formatDateTime } from "../time/clock";
 
 interface Settings {
   configured: boolean;
@@ -189,7 +190,7 @@ export function ZabbixSettingsPage() {
                   settings.tokenConfigured
                     ? `A token ending in …${settings.tokenLast4 ?? ""} is saved${
                         settings.tokenUpdatedAt
-                          ? ` (since ${new Date(settings.tokenUpdatedAt).toLocaleString()})`
+                          ? ` (since ${formatDateTime(settings.tokenUpdatedAt)})`
                           : ""
                       }. Leave empty to keep it.`
                     : "No token saved yet. Create one in Zabbix under Users → API tokens."
@@ -313,7 +314,7 @@ export function ZabbixSettingsPage() {
                 </Table>
                 <Box sx={{ mt: 1 }}>
                   <Typography variant="caption" color="text.secondary">
-                    Checked {new Date(test.checkedAt).toLocaleString()}
+                    Checked {formatDateTime(test.checkedAt)}
                   </Typography>
                 </Box>
               </>

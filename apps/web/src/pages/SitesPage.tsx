@@ -4,6 +4,7 @@ import {
   Alert,
   Button,
   Checkbox,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -21,7 +22,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { apiGet, apiPost } from "../api/client";
+import { ApiError, apiGet, apiPost } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
 
 interface Site {
@@ -60,6 +61,20 @@ export function SitesPage() {
   const [createForm, setCreateForm] = useState(emptySiteForm);
   const [createError, setCreateError] = useState<string | null>(null);
   const canWrite = getCurrentUserRole() === "SUPER_ADMIN";
+  const [showArchived, setShowArchived] = useState(false);
+  const [deleting, setDeleting] = useState<Site | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const restore = async (site: Site) => {
+    setError(null);
+    try {
+      await apiPost(`/sites/${site.id}/restore`);
+      setNotice(`${site.code} is restored and back in every list.`);
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   const submitCreate = async () => {
     setCreateError(null);
@@ -77,10 +92,10 @@ export function SitesPage() {
     // limit=200: this page has no pagination UI yet (few sites per
     // deployment) -- fetch everything the backend's max page size allows
     // rather than defaulting to its first 50.
-    apiGet<Paginated<Site>>("/sites?limit=200")
+    apiGet<Paginated<Site>>(`/sites?limit=200${showArchived ? "&includeArchived=true" : ""}`)
       .then((res) => setSites(res.items))
       .catch((err: Error) => setError(err.message));
-  }, [refreshKey]);
+  }, [refreshKey, showArchived]);
 
   return (
     <>
@@ -96,9 +111,23 @@ export function SitesPage() {
       </Stack>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Could not load sites: {error}
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+          {error}
         </Alert>
+      )}
+      {notice && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setNotice(null)}>
+          {notice}
+        </Alert>
+      )}
+      {canWrite && (
+        <FormControlLabel
+          sx={{ mb: 1 }}
+          control={
+            <Checkbox checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          }
+          label="Show deleted sites"
+        />
       )}
 
       <TableContainer component={Paper}>
@@ -110,6 +139,7 @@ export function SitesPage() {
               <TableCell>Timezone</TableCell>
               <TableCell>24x7</TableCell>
               <TableCell>Status</TableCell>
+              {canWrite && <TableCell align="right" />}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -123,12 +153,41 @@ export function SitesPage() {
                 <TableCell>{site.name}</TableCell>
                 <TableCell>{site.timezone}</TableCell>
                 <TableCell>{site.is247 ? "Yes" : "No"}</TableCell>
-                <TableCell>{site.status}</TableCell>
+                <TableCell>
+                  {site.status === "ARCHIVED" ? <Chip size="small" label="Deleted" /> : site.status}
+                </TableCell>
+                {canWrite && (
+                  <TableCell align="right">
+                    {site.status === "ARCHIVED" ? (
+                      <Button size="small" onClick={() => void restore(site)}>
+                        Restore
+                      </Button>
+                    ) : (
+                      <Button size="small" color="error" onClick={() => setDeleting(site)}>
+                        Delete
+                      </Button>
+                    )}
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </TableContainer>
+
+      {deleting && (
+        <DeleteSiteDialog
+          site={deleting}
+          onClose={() => setDeleting(null)}
+          onDone={() => {
+            setNotice(
+              `${deleting.code} is deleted: hidden from lists and the client portal, and it takes no new tickets. Its history is kept; tick "Show deleted sites" to restore it.`,
+            );
+            setDeleting(null);
+            setRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
 
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Create site</DialogTitle>
@@ -176,5 +235,73 @@ export function SitesPage() {
         </DialogActions>
       </Dialog>
     </>
+  );
+}
+
+/** "Delete site" = archive: confirm, then show the API's reasons if it refuses (open tickets). */
+function DeleteSiteDialog({
+  site,
+  onClose,
+  onDone,
+}: {
+  site: Site;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [examples, setExamples] = useState<string[]>([]);
+
+  const confirm = async () => {
+    setBusy(true);
+    setError(null);
+    setExamples([]);
+    try {
+      await apiPost(`/sites/${site.id}/archive`);
+      onDone();
+    } catch (err) {
+      const body =
+        err instanceof ApiError
+          ? (err.body as { message?: unknown; blockers?: { examples?: string[] }[] } | null)
+          : null;
+      setError(
+        typeof body?.message === "string"
+          ? body.message
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
+      setExamples(body?.blockers?.flatMap((b) => b.examples ?? []) ?? []);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onClose={busy ? undefined : onClose} maxWidth="xs" fullWidth>
+      <DialogTitle>Delete site {site.code}?</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1.5} sx={{ mt: 0.5 }}>
+          <Typography variant="body2">
+            {site.name} will disappear from site lists, pickers and the client portal, and nobody
+            can raise new tickets on it. Its tickets, assets and history are kept, and you can
+            restore it later.
+          </Typography>
+          {error && (
+            <Alert severity="error">
+              {error}
+              {examples.length > 0 && <> ({examples.join(", ")})</>}
+            </Alert>
+          )}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button color="error" variant="contained" onClick={() => void confirm()} disabled={busy}>
+          {busy ? "Deleting…" : "Delete site"}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }

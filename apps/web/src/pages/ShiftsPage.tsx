@@ -27,6 +27,7 @@ import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
 import { CategoryTeamsCard } from "../components/CategoryTeamsCard";
 import { severityColors } from "../theme/theme";
+import { formatTime } from "../time/clock";
 
 // Mirrors ShiftsController's SHIFT_WRITE_ROLES — UI-only gate (same pattern
 // as SupportGroupsPage/SlaPoliciesPage); the backend re-checks this regardless.
@@ -398,7 +399,7 @@ export function ShiftsPage() {
                 }}
               />
               <Typography variant="caption" color="text.secondary">
-                Live · updated {new Date(roster.asOf).toLocaleTimeString()}
+                Live · updated {formatTime(roster.asOf)}
               </Typography>
             </Stack>
           </Tooltip>

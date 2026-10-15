@@ -43,6 +43,7 @@ import {
   severityColor,
   zabbixErrorMessage,
 } from "../api/zabbix";
+import { formatDateTime, formatTime } from "../time/clock";
 
 const SEVERITY_OPTIONS = [
   { value: 0, label: "All severities" },
@@ -155,7 +156,7 @@ export function ZabbixPage() {
         </Button>
         {updatedAt && (
           <Typography variant="body2" color="text.secondary">
-            Updated {updatedAt.toLocaleTimeString()} · refreshes every 30 s
+            Updated {formatTime(updatedAt)} · refreshes every 30 s
           </Typography>
         )}
         <Box sx={{ flex: 1 }} />
@@ -297,7 +298,7 @@ export function ZabbixPage() {
                           )}
                         </TableCell>
                         <TableCell>{p.host?.siteCode ?? "—"}</TableCell>
-                        <TableCell title={new Date(p.startedAt).toLocaleString()}>
+                        <TableCell title={formatDateTime(p.startedAt)}>
                           {formatAge(p.ageSeconds)}
                         </TableCell>
                         <TableCell>{p.acknowledged ? "Yes" : "No"}</TableCell>

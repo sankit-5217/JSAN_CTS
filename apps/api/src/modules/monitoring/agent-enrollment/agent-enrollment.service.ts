@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "crypto";
+import { assertSiteAcceptsNewWork } from "../../sites/site-status";
 import { readFileSync } from "fs";
 import { join } from "path";
 import {
@@ -61,6 +62,7 @@ export class AgentEnrollmentService {
   async create(dto: CreateAgentEnrollmentDto, actor: ActorContext) {
     const site = await this.prisma.site.findUnique({ where: { id: dto.siteId } });
     if (!site) throw new NotFoundException(`Site ${dto.siteId} not found`);
+    await assertSiteAcceptsNewWork(this.prisma, dto.siteId);
     // Fail now (not on the client's machine) if Zabbix can't take agents yet.
     await this.zabbix.agentInstallTarget();
 
@@ -277,8 +279,15 @@ export class AgentEnrollmentService {
     const host = agentHostName(siteCode, dto.hostname);
     const ci = await this.cmdb.findByCode(host);
     const knownMachine = (ci?.metadata as { machineId?: string } | null)?.machineId;
-    if (!ci || ci.siteId !== enrollment.siteId || (knownMachine && knownMachine !== dto.machineId)) {
-      throw new NotFoundException({ code: "AGENT_NOT_ENROLLED", message: `${host} is not enrolled from this machine` });
+    if (
+      !ci ||
+      ci.siteId !== enrollment.siteId ||
+      (knownMachine && knownMachine !== dto.machineId)
+    ) {
+      throw new NotFoundException({
+        code: "AGENT_NOT_ENROLLED",
+        message: `${host} is not enrolled from this machine`,
+      });
     }
     return { hostName: host, agent: await this.zabbix.agentHostAvailability(host) };
   }
@@ -301,7 +310,10 @@ export class AgentEnrollmentService {
   }
 
   private apiBase(): string {
-    const base = (this.config.get<string>("API_PUBLIC_URL") ?? "http://localhost:3000").replace(/\/+$/, "");
+    const base = (this.config.get<string>("API_PUBLIC_URL") ?? "http://localhost:3000").replace(
+      /\/+$/,
+      "",
+    );
     return `${base}/api/v1`;
   }
 

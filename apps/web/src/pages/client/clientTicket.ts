@@ -67,6 +67,17 @@ export interface TicketProgress {
   waitingOnCustomerSince: string | null;
   customerRepliedWhileWaiting: boolean;
   feedback: { outcome: "FIXED" | "NOT_FIXED"; at: string } | null;
+  /** The reporter's edits to their report, oldest first (GET :id/progress). */
+  reportEdits?: ReportEdit[];
+}
+
+/** One saved edit of the report: who, when, each field's old → new value. */
+export interface ReportEdit {
+  at: string;
+  by: { name: string; role: string | null } | null;
+  /** False for edits saved before values were recorded: field names only. */
+  detailed: boolean;
+  changes: { label: string; from: string | null; to: string | null }[];
 }
 
 /** The customer-facing journey, in order. Pending and reopened states sit
@@ -105,4 +116,37 @@ export function relativeTime(iso: string, now = Date.now()): string {
   const days = Math.round(hours / 24);
   if (days < 7) return `${days}d ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+/** One entry of a ticket's conversation, in time order. */
+export type ConversationItem<C extends { createdAt: string }> =
+  | { type: "comment"; at: string; comment: C }
+  | { type: "status"; at: string; status: IncidentStatus }
+  | { type: "edit"; at: string; edit: ReportEdit };
+
+/**
+ * The conversation both portals show: messages, status changes (after the
+ * ticket was raised) and the reporter's report edits, oldest first. Edits
+ * with nothing readable to show are left out.
+ */
+export function buildConversation<C extends { createdAt: string }>(
+  comments: C[],
+  progress: Pick<TicketProgress, "milestones" | "reportEdits"> | null,
+  opts: { statuses?: boolean } = {},
+): ConversationItem<C>[] {
+  const items: ConversationItem<C>[] = comments.map((c) => ({
+    type: "comment",
+    at: c.createdAt,
+    comment: c,
+  }));
+  if (opts.statuses !== false) {
+    // The first milestone is the ticket being created: the report itself.
+    for (const m of progress?.milestones.slice(1) ?? []) {
+      items.push({ type: "status", at: m.at, status: m.status });
+    }
+  }
+  for (const edit of progress?.reportEdits ?? []) {
+    if (edit.changes.length > 0) items.push({ type: "edit", at: edit.at, edit });
+  }
+  return items.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 }

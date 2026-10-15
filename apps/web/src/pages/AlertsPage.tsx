@@ -18,6 +18,7 @@ import {
   Typography,
 } from "@mui/material";
 import { apiGet } from "../api/client";
+import { formatDateTime } from "../time/clock";
 
 // Literal unions mirroring the Prisma enums — see IncidentsPage.tsx for why
 // these aren't imported from shared-types.
@@ -184,7 +185,7 @@ export function AlertsPage() {
                 </TableCell>
                 <TableCell>{a.state}</TableCell>
                 <TableCell>{a.ciId ? (cisById[a.ciId] ?? a.ciId) : "—"}</TableCell>
-                <TableCell>{new Date(a.lastSeenAt).toLocaleString()}</TableCell>
+                <TableCell>{formatDateTime(a.lastSeenAt)}</TableCell>
                 <TableCell>
                   {a.correlatedIncidentId ? (
                     <Link component={RouterLink} to={`/incidents/${a.correlatedIncidentId}`}>

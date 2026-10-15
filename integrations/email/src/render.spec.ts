@@ -98,7 +98,7 @@ describe("renderNotification", () => {
       { to: [LEAD] },
     );
     expect(mail.subject).toBe("‼ [SITE01] INC-1042 — offered to you (accept within 5 min)");
-    expect(mail.text).toContain("before 2026-09-03T12:05:00.000Z");
+    expect(mail.text).toContain("before 3 Sep 2026, 12:05 UTC");
   });
 
   it("tells the desk when nobody accepted a routing offer", () => {

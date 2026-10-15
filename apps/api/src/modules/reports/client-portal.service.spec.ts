@@ -76,7 +76,8 @@ describe("ClientPortalService.getOverview", () => {
       }),
     );
     expect(prisma.site.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: { in: ["site-a"] } } }),
+      // Archived (deleted) sites never show in the client portal (rubric T11).
+      expect.objectContaining({ where: { id: { in: ["site-a"] }, status: { not: "ARCHIVED" } } }),
     );
   });
 

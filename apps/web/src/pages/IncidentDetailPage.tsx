@@ -56,6 +56,9 @@ import {
   type TicketAttachment,
 } from "./client/conversation";
 import { MessageBubble, StagedFiles } from "./client/MessageBubble";
+import { ReportEditNote } from "./client/ReportEditNote";
+import { buildConversation, type ReportEdit, type TicketProgress } from "./client/clientTicket";
+import { formatDateTime, formatTime } from "../time/clock";
 
 const pulse = keyframes`
   0%, 100% { opacity: 1; }
@@ -128,6 +131,9 @@ interface CustomerProgress {
   waitingOnCustomerSince: string | null;
   customerRepliedWhileWaiting: boolean;
   feedback: { outcome: "FIXED" | "NOT_FIXED"; at: string } | null;
+  milestones: TicketProgress["milestones"];
+  /** The reporter's edits to their report (shown in the Conversation). */
+  reportEdits?: ReportEdit[];
 }
 
 interface SlaState {
@@ -155,7 +161,7 @@ function describeRoutingEvent(e: IncidentEvent): string | null {
   const name = typeof p.displayName === "string" ? p.displayName : "an engineer";
   switch (p.action) {
     case "OFFERED":
-      return `Offered to ${name}, who has until ${new Date(String(p.expiresAt)).toLocaleTimeString()} to accept`;
+      return `Offered to ${name}, who has until ${formatTime(String(p.expiresAt))} to accept`;
     case "DECLINED":
       return p.reason ? `${name} declined: "${String(p.reason)}"` : `${name} declined`;
     case "EXPIRED":
@@ -1315,7 +1321,7 @@ export function IncidentDetailPage() {
                     }}
                   />
                   <Typography variant="caption" color="text.secondary">
-                    Live · updated {lastUpdatedAt.toLocaleTimeString()}
+                    Live · updated {formatTime(lastUpdatedAt)}
                   </Typography>
                 </Stack>
               </Tooltip>
@@ -1649,21 +1655,27 @@ export function IncidentDetailPage() {
               Conversation
             </Typography>
             <Stack spacing={1.25} sx={{ mb: 2 }}>
-              {comments.map((c) => (
-                <MessageBubble
-                  key={c.id}
-                  message={c}
-                  mine={c.authorId === currentUserId}
-                  tag={
-                    c.authorId === incident.reportedByUserId
-                      ? { label: "Customer", color: "warning" }
-                      : c.isInternal
-                        ? { label: "Internal" }
-                        : { label: "To customer", color: "info" }
-                  }
-                  onDownload={(attachmentId) => void downloadAttachment(attachmentId)}
-                />
-              ))}
+              {/* Messages plus the reporter's report edits, in time order
+                  (status changes have their own timeline below). */}
+              {buildConversation(comments, customerProgress, { statuses: false }).map((item) =>
+                item.type === "edit" ? (
+                  <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
+                ) : item.type === "comment" ? (
+                  <MessageBubble
+                    key={item.comment.id}
+                    message={item.comment}
+                    mine={item.comment.authorId === currentUserId}
+                    tag={
+                      item.comment.authorId === incident.reportedByUserId
+                        ? { label: "Customer", color: "warning" }
+                        : item.comment.isInternal
+                          ? { label: "Internal" }
+                          : { label: "To customer", color: "info" }
+                    }
+                    onDownload={(attachmentId) => void downloadAttachment(attachmentId)}
+                  />
+                ) : null,
+              )}
               {comments.length === 0 && (
                 <Typography variant="body2" color="text.secondary">
                   No messages yet.
@@ -1868,7 +1880,7 @@ export function IncidentDetailPage() {
                     </Typography>
                   )}
                   <Typography variant="caption" color="text.secondary" display="block">
-                    {a.source} · last seen {new Date(a.lastSeenAt).toLocaleString()}
+                    {a.source} · last seen {formatDateTime(a.lastSeenAt)}
                   </Typography>
                   <Divider sx={{ mt: 1 }} />
                 </Box>
@@ -1891,8 +1903,8 @@ export function IncidentDetailPage() {
               {worklogs.map((w) => (
                 <Box key={w.id}>
                   <Typography variant="body2" component="div">
-                    {w.activityType} — {new Date(w.startedAt).toLocaleString()}
-                    {w.endedAt && ` → ${new Date(w.endedAt).toLocaleString()}`}
+                    {w.activityType} — {formatDateTime(w.startedAt)}
+                    {w.endedAt && ` → ${formatDateTime(w.endedAt)}`}
                     {w.durationMinutes !== null && ` (${w.durationMinutes}m)`}
                     {w.billable && <Chip size="small" label="billable" sx={{ ml: 1 }} />}
                   </Typography>
@@ -1995,7 +2007,7 @@ export function IncidentDetailPage() {
               {events.map((e) => (
                 <Box key={e.id}>
                   <Typography variant="body2">
-                    <strong>{e.eventType}</strong> — {new Date(e.createdAt).toLocaleString()}
+                    <strong>{e.eventType}</strong> — {formatDateTime(e.createdAt)}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {describeRoutingEvent(e) ??
@@ -2197,7 +2209,7 @@ function CustomerStatusBanner({
   progress: CustomerProgress | null;
 }) {
   if (!progress) return null;
-  const when = (iso: string) => new Date(iso).toLocaleString();
+  const when = (iso: string) => formatDateTime(iso);
   if (incident.status === "RESOLVED" && progress.feedback?.outcome === "FIXED") {
     return (
       <Alert severity="success" sx={{ mb: 2 }}>

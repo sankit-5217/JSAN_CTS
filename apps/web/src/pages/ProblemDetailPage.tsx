@@ -22,6 +22,7 @@ import {
   Typography,
 } from "@mui/material";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
+import { formatDateTime } from "../time/clock";
 
 const PROBLEM_STATUSES = ["OPEN", "INVESTIGATING", "KNOWN_ERROR", "RESOLVED", "CLOSED"];
 const PRIORITIES = ["P1", "P2", "P3", "P4"];
@@ -145,8 +146,8 @@ export function ProblemDetailPage() {
           <Typography variant="body2" color="text.secondary">
             Owner: {problem.ownerUserId ?? "—"} · Due:{" "}
             {problem.dueDate ? new Date(problem.dueDate).toLocaleDateString() : "—"} · Resolved:{" "}
-            {problem.resolvedAt ? new Date(problem.resolvedAt).toLocaleString() : "—"} · Closed:{" "}
-            {problem.closedAt ? new Date(problem.closedAt).toLocaleString() : "—"}
+            {problem.resolvedAt ? formatDateTime(problem.resolvedAt) : "—"} · Closed:{" "}
+            {problem.closedAt ? formatDateTime(problem.closedAt) : "—"}
           </Typography>
           <Typography variant="body2" sx={{ mt: 1 }}>
             <strong>Symptoms:</strong> {problem.symptoms}

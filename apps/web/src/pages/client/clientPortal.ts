@@ -80,11 +80,15 @@ export const SITE_STATE_COLOR: Record<SiteState, ChipColor> = {
   MAJOR_INCIDENT: "error",
 };
 
-/** "today, 4:30 PM" / "Thu 2 Oct, 4:30 PM": a target time a customer can
+/** "today, 4:30 PM IST" / "Thu 2 Oct, 4:30 PM IST": a target time a customer can
  *  read at a glance without doing date arithmetic. */
 export function formatDue(iso: string, now = new Date()): string {
   const due = new Date(iso);
-  const time = due.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const time = due.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
   if (due.toDateString() === now.toDateString()) {
     return `today, ${time}`;
   }

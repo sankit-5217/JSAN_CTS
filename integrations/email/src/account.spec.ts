@@ -16,7 +16,7 @@ describe("renderAccountEmail", () => {
     expect(email.subject).toBe("You're invited to JSAN OpsDesk");
     expect(email.text).toContain(LINK);
     expect(email.text).toContain("Admin <admin@example.com> has given you access");
-    expect(email.text).toContain("2026-09-28 10:00");
+    expect(email.text).toContain("28 Sep 2026, 10:00 UTC");
     expect(email.html).toContain(`href="${LINK}"`);
     expect(email.headers).not.toHaveProperty("References");
     expect(email.text).not.toMatch(/worklog/i);
@@ -56,5 +56,18 @@ describe("renderAccountEmail", () => {
         expiresAt: "t",
       }),
     ).toThrow(EmailRenderError);
+  });
+});
+
+describe("renderAccountEmail validity", () => {
+  it("says how long the link lasts, readable in any time zone", () => {
+    const email = renderAccountEmail({
+      kind: "PASSWORD_RESET",
+      to: { email: "sam@example.com" },
+      link: "https://opsdesk.example/auth/set-password#token=abc123",
+      expiresAt: "2026-09-28 10:00",
+      validFor: "1 hour",
+    });
+    expect(email.text).toContain("valid for 1 hour (until 28 Sep 2026, 10:00 UTC)");
   });
 });

@@ -33,6 +33,9 @@ const TOKEN_TTL_MS: Record<PasswordTokenPurpose, number> = {
 
 const INVALID_CREDENTIALS = "Invalid email or password";
 
+/** TOKEN_TTL_MS in words, for the email (readable in any time zone). */
+const VALID_FOR: Record<PasswordTokenPurpose, string> = { INVITE: "3 days", RESET: "1 hour" };
+
 export interface SignInLinkResult {
   /** The link itself — shown to the admin as a fallback when email isn't available. */
   link: string;
@@ -193,6 +196,7 @@ export class PasswordAuthService {
             to: { name: user.displayName, email: user.email },
             link,
             expiresAt: expiresText,
+            validFor: VALID_FOR[purpose],
             invitedBy: inviter ? { name: inviter.displayName, email: inviter.email } : undefined,
           }
         : {
@@ -200,6 +204,7 @@ export class PasswordAuthService {
             to: { name: user.displayName, email: user.email },
             link,
             expiresAt: expiresText,
+            validFor: VALID_FOR[purpose],
           },
     );
     return { link, expiresAt, purpose, emailQueued };

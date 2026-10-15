@@ -51,7 +51,14 @@ function makeService(
     $transaction: jest.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
     incidentEvent: { findMany: jest.fn().mockResolvedValue(opts.events ?? []) },
     incidentComment: { count: jest.fn().mockResolvedValue(opts.replies ?? 0) },
-    user: { findUnique: jest.fn().mockResolvedValue({ displayName: "Rahul" }) },
+    user: {
+      findUnique: jest.fn().mockResolvedValue({ displayName: "Rahul" }),
+      findMany: jest
+        .fn()
+        .mockResolvedValue([
+          { id: "cust-1", displayName: "Priya", role: UserRole.CLIENT_MANAGER_VIEWER },
+        ]),
+    },
     supportGroup: { findUnique: jest.fn().mockResolvedValue({ name: "Windows & Servers" }) },
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
@@ -224,5 +231,55 @@ describe("IncidentCustomerService.submitFeedback", () => {
     await expect(
       service.submitFeedback("inc-1", { outcome: "FIXED" }, { actorId: "cust-1" }, CUSTOMER),
     ).resolves.toMatchObject({ outcome: "FIXED" });
+  });
+});
+
+describe("IncidentCustomerService.getProgress: report edits in the conversation (rubric T3/T5)", () => {
+  it("returns each edit with who, when and old → new, for both portals", async () => {
+    const { service } = makeService({
+      events: [
+        {
+          eventType: "REPORT_EDITED",
+          actorId: "cust-1",
+          createdAt: at(5),
+          payload: {
+            fields: ["priority"],
+            changes: [{ field: "priority", label: "Priority", from: "P3", to: "P2" }],
+          },
+        },
+      ],
+    });
+    const progress = await service.getProgress("inc-1", CUSTOMER);
+    expect(progress.reportEdits).toEqual([
+      {
+        at: at(5),
+        by: { name: "Priya", role: UserRole.CLIENT_MANAGER_VIEWER },
+        detailed: true,
+        changes: [{ label: "Priority", from: "P3", to: "P2" }],
+      },
+    ]);
+  });
+
+  it("still shows edits saved before values were recorded (field names only)", async () => {
+    const { service } = makeService({
+      events: [
+        {
+          eventType: "REPORT_EDITED",
+          actorId: "cust-1",
+          createdAt: at(5),
+          payload: { fields: ["severity", "category"] },
+        },
+      ],
+    });
+    const [edit] = (await service.getProgress("inc-1", CUSTOMER)).reportEdits;
+    expect(edit).toMatchObject({
+      detailed: false,
+      changes: [{ label: "Severity", from: null, to: null }],
+    });
+  });
+
+  it("has no edits when the reporter never changed the report", async () => {
+    const { service } = makeService();
+    expect((await service.getProgress("inc-1", CUSTOMER)).reportEdits).toEqual([]);
   });
 });

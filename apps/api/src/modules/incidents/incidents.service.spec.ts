@@ -164,6 +164,11 @@ function makeService(
     },
     supportGroup: {
       findUnique: overrides.supportGroupFindUnique ?? jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    // New tickets check the site isn't archived (rubric T12).
+    site: {
+      findUnique: jest.fn().mockResolvedValue({ code: "SITE01", status: "ACTIVE" }),
     },
     supportGroupMember: {
       findMany: overrides.supportGroupMemberFindMany ?? jest.fn().mockResolvedValue([]),
@@ -2971,7 +2976,19 @@ describe("IncidentsService issue template v2", () => {
         expect.objectContaining({
           data: expect.objectContaining({
             eventType: "REPORT_EDITED",
-            payload: { fields: expect.arrayContaining(["shortDescription", "priority"]) },
+            payload: {
+              fields: expect.arrayContaining(["shortDescription", "priority"]),
+              // Rubric T3: old → new per field, shown in the conversation.
+              changes: expect.arrayContaining([
+                {
+                  field: "shortDescription",
+                  label: "Subject",
+                  from: "Server unresponsive",
+                  to: "Now a change",
+                },
+                { field: "priority", label: "Priority", from: "P3", to: "P2" },
+              ]),
+            },
           }),
         }),
       );

@@ -19,6 +19,7 @@ import {
   Typography,
 } from "@mui/material";
 import { apiGet, apiPost } from "../api/client";
+import { formatDateTime, formatTime } from "../time/clock";
 
 const CHANGE_TYPES = ["STANDARD", "NORMAL", "EMERGENCY"];
 const CHANGE_STATUSES = [
@@ -313,8 +314,7 @@ export function ChangesPage() {
                       </Link>
                     </TableCell>
                     <TableCell>
-                      {new Date(c.windowStart).toLocaleString()} →{" "}
-                      {new Date(c.windowEnd).toLocaleTimeString()}
+                      {formatDateTime(c.windowStart)} → {formatTime(c.windowEnd)}
                     </TableCell>
                     <TableCell>
                       <Chip
