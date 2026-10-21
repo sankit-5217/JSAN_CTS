@@ -28,8 +28,11 @@ describe("AuthzService", () => {
     expect(prisma.userSiteAccess.findMany).not.toHaveBeenCalled();
   });
 
-  it("returns null for DELIVERY_OPS_MANAGER and AUDITOR_READ_ONLY too", async () => {
+  it("returns null for SERVICE_DESK_NOC, DELIVERY_OPS_MANAGER and AUDITOR_READ_ONLY too", async () => {
     const { service } = makeService();
+    await expect(
+      service.getAccessibleSiteIds({ ...scopedUser, role: UserRole.SERVICE_DESK_NOC }),
+    ).resolves.toBeNull();
     await expect(
       service.getAccessibleSiteIds({ ...scopedUser, role: UserRole.DELIVERY_OPS_MANAGER }),
     ).resolves.toBeNull();

@@ -116,8 +116,8 @@ async function main() {
     },
   });
 
-  // Service desk: scoped to SITE01 only — exercises the "assigned sites"
-  // path in AuthzService rather than the "all sites" admin path.
+  // Service desk: an all-sites role (AuthzService.ALL_SITES_ROLES), so it
+  // needs no UserSiteAccess rows.
   const serviceDesk = await prisma.user.upsert({
     where: { email: "servicedesk@example.com" },
     update: {},
@@ -172,12 +172,6 @@ async function main() {
     where: { userId_siteId: { userId: clientViewer.id, siteId: site1.id } },
     update: {},
     create: { userId: clientViewer.id, siteId: site1.id },
-  });
-
-  await prisma.userSiteAccess.upsert({
-    where: { userId_siteId: { userId: serviceDesk.id, siteId: site1.id } },
-    update: {},
-    create: { userId: serviceDesk.id, siteId: site1.id },
   });
 
   await prisma.userSiteAccess.upsert({
@@ -668,7 +662,7 @@ async function main() {
 
   console.log(
     `Seeded sites ${site1.code}/${site2.code}, users ${admin.email} (SUPER_ADMIN, all sites), ` +
-      `${serviceDesk.email} (SERVICE_DESK_NOC, ${site1.code} only), ` +
+      `${serviceDesk.email} (SERVICE_DESK_NOC, all sites), ` +
       `${siteEngineer.email} (SITE_ENGINEER, ${site2.code} only), ` +
       `${siteEngineer1.email} (SITE_ENGINEER, ${site1.code} only), ` +
       `${siteEngineer2.email} (SITE_ENGINEER, ${site1.code} only), ` +

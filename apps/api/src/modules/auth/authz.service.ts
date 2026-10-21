@@ -7,10 +7,12 @@ import { AuthenticatedUser } from "./types/jwt-payload.type";
  * Roles that see every site without needing UserSiteAccess rows — matches
  * the "Typical Access" column of the role table in spec §4 (Super Admin:
  * "all data"; Delivery/Operations Manager: "cross-site dashboards";
- * Auditor: "read-only" evidence across everything).
+ * Auditor: "read-only" evidence across everything), plus Service Desk /
+ * NOC, which triages tickets and alerts for every site.
  */
 const ALL_SITES_ROLES: ReadonlySet<UserRole> = new Set([
   UserRole.SUPER_ADMIN,
+  UserRole.SERVICE_DESK_NOC,
   UserRole.DELIVERY_OPS_MANAGER,
   UserRole.AUDITOR_READ_ONLY,
 ]);

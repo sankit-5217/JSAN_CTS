@@ -85,10 +85,10 @@ export async function seedFixture(prisma: PrismaClient): Promise<Fixture> {
       data: { code: "E2E02", name: "E2E Restricted Data Center", timezone: "UTC", is247: true },
     }),
   ]);
-  // None of these roles are in AuthzService's ALL_SITES_ROLES, so each only
-  // sees sites it has an explicit grant for. serviceDesk/siteEngineer/
-  // infraLead are staff actually assigned to work `site` -- grant it, same
-  // as a real deployment would. clientViewer is also granted `site`, but
+  // serviceDesk is in AuthzService's ALL_SITES_ROLES, so its grant is a
+  // no-op; the others only see sites they have an explicit grant for.
+  // siteEngineer/infraLead are staff actually assigned to work `site` --
+  // grant it, same as a real deployment would. clientViewer is also granted `site`, but
   // deliberately NOT `siteB`, so it can serve as the "restricted site"
   // case in site-scope tests.
   await prisma.userSiteAccess.createMany({

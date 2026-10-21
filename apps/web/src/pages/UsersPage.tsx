@@ -81,7 +81,12 @@ const ROLES = [
 
 // Mirrors the API's ALL_SITES_ROLES (auth/authz.service.ts) — these roles see
 // every site, so the form doesn't offer site grants for them. Display only.
-const ALL_SITES_ROLES = ["SUPER_ADMIN", "DELIVERY_OPS_MANAGER", "AUDITOR_READ_ONLY"];
+const ALL_SITES_ROLES = [
+  "SUPER_ADMIN",
+  "SERVICE_DESK_NOC",
+  "DELIVERY_OPS_MANAGER",
+  "AUDITOR_READ_ONLY",
+];
 
 type StatusFilter = "active" | "inactive" | "all";
 
