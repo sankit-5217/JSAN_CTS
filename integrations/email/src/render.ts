@@ -50,6 +50,74 @@ function minutesPhrase(minutes: number): string {
   return rem ? `${h}h ${rem}m` : `${h}h`;
 }
 
+/**
+ * An incident email's subject: `INC-00002[Bug][P3,S3] Uploads are slow`.
+ * A missing part is left out (`INC-00002[P3] ...`), never shown empty.
+ */
+export function ticketSubject(entity: EntityRef): string {
+  const oneLine = (v: string | undefined) => (v ?? "").replace(/[\r\n]+/g, " ").trim();
+  const issueType = oneLine(entity.ticket?.issueType);
+  const levels = [oneLine(entity.priority), oneLine(entity.severity)].filter(Boolean).join(",");
+  const tags = `${issueType ? `[${issueType}]` : ""}${levels ? `[${levels}]` : ""}`;
+  return `${entity.key}${tags} ${oneLine(entity.title)}`.trim();
+}
+
+/** "<who> <did what> on <when>", from the first line of an incident email. */
+const TICKET_VERB: Partial<Record<NotificationEvent["kind"], string>> = {
+  INCIDENT_CREATED: "raised this ticket",
+  INCIDENT_ASSIGNED: "assigned this ticket",
+  INCIDENT_GROUP_ASSIGNED: "assigned this ticket",
+  INCIDENT_STATUS_CHANGED: "changed the status",
+  INCIDENT_COMMENT_ADDED: "added a comment",
+  INCIDENT_UPDATED: "updated this ticket",
+  INCIDENT_ATTACHMENT_ADDED: "added a file",
+};
+
+/** The event lines of an incident email; who did it is said once, above them. */
+function ticketLines(event: NotificationEvent): string[] | undefined {
+  switch (event.kind) {
+    case "INCIDENT_CREATED":
+      return event.description ? ["Description:", event.description] : [];
+    case "INCIDENT_ASSIGNED":
+      return [`Assigned to ${event.assignee.name ?? event.assignee.email}.`];
+    case "INCIDENT_GROUP_ASSIGNED":
+      return [`Assigned to the ${event.group.name} group.`];
+    case "INCIDENT_STATUS_CHANGED":
+      return [`Status: ${event.from} → ${event.to}`, event.comment ? `Note: ${event.comment}` : ""];
+    case "INCIDENT_COMMENT_ADDED":
+      return [
+        event.internal ? "Internal note (staff only, not sent to the client):" : "Comment:",
+        event.body,
+      ];
+    case "INCIDENT_UPDATED":
+      return ["What changed:", ...event.changes.map((change) => `- ${change}`)];
+    case "INCIDENT_ATTACHMENT_ADDED":
+      return [`File: ${event.fileName}`];
+    default:
+      return undefined;
+  }
+}
+
+function ticketActorLine(event: NotificationEvent): string {
+  const by = event.entity.ticket?.updatedBy;
+  if (!by) return "";
+  const who = by.role ? `${by.name} (${by.role})` : by.name;
+  return `${who} ${TICKET_VERB[event.kind] ?? "updated this ticket"} on ${formatUtc(by.at)}.`;
+}
+
+function ticketSummary(entity: EntityRef): string[] {
+  const t = entity.ticket ?? {};
+  return [
+    `Ticket: ${entity.key} - ${entity.title}`,
+    t.status ? `Status: ${t.status}` : "",
+    t.issueType ? `Issue type: ${t.issueType}` : "",
+    entity.priority ? `Priority: ${entity.priority}` : "",
+    entity.severity ? `Severity: ${entity.severity}` : "",
+    `Assignee: ${t.assignee ?? "Not assigned yet"}`,
+    `Assignee group: ${t.assigneeGroup ?? "None"}`,
+  ];
+}
+
 interface Rendered {
   /** short phrase for the subject line, after the entity key */
   phrase: string;
@@ -97,6 +165,11 @@ function renderBody(event: NotificationEvent): Rendered {
       return {
         phrase: `new comment from ${event.author.name ?? event.author.email}`,
         lines: [`${addr(event.author)} commented on ${event.entity.key}:`, event.body],
+      };
+    case "INCIDENT_ATTACHMENT_ADDED":
+      return {
+        phrase: "file added",
+        lines: [`A file was added to ${event.entity.key}: ${event.fileName}`],
       };
     case "INCIDENT_UPDATED":
       return {
@@ -215,23 +288,43 @@ export function renderNotification(
   }
 
   const { phrase, lines, urgent } = renderBody(event);
-
-  const sitePrefix = event.entity.siteCode ? `[${event.entity.siteCode}] ` : "";
-  const marker = urgent ? "‼ " : "";
-  const subject = `${marker}${sitePrefix}${key} — ${phrase}`;
-
   const url = entityUrl(event.entity, options);
-  const bodyLines = [
-    `${key}: ${event.entity.title}`,
-    event.entity.priority ? `Priority: ${event.entity.priority}` : "",
-    event.entity.severity ? `Severity: ${event.entity.severity}` : "",
-    "",
-    ...lines.filter(Boolean),
-    "",
+  const footer = [
     url ? `View in portal: ${url}` : "",
     "—",
     "Automated OpsDesk notification. Reply above this line to add a worklog comment.",
-  ].filter((l) => l !== "");
+  ];
+
+  let subject: string;
+  let bodyLines: string[];
+  if (event.entity.ticket) {
+    // Every email about a ticket: one subject format (so they all thread
+    // together), who did what first, then the ticket as it stands now.
+    subject = ticketSubject({ ...event.entity, key });
+    // A blank line between the sections, so the plain-text part reads well.
+    bodyLines = [
+      [ticketActorLine(event)],
+      ticketLines(event) ?? lines,
+      ticketSummary(event.entity),
+      footer,
+    ]
+      .map((section) => section.filter(Boolean))
+      .filter((section) => section.length > 0)
+      .flatMap((section, i) => (i === 0 ? section : ["", ...section]));
+  } else {
+    const sitePrefix = event.entity.siteCode ? `[${event.entity.siteCode}] ` : "";
+    const marker = urgent ? "‼ " : "";
+    subject = `${marker}${sitePrefix}${key} — ${phrase}`;
+    bodyLines = [
+      `${key}: ${event.entity.title}`,
+      event.entity.priority ? `Priority: ${event.entity.priority}` : "",
+      event.entity.severity ? `Severity: ${event.entity.severity}` : "",
+      "",
+      ...lines.filter(Boolean),
+      "",
+      ...footer,
+    ].filter((l) => l !== "");
+  }
 
   const text = bodyLines.join("\n");
   const html = renderHtml(bodyLines, url);
@@ -275,7 +368,8 @@ function renderHtml(lines: string[], url: string | undefined): string {
         const label = line.slice(0, line.length - url.length);
         return `<p>${escapeHtml(label)}<a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>`;
       }
-      return `<p>${escapeHtml(line)}</p>`;
+      // pre-wrap keeps a multi-line comment's own line breaks.
+      return line === "" ? "<br>" : `<p style="white-space:pre-wrap">${escapeHtml(line)}</p>`;
     })
     .join("\n");
   return `<!doctype html><html><body style="font-family:system-ui,sans-serif">\n${body}\n</body></html>`;

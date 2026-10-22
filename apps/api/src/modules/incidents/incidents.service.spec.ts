@@ -173,6 +173,9 @@ function makeService(
     supportGroupMember: {
       findMany: overrides.supportGroupMemberFindMany ?? jest.fn().mockResolvedValue([]),
     },
+    issueCatalogOption: {
+      findUnique: jest.fn().mockResolvedValue({ label: "Bug" }),
+    },
     alert: {
       findMany: overrides.alertFindMany ?? jest.fn().mockResolvedValue([]),
     },
@@ -285,24 +288,42 @@ describe("IncidentsService.create", () => {
     );
   });
 
-  it("includes the reporting customer on the new-ticket notification when self-reported", async () => {
+  it("puts the reporting customer on Cc of the new-ticket email, with the ticket subject parts", async () => {
     const { service, notifications } = makeService({
       userFindMany: jest
         .fn()
         .mockResolvedValue([{ email: "desk@corp.example", displayName: "Service Desk" }]),
-      userFindUnique: jest
-        .fn()
-        .mockResolvedValue({ id: "customer-1", email: "jane@client.example", displayName: "Jane" }),
+      userFindUnique: jest.fn().mockResolvedValue({
+        id: "customer-1",
+        email: "jane@client.example",
+        displayName: "Jane",
+        role: UserRole.CLIENT_MANAGER_VIEWER,
+      }),
     });
 
-    await service.create(baseCreateDto, { actorId: "user-1" }, "customer-1");
+    await service.create(
+      { ...baseCreateDto, issueType: "BUG", severity: "S3" },
+      { actorId: "customer-1" },
+      "customer-1",
+    );
 
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
           kind: "INCIDENT_CREATED",
-          reporter: { name: "Jane", email: "jane@client.example" },
+          entity: expect.objectContaining({
+            key: "INC-000001",
+            severity: "S3",
+            ticket: expect.objectContaining({
+              issueType: "Bug",
+              updatedBy: expect.objectContaining({ name: "Jane", role: "Client" }),
+            }),
+          }),
         }),
+        recipients: {
+          to: [{ name: "Service Desk", email: "desk@corp.example" }],
+          cc: [{ name: "Jane", email: "jane@client.example" }],
+        },
       }),
       expect.any(String),
     );
@@ -466,7 +487,7 @@ describe("IncidentsService.createFromCustomer", () => {
       supportGroupFindUnique: jest.fn().mockResolvedValue({
         id: "grp-desk",
         name: "JSAN ServiceDesk",
-        members: [{ user: { id: "desk-1", email: "desk@example.com", displayName: "Desk" } }],
+        members: [{ userId: "desk-1" }],
       }),
     });
     await service.createFromCustomer(customerDto, { actorId: clientViewer.id }, clientViewer);
@@ -548,8 +569,20 @@ describe("IncidentsService.updateCcList", () => {
   });
 });
 
+/** Like Postgres: a column left undefined in the update data keeps its value. */
+function updateKeeping(before: ReturnType<typeof baseIncident>) {
+  return {
+    update: jest.fn().mockImplementation(({ data }) =>
+      Promise.resolve({
+        ...before,
+        ...Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)),
+      }),
+    ),
+  };
+}
+
 describe("IncidentsService.update", () => {
-  it("emails the reporter with the ticket's CC list when the desk changes something customer-visible", async () => {
+  it("emails the assignee, Cc the reporter and CC list, when the desk changes something customer-visible", async () => {
     const before = baseIncident({
       ownerUserId: engineer.id,
       reportedByUserId: "customer-1",
@@ -590,32 +623,46 @@ describe("IncidentsService.update", () => {
           kind: "INCIDENT_UPDATED",
           changes: ["Now handled by Rahul", "Priority changed from P2 to P1"],
         }),
+        // To: the (new) assignee. Cc: the reporter and the CC list.
         recipients: {
-          to: [{ name: "Site POC", email: "customer@example.com" }],
-          cc: [{ name: "ops-lead@client.example", email: "ops-lead@client.example" }],
+          to: [{ name: "Rahul", email: "eng@example.com" }],
+          cc: [
+            { name: "Site POC", email: "customer@example.com" },
+            { email: "ops-lead@client.example" },
+          ],
         },
       }),
-      expect.stringMatching(/^INCIDENT_UPDATED:incident-1:\d+$/),
+      undefined,
     );
+    expect(notifications.enqueue).toHaveBeenCalledTimes(1);
   });
 
-  it("sends no customer update when only internal fields change", async () => {
+  it("mails a staff-only edit to the assignee alone, never the reporter or CC list", async () => {
+    const before = baseIncident({
+      ownerUserId: engineer.id,
+      reportedByUserId: "customer-1",
+      ccEmails: ["ops-lead@client.example"],
+    });
     const { service, notifications } = makeService({
-      incidentFindUnique: jest.fn().mockResolvedValue(
-        baseIncident({
-          ownerUserId: engineer.id,
-          reportedByUserId: "customer-1",
-          ccEmails: ["ops-lead@client.example"],
-        }),
-      ),
+      incidentFindUnique: jest.fn().mockResolvedValue(before),
+      txIncident: updateKeeping(before),
+      userFindUnique: jest
+        .fn()
+        .mockImplementation(({ where }) =>
+          Promise.resolve(
+            where.id === "customer-1"
+              ? { id: "customer-1", email: "customer@example.com", displayName: "Site POC" }
+              : { id: where.id, email: "eng@example.com", displayName: "Eng" },
+          ),
+        ),
     });
     await service.update("incident-1", { impact: "LOW", urgency: "LOW" }, engineer, {
       actorId: engineer.id,
     });
-    expect(notifications.enqueue).not.toHaveBeenCalledWith(
-      expect.objectContaining({ event: expect.objectContaining({ kind: "INCIDENT_UPDATED" }) }),
-      expect.anything(),
-    );
+    expect(notifications.enqueue).toHaveBeenCalledTimes(1);
+    const [job] = (notifications.enqueue as jest.Mock).mock.calls[0];
+    expect(job.event.kind).toBe("INCIDENT_UPDATED");
+    expect(job.recipients).toEqual({ to: [{ name: "Eng", email: "eng@example.com" }] });
   });
 
   it("calls SlaService.onPriorityChanged when priority actually changes", async () => {
@@ -647,9 +694,10 @@ describe("IncidentsService.update", () => {
     expect(slaService.onPriorityChanged).not.toHaveBeenCalled();
   });
 
-  it("notifies the newly assigned owner when a PATCH reassigns the ticket", async () => {
+  it("emails the newly assigned owner once when a PATCH reassigns the ticket", async () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerUserId: null })),
+      txIncident: updateKeeping(baseIncident({ ownerUserId: null })),
       userFindUnique: jest.fn().mockResolvedValue({
         id: "engineer-2",
         email: "engineer2@example.com",
@@ -659,44 +707,37 @@ describe("IncidentsService.update", () => {
     await service.update("incident-1", { ownerUserId: "engineer-2" }, serviceDesk, {
       actorId: serviceDesk.id,
     });
+    expect(notifications.enqueue).toHaveBeenCalledTimes(1);
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: expect.objectContaining({ kind: "INCIDENT_ASSIGNED" }),
+        event: expect.objectContaining({
+          kind: "INCIDENT_UPDATED",
+          changes: ["Now handled by Otis Engineer"],
+        }),
         recipients: { to: [{ name: "Otis Engineer", email: "engineer2@example.com" }] },
       }),
-      "INCIDENT_ASSIGNED:incident-1:engineer-2",
+      undefined,
     );
   });
 
-  it("notifies every member of the group when a PATCH assigns it with no individual owner", async () => {
+  it("emails every active group member when a PATCH assigns it with no individual owner", async () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest
         .fn()
         .mockResolvedValue(baseIncident({ ownerGroupId: null, ownerUserId: null })),
+      txIncident: updateKeeping(baseIncident({ ownerGroupId: null, ownerUserId: null })),
       supportGroupFindUnique: jest.fn().mockResolvedValue({
         id: "group-1",
         name: "Networking",
-        members: [
-          {
-            user: {
-              isActive: true,
-              email: "eng1@example.com",
-              displayName: "Eng One",
-            },
-          },
-          {
-            user: {
-              isActive: true,
-              email: "eng2@example.com",
-              displayName: "Eng Two",
-            },
-          },
-          // inactive members never get paged
-          {
-            user: { isActive: false, email: "gone@example.com", displayName: "Gone" },
-          },
-        ],
+        members: [{ userId: "eng-1" }, { userId: "eng-2" }],
       }),
+      // The query itself leaves out inactive members.
+      supportGroupMemberFindMany: jest
+        .fn()
+        .mockResolvedValue([
+          { user: { isActive: true, email: "eng1@example.com", displayName: "Eng One" } },
+          { user: { isActive: true, email: "eng2@example.com", displayName: "Eng Two" } },
+        ]),
     });
     await service.update("incident-1", { ownerGroupId: "group-1" }, serviceDesk, {
       actorId: serviceDesk.id,
@@ -704,8 +745,11 @@ describe("IncidentsService.update", () => {
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
-          kind: "INCIDENT_GROUP_ASSIGNED",
-          group: { name: "Networking" },
+          kind: "INCIDENT_UPDATED",
+          changes: ["Assigned to the Networking team"],
+          entity: expect.objectContaining({
+            ticket: expect.objectContaining({ assigneeGroup: "Networking" }),
+          }),
         }),
         recipients: {
           to: [
@@ -714,11 +758,11 @@ describe("IncidentsService.update", () => {
           ],
         },
       }),
-      "INCIDENT_GROUP_ASSIGNED:incident-1:group-1",
+      undefined,
     );
   });
 
-  it("notifies the individual owner, not the group, when both are set in the same PATCH", async () => {
+  it("sends one email when owner and group are set in the same PATCH", async () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest
         .fn()
@@ -735,8 +779,9 @@ describe("IncidentsService.update", () => {
       serviceDesk,
       { actorId: serviceDesk.id },
     );
+    // One email for the whole edit, not one per field.
     const kinds = (notifications.enqueue as jest.Mock).mock.calls.map(([job]) => job.event.kind);
-    expect(kinds).toEqual(["INCIDENT_ASSIGNED"]);
+    expect(kinds).toEqual(["INCIDENT_UPDATED"]);
   });
 
   it("does not notify when ownerUserId is left unchanged", async () => {
@@ -1394,9 +1439,16 @@ describe("IncidentsService.createTransition", () => {
     });
   });
 
-  it("notifies the newly assigned owner when NEW -> ASSIGNED resolves one in the same request", async () => {
-    const { service, notifications } = makeService({
+  it("sends one status email to the newly assigned owner when NEW -> ASSIGNED names one", async () => {
+    const { service, notifications, inbox } = makeService({
       incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+      txIncident: {
+        update: jest
+          .fn()
+          .mockImplementation(({ data }) =>
+            Promise.resolve({ ...baseIncident({ ownerUserId: "engineer-1" }), ...data }),
+          ),
+      },
       userFindUnique: jest.fn().mockResolvedValue({
         id: "engineer-1",
         email: "engineer@example.com",
@@ -1409,20 +1461,36 @@ describe("IncidentsService.createTransition", () => {
       { actorId: serviceDesk.id },
       serviceDesk,
     );
+    expect(notifications.enqueue).toHaveBeenCalledTimes(1);
     expect(notifications.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({ event: expect.objectContaining({ kind: "INCIDENT_ASSIGNED" }) }),
-      "INCIDENT_ASSIGNED:incident-1:engineer-1",
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "INCIDENT_STATUS_CHANGED",
+          from: "New",
+          to: "Assigned",
+        }),
+        recipients: { to: [{ name: "Engineer One", email: "engineer@example.com" }] },
+      }),
+      undefined,
+    );
+    expect(inbox.notifyUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ userIds: ["engineer-1"], kind: "INCIDENT_ASSIGNED" }),
     );
   });
 
-  it("notifies the group when NEW -> ASSIGNED resolves one with no individual owner", async () => {
+  it("sends the status email to the group when NEW -> ASSIGNED names no individual owner", async () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
       supportGroupFindUnique: jest.fn().mockResolvedValue({
         id: "group-1",
         name: "Networking",
-        members: [{ user: { isActive: true, email: "eng1@example.com", displayName: "Eng One" } }],
+        members: [{ userId: "eng-1" }],
       }),
+      supportGroupMemberFindMany: jest
+        .fn()
+        .mockResolvedValue([
+          { user: { isActive: true, email: "eng1@example.com", displayName: "Eng One" } },
+        ]),
     });
     await service.createTransition(
       "incident-1",
@@ -1430,16 +1498,17 @@ describe("IncidentsService.createTransition", () => {
       { actorId: serviceDesk.id },
       serviceDesk,
     );
+    expect(notifications.enqueue).toHaveBeenCalledTimes(1);
     expect(notifications.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: expect.objectContaining({ kind: "INCIDENT_GROUP_ASSIGNED" }),
+        event: expect.objectContaining({ kind: "INCIDENT_STATUS_CHANGED" }),
         recipients: { to: [{ name: "Eng One", email: "eng1@example.com" }] },
       }),
-      "INCIDENT_GROUP_ASSIGNED:incident-1:group-1",
+      undefined,
     );
   });
 
-  it("notifies owner (to) and cc's the reporting customer on every status change", async () => {
+  it("emails the owner, Cc the reporting customer, on every status change", async () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest.fn().mockResolvedValue(
         baseIncident({
@@ -1461,30 +1530,35 @@ describe("IncidentsService.createTransition", () => {
           }),
         ),
       },
-      userFindMany: jest.fn().mockResolvedValue([
-        { id: engineer.id, email: "engineer@example.com", displayName: "Engineer One" },
-        { id: "customer-1", email: "customer@example.com", displayName: "Site POC" },
-      ]),
+      userFindUnique: jest
+        .fn()
+        .mockImplementation(({ where }) =>
+          Promise.resolve(
+            where.id === "customer-1"
+              ? { id: "customer-1", email: "customer@example.com", displayName: "Site POC" }
+              : { id: engineer.id, email: "engineer@example.com", displayName: "Engineer One" },
+          ),
+        ),
     });
     await service.createTransition(
       "incident-1",
-      { toStatus: IncidentStatus.IN_PROGRESS },
+      { toStatus: IncidentStatus.IN_PROGRESS, reason: "staff-only note" },
       { actorId: engineer.id },
       engineer,
     );
-    expect(notifications.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: expect.objectContaining({
-          kind: "INCIDENT_STATUS_CHANGED",
-          from: IncidentStatus.ACKNOWLEDGED,
-          to: IncidentStatus.IN_PROGRESS,
-        }),
-        recipients: {
-          to: [{ name: "Engineer One", email: "engineer@example.com" }],
-          cc: [{ name: "Site POC", email: "customer@example.com" }],
-        },
-      }),
-    );
+    const [job] = (notifications.enqueue as jest.Mock).mock.calls[0];
+    // Both show as "In Progress" on the ticket, so the mail names them.
+    expect(job.event).toMatchObject({
+      kind: "INCIDENT_STATUS_CHANGED",
+      from: "Acknowledged",
+      to: "In progress",
+    });
+    // The transition reason is a staff field the client never sees.
+    expect(job.event.comment).toBeUndefined();
+    expect(job.recipients).toEqual({
+      to: [{ name: "Engineer One", email: "engineer@example.com" }],
+      cc: [{ name: "Site POC", email: "customer@example.com" }],
+    });
   });
 
   it("skips the status-change notification when the owner lookup comes back with no email", async () => {
@@ -1762,60 +1836,87 @@ describe("IncidentsService.createComment isInternal enforcement", () => {
 });
 
 describe("IncidentsService.createComment notifications", () => {
-  it("notifies the assigned owner when the customer comments", async () => {
+  // engineer owns the ticket; customer-1 reported it; one address on the CC list.
+  const people = jest.fn().mockImplementation(({ where }) =>
+    Promise.resolve(
+      where.id === engineer.id
+        ? { id: engineer.id, email: "engineer@example.com", displayName: "Engineer One" }
+        : where.id === "customer-1"
+          ? {
+              id: "customer-1",
+              email: "customer@example.com",
+              displayName: "Site POC",
+              role: UserRole.CLIENT_MANAGER_VIEWER,
+            }
+          : null,
+    ),
+  );
+  const ticket = () =>
+    baseIncident({
+      ownerUserId: engineer.id,
+      reportedByUserId: "customer-1",
+      ccEmails: ["ops-lead@client.example"],
+    });
+
+  it("emails the customer's reply to the assignee, Cc the reporter and CC list, naming who wrote it", async () => {
+    const customer = { ...clientViewer, id: "customer-1" };
     const { service, notifications } = makeService({
-      incidentFindUnique: jest
-        .fn()
-        .mockResolvedValue(
-          baseIncident({ ownerUserId: engineer.id, reportedByUserId: clientViewer.id }),
-        ),
-      userFindUnique: jest.fn().mockResolvedValue({
-        id: engineer.id,
-        email: "engineer@example.com",
-        displayName: "Engineer One",
-      }),
+      incidentFindUnique: jest.fn().mockResolvedValue(ticket()),
+      userFindUnique: people,
     });
     await service.createComment(
       "incident-1",
       { body: "Any update?" },
-      { actorId: clientViewer.id },
-      clientViewer,
+      { actorId: customer.id },
+      customer,
     );
-    expect(notifications.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: expect.objectContaining({ kind: "INCIDENT_COMMENT_ADDED", body: "Any update?" }),
-        recipients: { to: [{ name: "Engineer One", email: "engineer@example.com" }] },
-      }),
-    );
+    expect(notifications.enqueue).toHaveBeenCalledTimes(1);
+    const [job] = (notifications.enqueue as jest.Mock).mock.calls[0];
+    expect(job.event).toMatchObject({
+      kind: "INCIDENT_COMMENT_ADDED",
+      body: "Any update?",
+      internal: false,
+      entity: {
+        ticket: { updatedBy: { name: "Site POC", role: "Client" } },
+      },
+    });
+    expect(job.recipients).toEqual({
+      to: [{ name: "Engineer One", email: "engineer@example.com" }],
+      cc: [
+        { name: "Site POC", email: "customer@example.com" },
+        { email: "ops-lead@client.example" },
+      ],
+    });
   });
 
-  it("skips the customer notification when the ticket has no owner yet", async () => {
+  it("sends the reply to the service desk when the ticket has no assignee or group yet", async () => {
     const { service, notifications } = makeService({
       incidentFindUnique: jest
         .fn()
-        .mockResolvedValue(baseIncident({ ownerUserId: null, reportedByUserId: clientViewer.id })),
+        .mockResolvedValue(baseIncident({ ownerUserId: null, reportedByUserId: "customer-1" })),
+      userFindUnique: people,
+      userFindMany: jest
+        .fn()
+        .mockResolvedValue([{ id: "desk-1", email: "desk@example.com", displayName: "Desk" }]),
     });
+    const customer = { ...clientViewer, id: "customer-1" };
     await service.createComment(
       "incident-1",
       { body: "Any update?" },
-      { actorId: clientViewer.id },
-      clientViewer,
+      { actorId: customer.id },
+      customer,
     );
-    expect(notifications.enqueue).not.toHaveBeenCalled();
+    const [job] = (notifications.enqueue as jest.Mock).mock.calls[0];
+    expect(job.recipients).toEqual({
+      to: [{ name: "Desk", email: "desk@example.com" }],
+      cc: [{ name: "Site POC", email: "customer@example.com" }],
+    });
   });
 
-  it("notifies the reporting customer when staff posts a customer-visible reply", async () => {
+  it("emails a staff reply the client can see to everyone on the ticket", async () => {
     const { service, notifications } = makeService({
-      incidentFindUnique: jest
-        .fn()
-        .mockResolvedValue(
-          baseIncident({ ownerUserId: engineer.id, reportedByUserId: "customer-1" }),
-        ),
-      userFindUnique: jest.fn().mockResolvedValue({
-        id: "customer-1",
-        email: "customer@example.com",
-        displayName: "Site POC",
-      }),
+      incidentFindUnique: jest.fn().mockResolvedValue(ticket()),
+      userFindUnique: people,
     });
     await service.createComment(
       "incident-1",
@@ -1823,21 +1924,22 @@ describe("IncidentsService.createComment notifications", () => {
       { actorId: engineer.id },
       engineer,
     );
-    expect(notifications.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: expect.objectContaining({ kind: "INCIDENT_COMMENT_ADDED" }),
-        recipients: { to: [{ name: "Site POC", email: "customer@example.com" }] },
-      }),
-    );
+    expect(notifications.enqueue).toHaveBeenCalledTimes(1);
+    const [job] = (notifications.enqueue as jest.Mock).mock.calls[0];
+    expect(job.event).toMatchObject({ kind: "INCIDENT_COMMENT_ADDED", internal: false });
+    expect(job.recipients).toEqual({
+      to: [{ name: "Engineer One", email: "engineer@example.com" }],
+      cc: [
+        { name: "Site POC", email: "customer@example.com" },
+        { email: "ops-lead@client.example" },
+      ],
+    });
   });
 
-  it("does not notify anyone for an internal-only note between staff", async () => {
+  it("emails an internal note to the assignee only, never the reporter or CC list", async () => {
     const { service, notifications } = makeService({
-      incidentFindUnique: jest
-        .fn()
-        .mockResolvedValue(
-          baseIncident({ ownerUserId: engineer.id, reportedByUserId: "customer-1" }),
-        ),
+      incidentFindUnique: jest.fn().mockResolvedValue(ticket()),
+      userFindUnique: people,
     });
     await service.createComment(
       "incident-1",
@@ -1845,7 +1947,11 @@ describe("IncidentsService.createComment notifications", () => {
       { actorId: engineer.id },
       engineer,
     );
-    expect(notifications.enqueue).not.toHaveBeenCalled();
+    const [job] = (notifications.enqueue as jest.Mock).mock.calls[0];
+    expect(job.event).toMatchObject({ kind: "INCIDENT_COMMENT_ADDED", internal: true });
+    expect(job.recipients).toEqual({
+      to: [{ name: "Engineer One", email: "engineer@example.com" }],
+    });
   });
 });
 
@@ -2326,12 +2432,15 @@ describe("IncidentsService.autoAssign", () => {
       expect.objectContaining({ action: "TRANSITION", actorId: null, correlationId: "corr-1" }),
       tx,
     );
-    expect(notifications.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: expect.objectContaining({ kind: "INCIDENT_ASSIGNED" }),
-      }),
-      "INCIDENT_ASSIGNED:incident-1:eng-1",
-    );
+    // One email for the move, from "Skill-based routing", to the new owner.
+    expect(notifications.enqueue).toHaveBeenCalledTimes(1);
+    const [job] = (notifications.enqueue as jest.Mock).mock.calls[0];
+    expect(job.event).toMatchObject({
+      kind: "INCIDENT_STATUS_CHANGED",
+      to: "Assigned",
+      entity: { ticket: { assignee: "Eng", updatedBy: { name: "Skill-based routing" } } },
+    });
+    expect(job.recipients).toEqual({ to: [{ name: "Eng", email: "eng@corp.example" }] });
   });
 
   it("does nothing when the incident is no longer NEW", async () => {

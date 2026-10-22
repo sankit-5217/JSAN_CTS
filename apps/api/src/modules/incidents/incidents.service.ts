@@ -20,7 +20,7 @@ import {
   Priority,
   UserRole,
 } from "@prisma/client";
-import type { Party } from "@cts-dc-opsdesk/email-adapter";
+import type { NotificationEvent } from "@cts-dc-opsdesk/email-adapter";
 import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
 import { StorageService } from "../../common/storage/storage.service";
 import { ActorContext } from "../../common/types/actor-context.type";
@@ -37,6 +37,7 @@ import { isAllowedAttachment, MAX_ATTACHMENT_SIZE_BYTES } from "./attachment.con
 import { assertSiteAcceptsNewWork } from "../sites/site-status";
 import { REPORT_FIELDS, ReportNames, ReportValues, diffReport, idsToName } from "./report-changes";
 import { IssueReportingService } from "./issue-reporting.service";
+import { ticketEntityRef, ticketRecipients, ticketStatusLabel } from "./ticket-mail";
 import {
   INCIDENT_CREATED_EVENT,
   INCIDENT_UPDATED_EVENT,
@@ -205,12 +206,35 @@ async function sha256Of(file: UploadedAttachmentFile): Promise<string> {
   return hash.digest("hex");
 }
 
-/** The ticket's CC List as mail parties, minus anyone already addressed. */
-function ccParties(incident: Incident, already: Party[]): Party[] {
-  const taken = new Set(already.map((p) => p.email.toLowerCase()));
-  return (incident.ccEmails ?? [])
-    .filter((email) => !taken.has(email.toLowerCase()))
-    .map((email) => ({ name: email, email }));
+/** A ticket email's event before the ticket's own details are filled in. */
+type WithoutEntity<E> = E extends unknown ? Omit<E, "entity"> : never;
+type TicketMailEvent = WithoutEntity<NotificationEvent>;
+
+/** Staff-only fields an edit changed, for a mail to the assignee and group. */
+function describeStaffOnlyChanges(before: Incident, after: Incident): string[] {
+  return (
+    [
+      ["Impact", "impact"],
+      ["Urgency", "urgency"],
+      ["Category", "category"],
+    ] as const
+  )
+    .filter(([, key]) => (after[key] ?? "") !== (before[key] ?? ""))
+    .map(([label, key]) => `${label}: ${before[key] ?? "none"} → ${after[key] ?? "none"}`)
+    .concat(after.ciId !== before.ciId ? ["Configuration item changed"] : []);
+}
+
+/** "Acknowledged" for ACKNOWLEDGED: when two states share a template label. */
+function rawStatusLabel(status: IncidentStatus): string {
+  const words = status.toLowerCase().replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** multer hands over a UTF-8 file name decoded as latin1; undo that. */
+function uploadFileName(name: string): string {
+  if ([...name].some((ch) => ch.charCodeAt(0) > 0xff)) return name;
+  const decoded = Buffer.from(name, "latin1").toString("utf8");
+  return decoded.includes(String.fromCharCode(0xfffd)) ? name : decoded;
 }
 
 /**
@@ -635,12 +659,17 @@ export class IncidentsService {
       );
       return after;
     });
-    // The desk changing the list is news to the reporter and to whoever
-    // was just added; the reporter editing their own list is not.
-    if (user.role !== UserRole.CLIENT_MANAGER_VIEWER) {
-      await this.notifyCustomerUpdate(after, [
-        `CC list is now: ${ccEmails.length > 0 ? ccEmails.join(", ") : "empty"}`,
-      ]);
+    // Whoever changed it, everyone on the ticket hears, including whoever
+    // was just added (they are on Cc of this very mail).
+    if (!sameValue(before.ccEmails, ccEmails)) {
+      await this.mailTicket(
+        after,
+        {
+          kind: "INCIDENT_UPDATED",
+          changes: [`CC list is now: ${ccEmails.length > 0 ? ccEmails.join(", ") : "empty"}`],
+        },
+        { userId: actor.actorId },
+      );
     }
     return after;
   }
@@ -705,10 +734,19 @@ export class IncidentsService {
       actor,
       { ownerChanged, priorityChanged },
     );
-    // The reporter and the CC list hear about desk-side edits that matter
-    // to them (who is handling it, priority, subject, classification, the
-    // CC list itself) — internal fields like impact/urgency/CI stay quiet.
-    await this.notifyCustomerUpdate(after, await this.describeCustomerChanges(before, after));
+    // One mail per saved edit. Changes the client can see go to everyone;
+    // an edit of staff-only fields (impact, urgency, category, CI) goes to
+    // the assignee and group only.
+    const changes = await this.describeCustomerChanges(before, after);
+    const staffChanges = describeStaffOnlyChanges(before, after);
+    if (changes.length > 0 || staffChanges.length > 0) {
+      await this.mailTicket(
+        after,
+        { kind: "INCIDENT_UPDATED", changes: changes.length > 0 ? changes : staffChanges },
+        { userId: actor.actorId },
+        { internal: changes.length === 0 },
+      );
+    }
     return after;
   }
 
@@ -810,6 +848,7 @@ export class IncidentsService {
     const changes = await this.describeCustomerChanges(before, after);
     if (changes.length > 0) {
       await this.notifyReporterEdit(after, changes, user.id);
+      await this.mailTicket(after, { kind: "INCIDENT_UPDATED", changes }, { userId: user.id });
     }
     return after;
   }
@@ -1035,44 +1074,33 @@ export class IncidentsService {
   }
 
   /**
-   * Customer-facing "ticket updated" mail: to the reporter, CC the ticket's
-   * CC list (or straight to the CC list when the ticket has no reporter on
-   * record). Best-effort like every other notification here. The CC list is
-   * read from the row as it is *now*, so an edit to the list reaches the
-   * new addresses with this very mail.
+   * The one way a change to a ticket reaches people by email: subject
+   * `INC-00002[Bug][P3,S3] Subject`, To the assignee and assignee group,
+   * Cc the reporter and the CC list (never on an internal mail), and a
+   * first line naming who did it (see ticket-mail.ts). Each operation sends
+   * exactly one. The row is read as it is *now*, so a CC-list edit reaches
+   * the new addresses with this very mail. Best-effort: the change is
+   * already saved and audited, so a failure here is logged, never thrown.
    */
-  private async notifyCustomerUpdate(incident: Incident, changes: string[]): Promise<void> {
-    if (changes.length === 0) {
-      return;
-    }
+  private async mailTicket(
+    incident: Incident,
+    event: TicketMailEvent,
+    by: { userId?: string | null; name?: string },
+    opts: { internal?: boolean; jobId?: string } = {},
+  ): Promise<void> {
     try {
-      const reporter = incident.reportedByUserId
-        ? await this.prisma.user.findUnique({ where: { id: incident.reportedByUserId } })
-        : null;
-      const to: Party[] = reporter?.email
-        ? [{ name: reporter.displayName, email: reporter.email }]
-        : [];
-      const cc = ccParties(incident, to);
-      const recipients =
-        to.length > 0
-          ? { to, cc: cc.length > 0 ? cc : undefined }
-          : cc.length > 0
-            ? { to: cc }
-            : null;
+      const recipients = await ticketRecipients(this.prisma, incident, opts);
       if (!recipients) {
         return;
       }
+      const entity = await ticketEntityRef(this.prisma, incident, by);
       await this.notifications.enqueue(
-        {
-          event: { kind: "INCIDENT_UPDATED", entity: this.toEntityRef(incident), changes },
-          recipients,
-        },
-        // Two colons only (see notifyAlertRecoveredEmail): one mail per saved edit.
-        `INCIDENT_UPDATED:${incident.id}:${incident.updatedAt?.getTime() ?? Date.now()}`,
+        { event: { ...event, entity } as NotificationEvent, recipients },
+        opts.jobId,
       );
     } catch (err) {
       this.logger.warn(
-        `ticket-updated notification skipped for incident ${incident.id}: ${
+        `${event.kind} email skipped for incident ${incident.id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -1857,7 +1885,7 @@ export class IncidentsService {
         {
           event: {
             kind: "INCIDENT_ALERT_RECOVERED_AFTER_RESOLVE",
-            entity: this.toEntityRef(incident),
+            entity: await ticketEntityRef(this.prisma, incident),
             alertType: alert.alertType,
             severity: alert.severity,
             recoveredAt: recoveredAt.toISOString(),
@@ -2024,7 +2052,8 @@ export class IncidentsService {
       throw new BadRequestException("No file was sent");
     }
     try {
-      await this.findOneScoped(incidentId, user);
+      const incident = await this.findOneScoped(incidentId, user);
+      file.originalname = uploadFileName(file.originalname);
       // A file sent with a message: only onto your own message on this ticket.
       if (commentId) {
         const comment = await this.prisma.incidentComment.findUnique({ where: { id: commentId } });
@@ -2035,7 +2064,18 @@ export class IncidentsService {
           throw new ForbiddenException("You can only attach files to your own messages");
         }
       }
-      return await this.storeAttachment(incidentId, file, actor, commentId);
+      const attachment = await this.storeAttachment(incidentId, file, actor, commentId);
+      // A file sent with a message is part of that message, which already
+      // had its email; a file added on its own gets one. Files outside a
+      // message are visible to the client, so this goes to everyone.
+      if (!commentId) {
+        await this.mailTicket(
+          incident,
+          { kind: "INCIDENT_ATTACHMENT_ADDED", fileName: file.originalname },
+          { userId: actor.actorId },
+        );
+      }
+      return attachment;
     } finally {
       // The temp file multer streamed the upload into is ours to remove,
       // whether the upload was accepted or not.
@@ -2184,7 +2224,7 @@ export class IncidentsService {
     actor: ActorContext,
     user: AuthenticatedUser,
   ): Promise<void> {
-    await this.findOneScoped(incidentId, user);
+    const incident = await this.findOneScoped(incidentId, user);
     const before = await this.findLiveAttachment(incidentId, attachmentId, user);
     // A customer can take back their own evidence, never the desk's.
     if (user.role === UserRole.CLIENT_MANAGER_VIEWER && before.uploadedById !== user.id) {
@@ -2222,6 +2262,23 @@ export class IncidentsService {
         tx,
       );
     });
+
+    // A file from an internal note was never visible to the client, so
+    // its removal is staff news only.
+    const internal = before.commentId
+      ? (await this.prisma.incidentComment.findUnique({ where: { id: before.commentId } }))
+          ?.isInternal !== false
+      : false;
+    const fileName = (before.objectKey.split("/").pop() ?? before.objectKey).replace(
+      /^[0-9a-f-]{36}-/,
+      "",
+    );
+    await this.mailTicket(
+      incident,
+      { kind: "INCIDENT_UPDATED", changes: [`Removed file ${fileName}`] },
+      { userId: actor.actorId },
+      { internal },
+    );
   }
 
   // --- Stakeholder notifications (best-effort) --------------------------
@@ -2232,31 +2289,13 @@ export class IncidentsService {
   // missing/unreachable notifications queue must never fail the request
   // that triggered it — the domain write already succeeded.
 
-  private toEntityRef(incident: Pick<Incident, "incidentNo" | "shortDescription" | "priority">) {
-    return {
-      key: incident.incidentNo,
-      title: incident.shortDescription,
-      priority: incident.priority,
-    };
-  }
-
-  private partyFor(
-    users: { id: string; email: string; displayName: string }[],
-    id: string | null,
-  ): Party | undefined {
-    const match = id ? users.find((u) => u.id === id) : undefined;
-    return match?.email ? { name: match.displayName, email: match.email } : undefined;
-  }
-
   /**
-   * Tell the service desk/NOC roster the moment a ticket is raised. Before
-   * this, the first notification any incident ever got was on assignment —
-   * a brand-new ticket could sit unnoticed in the queue until someone
-   * happened to look. Called from create() (and so from createFromCustomer()
-   * too, which calls create() internally) — one insertion point covers both
-   * staff-created and customer self-service tickets. Mirrors
-   * AlertsService.notifyNocOfCriticalAlert's role-roster pattern; there was
-   * no equivalent "page the desk" helper in this module yet.
+   * Tell the service desk/NOC roster (bell) the moment a ticket is raised,
+   * and send the ticket's first email (see mailTicket): to the assignee and
+   * group it landed with, else the service desk; the reporter and CC list
+   * on Cc. Called from create() (and so from createFromCustomer() too,
+   * which calls create() internally) — one insertion point covers both
+   * staff-created and customer self-service tickets.
    */
   private async notifyServiceDeskOfNewIncident(
     incident: Incident,
@@ -2265,7 +2304,7 @@ export class IncidentsService {
     try {
       const roster = await this.prisma.user.findMany({
         where: { isActive: true, role: UserRole.SERVICE_DESK_NOC },
-        select: { id: true, email: true, displayName: true },
+        select: { id: true },
       });
       await this.inbox.notifyUsers({
         userIds: roster.map((u) => u.id),
@@ -2278,28 +2317,6 @@ export class IncidentsService {
         level: levelForPriority(incident.priority),
         dedupeKey: `created:${incident.id}`,
       });
-      const to = roster
-        .filter((u) => u.email)
-        .map((u) => ({ name: u.displayName, email: u.email }));
-      if (to.length === 0) {
-        return;
-      }
-      let reporter: Party | undefined;
-      if (incident.reportedByUserId) {
-        const reportedBy = await this.prisma.user.findUnique({
-          where: { id: incident.reportedByUserId },
-        });
-        reporter = reportedBy?.email
-          ? { name: reportedBy.displayName, email: reportedBy.email }
-          : undefined;
-      }
-      await this.notifications.enqueue(
-        {
-          event: { kind: "INCIDENT_CREATED", entity: this.toEntityRef(incident), reporter },
-          recipients: { to },
-        },
-        `INCIDENT_CREATED:${incident.id}:new`,
-      );
     } catch (err) {
       this.logger.warn(
         `new-incident service-desk notification skipped for incident ${incident.id}: ${
@@ -2307,19 +2324,24 @@ export class IncidentsService {
         }`,
       );
     }
+    await this.mailTicket(
+      incident,
+      { kind: "INCIDENT_CREATED", description: incident.description ?? undefined },
+      { userId: actorUserId },
+      { jobId: `INCIDENT_CREATED:${incident.id}:new` },
+    );
   }
 
-  /** Tell the (re)assigned owner. Called from createTransition (assigning as
-   *  part of a status move) and update() (a plain reassignment via PATCH). */
+  /** The (re)assigned owner's bell. Its email is the one the operation that
+   *  assigned it sends (create, edit, status change), never a second one. */
   private async notifyAssignment(
     incident: Incident,
     ownerUserId: string,
     actorUserId?: string,
   ): Promise<void> {
     try {
-      // The in-app key includes updatedAt so that a later re-assignment back
-      // to the same engineer shows up again. The email's jobId intentionally
-      // doesn't include it.
+      // The key includes updatedAt so that a later re-assignment back to
+      // the same engineer shows up again.
       await this.inbox.notifyUsers({
         userIds: [ownerUserId],
         actorUserId,
@@ -2331,18 +2353,6 @@ export class IncidentsService {
         level: levelForPriority(incident.priority),
         dedupeKey: `assigned:${incident.id}:${ownerUserId}:${incident.updatedAt.getTime()}`,
       });
-      const assignee = await this.prisma.user.findUnique({ where: { id: ownerUserId } });
-      if (!assignee?.email) {
-        return;
-      }
-      const party: Party = { name: assignee.displayName, email: assignee.email };
-      await this.notifications.enqueue(
-        {
-          event: { kind: "INCIDENT_ASSIGNED", entity: this.toEntityRef(incident), assignee: party },
-          recipients: { to: [party] },
-        },
-        `INCIDENT_ASSIGNED:${incident.id}:${ownerUserId}`,
-      );
     } catch (err) {
       this.logger.warn(
         `assignment notification skipped for incident ${incident.id}: ${err instanceof Error ? err.message : String(err)}`,
@@ -2350,11 +2360,10 @@ export class IncidentsService {
     }
   }
 
-  /** Tell every member of a support group when a ticket lands in their
-   *  queue with no individual owner yet — otherwise a group assignment
-   *  satisfies the NEW -> ASSIGNED gate but pages nobody. Only called when
-   *  ownerUserId is unset; once someone claims it, notifyAssignment takes
-   *  over. */
+  /** Every group member's bell when a ticket lands in their queue with no
+   *  individual owner yet — otherwise a group assignment satisfies the
+   *  NEW -> ASSIGNED gate but pages nobody. The email is the operation's
+   *  own (the group is on its To line). */
   private async notifyGroupAssignment(
     incident: Incident,
     ownerGroupId: string,
@@ -2363,13 +2372,13 @@ export class IncidentsService {
     try {
       const group = await this.prisma.supportGroup.findUnique({
         where: { id: ownerGroupId },
-        include: { members: { include: { user: true } } },
+        include: { members: true },
       });
       if (!group) {
         return;
       }
       await this.inbox.notifyUsers({
-        userIds: group.members.map((m) => m.user.id),
+        userIds: group.members.map((m) => m.userId),
         actorUserId,
         kind: InAppNotificationKind.INCIDENT_GROUP_ASSIGNED,
         title: `${incident.incidentNo} assigned to ${group.name}`,
@@ -2379,23 +2388,6 @@ export class IncidentsService {
         level: levelForPriority(incident.priority),
         dedupeKey: `group:${incident.id}:${ownerGroupId}:${incident.updatedAt.getTime()}`,
       });
-      const to: Party[] = group.members
-        .filter((m) => m.user.isActive && m.user.email)
-        .map((m) => ({ name: m.user.displayName, email: m.user.email }));
-      if (to.length === 0) {
-        return;
-      }
-      await this.notifications.enqueue(
-        {
-          event: {
-            kind: "INCIDENT_GROUP_ASSIGNED",
-            entity: this.toEntityRef(incident),
-            group: { name: group.name },
-          },
-          recipients: { to },
-        },
-        `INCIDENT_GROUP_ASSIGNED:${incident.id}:${ownerGroupId}`,
-      );
     } catch (err) {
       this.logger.warn(
         `group-assignment notification skipped for incident ${incident.id}: ${err instanceof Error ? err.message : String(err)}`,
@@ -2404,10 +2396,11 @@ export class IncidentsService {
   }
 
   /**
-   * Tell the owner (to) and, when this ticket came in through customer
-   * self-service, cc the reporting customer on every status move — the
-   * "keep the client updated, cc'd on the ticket" loop. No-ops if neither
-   * has an email on file (still unassigned and not customer-reported).
+   * Bells for the owner and the reporter, and one email to everyone on the
+   * ticket. The email shows the status as the ticket does and leaves out
+   * the transition reason, a staff field the client never sees (anything
+   * meant for them goes in a customer-visible reply). `actorUserId` unset
+   * means skill-based routing moved it.
    */
   private async notifyStatusChange(
     before: Incident,
@@ -2416,12 +2409,6 @@ export class IncidentsService {
     actorUserId?: string,
   ): Promise<void> {
     try {
-      const ids = [after.ownerUserId, after.reportedByUserId].filter((v): v is string =>
-        Boolean(v),
-      );
-      if (ids.length === 0) {
-        return;
-      }
       const dedupeKey = `status:${after.id}:${after.status}:${after.updatedAt.getTime()}`;
       await this.inbox.notifyUsers({
         userIds: [after.ownerUserId],
@@ -2434,9 +2421,6 @@ export class IncidentsService {
         level: levelForPriority(after.priority),
         dedupeKey,
       });
-      // The customer's bell gets plain language and never the transition
-      // reason, which is a staff field (the timeline hides it from them
-      // too). Anything meant for them goes in a customer-visible reply.
       await this.inbox.notifyUsers({
         userIds: [after.reportedByUserId],
         actorUserId,
@@ -2448,39 +2432,31 @@ export class IncidentsService {
         level: levelForPriority(after.priority),
         dedupeKey,
       });
-      const users = await this.prisma.user.findMany({ where: { id: { in: ids } } });
-      const owner = this.partyFor(users, after.ownerUserId);
-      const customer = this.partyFor(users, after.reportedByUserId);
-      const to = owner ? [owner] : customer ? [customer] : [];
-      if (to.length === 0) {
-        return;
-      }
-      // The ticket's CC List rides along on every customer-facing status
-      // mail, after the reporter.
-      const cc = [...(owner && customer ? [customer] : []), ...ccParties(after, to)];
-      await this.notifications.enqueue({
-        event: {
-          kind: "INCIDENT_STATUS_CHANGED",
-          entity: this.toEntityRef(after),
-          from: before.status,
-          to: after.status,
-          comment: reason,
-        },
-        recipients: { to, cc: cc.length > 0 ? cc : undefined },
-      });
     } catch (err) {
       this.logger.warn(
         `status-change notification skipped for incident ${after.id}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    // Two states can share a label (Acknowledged and In Progress both show
+    // as "In Progress"); then say which, rather than "X → X".
+    let from = ticketStatusLabel(before.status);
+    let to = ticketStatusLabel(after.status);
+    if (from === to) {
+      from = rawStatusLabel(before.status);
+      to = rawStatusLabel(after.status);
+    }
+    await this.mailTicket(
+      after,
+      { kind: "INCIDENT_STATUS_CHANGED", from, to },
+      actorUserId ? { userId: actorUserId } : { name: "Skill-based routing" },
+    );
   }
 
   /**
-   * Only notifies the *other side* of the conversation: an internal reply
-   * explicitly marked customer-visible tells the reporting customer; an
-   * internal-only note between staff notifies no one. A customer's reply
-   * goes to whoever is handling the ticket (see supportRecipientIds), so it
-   * always reaches someone, even on an unassigned ticket.
+   * Bell for the other side of the conversation, and one email: a reply
+   * the client can see goes to everyone on the ticket; an internal note
+   * only to the assignee and group. A customer's reply reaches whoever is
+   * handling the ticket (see supportRecipientIds), even unassigned.
    */
   private async notifyComment(
     incident: Incident,
@@ -2489,44 +2465,36 @@ export class IncidentsService {
   ): Promise<void> {
     if (author.role === UserRole.CLIENT_MANAGER_VIEWER) {
       await this.notifyCustomerReply(incident, comment, author);
-      return;
-    }
-    try {
-      const recipientId = comment.isInternal ? null : incident.reportedByUserId;
-      if (!recipientId) {
-        return;
+    } else if (!comment.isInternal && incident.reportedByUserId) {
+      try {
+        await this.inbox.notifyUsers({
+          userIds: [incident.reportedByUserId],
+          actorUserId: author.id,
+          kind: InAppNotificationKind.INCIDENT_COMMENT_ADDED,
+          title: `New reply from the service desk on ${incident.incidentNo}`,
+          body: comment.body.length > 200 ? `${comment.body.slice(0, 199)}…` : comment.body,
+          entityType: "INCIDENT",
+          entityId: incident.id,
+          level: levelForPriority(incident.priority),
+          dedupeKey: `comment:${comment.id}`,
+        });
+      } catch (err) {
+        this.logger.warn(
+          `comment notification skipped for incident ${incident.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
-      await this.inbox.notifyUsers({
-        userIds: [recipientId],
-        actorUserId: author.id,
-        kind: InAppNotificationKind.INCIDENT_COMMENT_ADDED,
-        title: `New reply from the service desk on ${incident.incidentNo}`,
-        body: comment.body.length > 200 ? `${comment.body.slice(0, 199)}…` : comment.body,
-        entityType: "INCIDENT",
-        entityId: incident.id,
-        level: levelForPriority(incident.priority),
-        dedupeKey: `comment:${comment.id}`,
-      });
-      const recipient = await this.prisma.user.findUnique({ where: { id: recipientId } });
-      if (!recipient?.email) {
-        return;
-      }
-      const to = [{ name: recipient.displayName, email: recipient.email }];
-      const cc = ccParties(incident, to);
-      await this.notifications.enqueue({
-        event: {
-          kind: "INCIDENT_COMMENT_ADDED",
-          entity: this.toEntityRef(incident),
-          author: { email: author.email },
-          body: comment.body,
-        },
-        recipients: { to, cc: cc.length > 0 ? cc : undefined },
-      });
-    } catch (err) {
-      this.logger.warn(
-        `comment notification skipped for incident ${incident.id}: ${err instanceof Error ? err.message : String(err)}`,
-      );
     }
+    await this.mailTicket(
+      incident,
+      {
+        kind: "INCIDENT_COMMENT_ADDED",
+        author: { email: author.email },
+        body: comment.body,
+        internal: comment.isInternal,
+      },
+      { userId: author.id },
+      { internal: comment.isInternal },
+    );
   }
 
   private async notifyCustomerReply(
@@ -2548,22 +2516,6 @@ export class IncidentsService {
         entityId: incident.id,
         level: levelForPriority(incident.priority),
         dedupeKey: `comment:${comment.id}`,
-      });
-      if (!incident.ownerUserId) {
-        return;
-      }
-      const owner = await this.prisma.user.findUnique({ where: { id: incident.ownerUserId } });
-      if (!owner?.email) {
-        return;
-      }
-      await this.notifications.enqueue({
-        event: {
-          kind: "INCIDENT_COMMENT_ADDED",
-          entity: this.toEntityRef(incident),
-          author: { email: author.email },
-          body: comment.body,
-        },
-        recipients: { to: [{ name: owner.displayName, email: owner.email }] },
       });
     } catch (err) {
       this.logger.warn(

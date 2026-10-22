@@ -1,4 +1,11 @@
-import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from "@nestjs/common";
 import { OnEvent } from "@nestjs/event-emitter";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import {
@@ -25,6 +32,7 @@ import {
   IncidentUpdatedEvent,
 } from "../incidents/incident-events";
 import { IncidentsService } from "../incidents/incidents.service";
+import { ticketEntityRef } from "../incidents/ticket-mail";
 import { CategoryTeamsService } from "./category-teams.service";
 import { offerTimeoutFor, RoutingCandidate, RoutingService } from "./routing.service";
 
@@ -354,11 +362,7 @@ export class RoutingOffersService {
         {
           event: {
             kind: "INCIDENT_OFFERED",
-            entity: {
-              key: incident.incidentNo,
-              title: incident.shortDescription,
-              priority: incident.priority,
-            },
+            entity: await ticketEntityRef(this.prisma, incident),
             offeredTo: { name: next.displayName, email: next.email },
             expiresAt: expiresAt.toISOString(),
             timeoutMinutes,
@@ -424,11 +428,7 @@ export class RoutingOffersService {
         {
           event: {
             kind: "INCIDENT_OFFER_UNACCEPTED",
-            entity: {
-              key: incident.incidentNo,
-              title: incident.shortDescription,
-              priority: incident.priority,
-            },
+            entity: await ticketEntityRef(this.prisma, incident),
             offeredTo: names,
           },
           recipients: { to },

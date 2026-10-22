@@ -1,4 +1,4 @@
-import { EmailRenderError, entityMessageId, renderNotification } from "./render";
+import { EmailRenderError, entityMessageId, renderNotification, ticketSubject } from "./render";
 import type { EntityRef, NotificationEvent, Party } from "./types";
 
 const JANE: Party = { name: "Jane Doe", email: "jane@corp.example" };
@@ -241,5 +241,123 @@ describe("renderNotification", () => {
       expect(err).toBeInstanceOf(EmailRenderError);
       expect((err as EmailRenderError).field).toBe("entity.key");
     }
+  });
+});
+
+describe("incident ticket emails", () => {
+  const ticket = (overrides: Partial<EntityRef> = {}): EntityRef => ({
+    key: "INC-00002",
+    title: "Uploads are slow",
+    siteCode: "SITE01",
+    priority: "P3",
+    severity: "S3",
+    ticket: {
+      issueType: "Bug",
+      status: "In Progress",
+      assignee: "Rahul Sharma",
+      assigneeGroup: "Infra team",
+      updatedBy: { name: "Rahul Sharma", role: "Engineer", at: "2026-10-22T11:10:00.000Z" },
+    },
+    ...overrides,
+  });
+  const recipients = { to: [LEAD], cc: [JANE, { email: "ops@client.example" }] };
+
+  it("builds the subject as KEY[Issue type][Priority,Severity] Subject", () => {
+    expect(ticketSubject(ticket())).toBe("INC-00002[Bug][P3,S3] Uploads are slow");
+  });
+
+  it("leaves out a missing part instead of showing it empty", () => {
+    expect(ticketSubject(ticket({ severity: undefined }))).toBe(
+      "INC-00002[Bug][P3] Uploads are slow",
+    );
+    expect(ticketSubject(ticket({ priority: undefined, severity: undefined, ticket: {} }))).toBe(
+      "INC-00002 Uploads are slow",
+    );
+  });
+
+  it("keeps the subject on one line whatever the title holds", () => {
+    const title = ["Uploads", "Bcc: x@evil.example"].join(String.fromCharCode(13, 10));
+    expect(ticketSubject(ticket({ title }))).toBe(
+      "INC-00002[Bug][P3,S3] Uploads Bcc: x@evil.example",
+    );
+  });
+
+  it("uses the ticket subject for every kind, including staff-only SLA mails", () => {
+    const sla = renderNotification(
+      {
+        kind: "SLA_BREACHED",
+        entity: ticket(),
+        slaKind: "RESOLUTION",
+        breachedAt: "2026-10-22T12:00:00Z",
+      },
+      { to: [LEAD] },
+    );
+    expect(sla.subject).toBe("INC-00002[Bug][P3,S3] Uploads are slow");
+    expect(sla.headers["X-Priority"]).toBe("1");
+  });
+
+  it("says who commented, with role and time, then the comment and the ticket summary", () => {
+    const mail = renderNotification(
+      {
+        kind: "INCIDENT_COMMENT_ADDED",
+        entity: ticket(),
+        author: LEAD,
+        body: "Line one\nLine two",
+      },
+      recipients,
+      OPTS,
+    );
+    const lines = mail.text.split("\n");
+    expect(lines[0]).toBe("Rahul Sharma (Engineer) added a comment on 22 Oct 2026, 11:10 UTC.");
+    expect(mail.text).toContain("Comment:\nLine one\nLine two");
+    expect(mail.text).toContain("Status: In Progress");
+    expect(mail.text).toContain("Assignee: Rahul Sharma");
+    expect(mail.text).toContain("Assignee group: Infra team");
+    expect(mail.text).toContain("View in portal: https://opsdesk.jsan.example/entity/INC-00002");
+    expect(mail.html).toContain("white-space:pre-wrap");
+  });
+
+  it("shows every CC recipient on the mail itself", () => {
+    const mail = renderNotification(
+      { kind: "INCIDENT_UPDATED", entity: ticket(), changes: ["Severity: S2 → S3"] },
+      recipients,
+    );
+    expect(mail.to).toEqual(["Sam Lead <sam@corp.example>"]);
+    expect(mail.cc).toEqual(["Jane Doe <jane@corp.example>", "ops@client.example"]);
+    expect(mail.text).toContain("Rahul Sharma (Engineer) updated this ticket on");
+    expect(mail.text).toContain("What changed:\n- Severity: S2 → S3");
+  });
+
+  it("labels an internal note as staff only", () => {
+    const mail = renderNotification(
+      {
+        kind: "INCIDENT_COMMENT_ADDED",
+        entity: ticket(),
+        author: LEAD,
+        body: "check the RAID",
+        internal: true,
+      },
+      { to: [LEAD] },
+    );
+    expect(mail.text).toContain("Internal note (staff only, not sent to the client):");
+  });
+
+  it("names an added file, and an unassigned ticket says so", () => {
+    const mail = renderNotification(
+      {
+        kind: "INCIDENT_ATTACHMENT_ADDED",
+        entity: ticket({
+          ticket: {
+            issueType: "Bug",
+            updatedBy: { name: "Jane Doe", role: "Client", at: "2026-10-22T11:10:00Z" },
+          },
+        }),
+        fileName: "shot.png",
+      },
+      { to: [LEAD] },
+    );
+    expect(mail.text).toContain("Jane Doe (Client) added a file on 22 Oct 2026, 11:10 UTC.");
+    expect(mail.text).toContain("File: shot.png");
+    expect(mail.text).toContain("Assignee: Not assigned yet");
   });
 });

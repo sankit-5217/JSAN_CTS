@@ -19,6 +19,8 @@ import { AuditService } from "../audit/audit.service";
 import { InboxService } from "../inbox/inbox.service";
 import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import { SlaTimersPublisher } from "./sla-timers.publisher";
+// A pure helper, not the incidents module: that module depends on this one.
+import { ticketEntityRef } from "../incidents/ticket-mail";
 
 type SlaKindInternal = "ACK" | "RESOLVE";
 
@@ -305,10 +307,8 @@ export class SlaEscalationScanner {
     }
 
     const entity: EntityRef = {
-      key: instance.incident.incidentNo,
-      title: instance.incident.shortDescription,
+      ...(await ticketEntityRef(this.prisma, instance.incident)),
       siteCode: instance.incident.site.code,
-      priority: instance.incident.priority,
     };
     const slaKind = crossed.slaKind === "ACK" ? "RESPONSE" : "RESOLUTION";
 
