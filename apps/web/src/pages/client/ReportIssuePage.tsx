@@ -24,6 +24,7 @@ import {
   type ReportDraft,
 } from "./issueReporting";
 import { FieldRow, IssueTemplateForm, type TemplateGroup } from "./IssueTemplateForm";
+import { describeFailedUpload } from "./conversation";
 
 interface Site {
   id: string;
@@ -100,8 +101,8 @@ export function ReportIssuePage() {
     for (const file of files) {
       try {
         await apiUpload(`/incidents/${incident.id}/attachments`, file);
-      } catch {
-        failedUploads.push(file.name);
+      } catch (err) {
+        failedUploads.push(describeFailedUpload(file, err));
       }
     }
     navigate(`/client/tickets/${incident.id}`, { state: { justCreated: true, failedUploads } });

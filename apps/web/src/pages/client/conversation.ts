@@ -1,4 +1,4 @@
-import { apiPost, apiUpload } from "../../api/client";
+import { ApiError, apiPost, apiUpload } from "../../api/client";
 
 /** A file on a ticket (GET /incidents/:id/attachments, or inside a message). */
 export interface TicketAttachment {
@@ -46,6 +46,25 @@ export function attachmentName(a: Pick<TicketAttachment, "objectKey">): string {
 }
 
 /**
+ * "name.png (why)" for a file that didn't upload, so the person (and
+ * whoever they forward it to) can tell a refused type from a storage fault.
+ */
+export function describeFailedUpload(file: File, err: unknown): string {
+  let reason: string;
+  if (err instanceof ApiError) {
+    const detail = (err.body as { message?: unknown } | null)?.message;
+    if (typeof detail === "string" && detail) reason = detail;
+    else if (Array.isArray(detail)) reason = detail.join("; ");
+    else if (err.status === 413) reason = "file is too large";
+    else if (err.status >= 500) reason = `server couldn't store it (${err.status})`;
+    else reason = `error ${err.status}`;
+  } else {
+    reason = "network error";
+  }
+  return `${file.name} (${reason})`;
+}
+
+/**
  * Posts a message and then each file with it. The message is saved first,
  * so a failed upload never loses the words; the names of files that didn't
  * make it come back for the caller to report.
@@ -65,8 +84,8 @@ export async function sendMessage(
   for (const file of files) {
     try {
       await apiUpload(`/incidents/${incidentId}/attachments`, file, { commentId: comment.id });
-    } catch {
-      failedUploads.push(file.name);
+    } catch (err) {
+      failedUploads.push(describeFailedUpload(file, err));
     }
   }
   return { failedUploads };

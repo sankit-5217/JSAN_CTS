@@ -147,11 +147,10 @@ async function seedIssueReporting(prisma: PrismaClient) {
   }
 
   const severities: [string, string][] = [
-    ["BLOCKER", "Blocker - service down"],
-    ["CRITICAL", "Critical - major degradation"],
-    ["MAJOR", "Major - partial impact"],
-    ["MINOR", "Minor - workaround available"],
-    ["TRIVIAL", "Trivial / cosmetic"],
+    ["S0", "S0"],
+    ["S1", "S1"],
+    ["S2", "S2"],
+    ["S3", "S3"],
   ];
   for (const [i, [value, label]] of severities.entries()) {
     await option(IssueCatalogKind.SEVERITY, value, label, i);
