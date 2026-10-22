@@ -3,7 +3,6 @@ import {
   clientGroups,
   draftFromTicket,
   editProblems,
-  pickTemplateOnTicket,
   reportEditBody,
   type IssueCatalog,
   type IssueTemplate,
@@ -99,12 +98,6 @@ describe("editing a raised ticket", () => {
       ccEmails: ["a@x.io", "b@x.io"],
       refIncidentNo: "INC-000012",
     });
-  });
-
-  it("switching the template on a ticket only switches the issue type", () => {
-    const before = draftFromTicket(ticket, catalog);
-    const after = pickTemplateOnTicket(before, "tpl-chg", catalog);
-    expect(after).toEqual({ ...before, templateId: "tpl-chg", issueType: "CHANGE_REQUEST" });
   });
 
   it("flags what blocks saving", () => {

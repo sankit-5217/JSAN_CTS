@@ -50,7 +50,7 @@ const ticket: TicketFields = {
   refIncidentNo: null,
 };
 
-const render = (props: { mode: "create" | "edit"; hideTemplate?: boolean }) =>
+const render = (props: { mode: "create" | "edit" }) =>
   renderToStaticMarkup(
     <IssueTemplateForm
       catalog={catalog}
@@ -67,9 +67,9 @@ const render = (props: { mode: "create" | "edit"; hideTemplate?: boolean }) =>
 const labels = (html: string) =>
   [...html.matchAll(/>(Template|Subject|Issue Type|Priority:|Assignee Group)</g)].map((m) => m[1]);
 
-describe("rubric T1: no Template button on the client's ticket page once the report exists", () => {
-  it("the ticket page (edit, hideTemplate) has no Template row, but keeps every other field", () => {
-    const html = render({ mode: "edit", hideTemplate: true });
+describe("rubric T1: no Template button on any ticket page once the report exists", () => {
+  it("an existing ticket (edit: client, service desk, admin) has no Template row, but keeps every other field", () => {
+    const html = render({ mode: "edit" });
     expect(labels(html)).not.toContain("Template");
     expect(labels(html)).toEqual(
       expect.arrayContaining(["Subject", "Issue Type", "Priority:", "Assignee Group"]),

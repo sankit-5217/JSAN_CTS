@@ -136,24 +136,6 @@ export function applyTemplate(
   };
 }
 
-/**
- * The template picker on a ticket that already exists: it switches the
- * issue type (one template per type) and nothing else — the subject and
- * classification are already the reporter's own, and the description is
- * frozen.
- */
-export function pickTemplateOnTicket(
-  draft: ReportDraft,
-  templateId: string,
-  catalog: IssueCatalog,
-): ReportDraft {
-  const template = catalog.templates.find((t) => t.id === templateId);
-  const issueType = template
-    ? (catalog.issueTypes.find((t) => t.id === template.issueTypeId)?.value ?? draft.issueType)
-    : draft.issueType;
-  return { ...draft, templateId, issueType };
-}
-
 /** The template that drafts a given issue type, if one is configured. */
 export function templateForIssueType(
   catalog: IssueCatalog,

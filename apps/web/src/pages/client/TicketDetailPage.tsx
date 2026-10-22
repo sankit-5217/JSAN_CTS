@@ -578,7 +578,6 @@ function TicketReportEditor({
         )}
         <IssueTemplateForm
           mode="edit"
-          hideTemplate
           catalog={catalog}
           draft={draft}
           update={update}
