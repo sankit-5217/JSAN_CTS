@@ -9,7 +9,7 @@ there is no GitHub auto-deploy.
 | Service         | What                          | Public URL                                    |
 | --------------- | ----------------------------- | --------------------------------------------- |
 | `api`           | NestJS API (`apps/api`)       | https://api-production-8f7e.up.railway.app    |
-| `web`           | Built SPA (`apps/web`)        | https://web-production-84787.up.railway.app   |
+| `web`           | Built SPA (`apps/web`)        | https://jsan-opsdesk.up.railway.app           |
 | `worker`        | BullMQ worker (`apps/worker`) | — (no HTTP)                                   |
 | `Postgres`      | Railway Postgres (OpsDesk)    | private network only                          |
 | `Redis`         | Railway Redis                 | private network only                          |
