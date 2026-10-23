@@ -7,8 +7,10 @@ import { TEMPLATE_STATUS_FOR, TEMPLATE_STATUS_LABEL } from "./incident-status-di
  * 2026-10-22):
  *   - Subject `INC-00002[Bug][P3,S3] Uploads are slow` on every email about
  *     a ticket, so they all thread together.
- *   - To: the assignee and every member of the assignee group. Nobody
- *     assigned yet → the service desk, so a mail never goes nowhere.
+ *   - To: the assignee alone. No assignee yet → every member of the
+ *     assignee group (2026-10-23: a picked assignee must not have the rest
+ *     of the group on the mail). No group either → the service desk, so a
+ *     mail never goes nowhere.
  *   - Cc: the reporter and the ticket's CC list, in the Cc header, so
  *     everyone on the mail sees everyone else. Never on an internal note.
  *   - The body opens with who made the change, their role and when.
@@ -112,7 +114,7 @@ export async function ticketEntityRef(
 }
 
 /**
- * To: assignee + assignee-group members (else the service desk). Cc: the
+ * To: the assignee, else the assignee-group members, else the service desk. Cc: the
  * reporter and the CC list, unless `internal`. Each address appears once,
  * in To before Cc. Null when there is no one at all to write to.
  */
@@ -139,7 +141,7 @@ export async function ticketRecipients(
     const owner = await db.user.findUnique({ where: { id: incident.ownerUserId } });
     if (owner && owner.isActive !== false && owner.email) handlers.push(person(owner));
   }
-  if (incident.ownerGroupId) {
+  if (handlers.length === 0 && incident.ownerGroupId) {
     const members = await db.supportGroupMember.findMany({
       where: { groupId: incident.ownerGroupId, user: { isActive: true } },
       include: { user: true },

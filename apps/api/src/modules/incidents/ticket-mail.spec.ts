@@ -55,22 +55,26 @@ function incident(overrides: Partial<TicketMailIncident> = {}): TicketMailIncide
 }
 
 describe("ticketRecipients", () => {
-  it("puts the assignee and group on To, the reporter and CC list on Cc, each address once", async () => {
-    const r = await ticketRecipients(
-      db([
-        { email: "eng@jsan.example", displayName: "Rahul" },
-        { email: "amit@jsan.example", displayName: "Amit" },
-      ]),
-      incident(),
-    );
+  const group = [
+    { email: "eng@jsan.example", displayName: "Rahul" },
+    { email: "amit@jsan.example", displayName: "Amit" },
+  ];
+
+  it("puts only the assignee on To, never the rest of the group; reporter and CC list on Cc, each once", async () => {
+    const r = await ticketRecipients(db(group), incident());
     expect(r).toEqual({
-      to: [
-        { name: "Rahul", email: "eng@jsan.example" },
-        { name: "Amit", email: "amit@jsan.example" },
-      ],
+      to: [{ name: "Rahul", email: "eng@jsan.example" }],
       // jane@client.example on the CC list is the reporter: listed once.
       cc: [{ name: "Jane", email: "Jane@Client.example" }, { email: "ops@client.example" }],
     });
+  });
+
+  it("writes to the whole group while nobody is assigned", async () => {
+    const r = await ticketRecipients(db(group), incident({ ownerUserId: null }));
+    expect(r?.to).toEqual([
+      { name: "Rahul", email: "eng@jsan.example" },
+      { name: "Amit", email: "amit@jsan.example" },
+    ]);
   });
 
   it("keeps the reporter and CC list off an internal mail", async () => {
