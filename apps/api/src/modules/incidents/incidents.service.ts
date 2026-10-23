@@ -30,7 +30,7 @@ import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { InboxService } from "../inbox/inbox.service";
-import { ownIncidentsFilter } from "./incident-visibility";
+import { incidentAccessWhere, ownIncidentsFilter } from "./incident-visibility";
 import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import { SlaService } from "../sla/sla.service";
 import { isAllowedAttachment, MAX_ATTACHMENT_SIZE_BYTES } from "./attachment.constants";
@@ -278,26 +278,25 @@ export class IncidentsService {
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;
 
-    let siteFilter: string[] | undefined;
-    if (accessibleSiteIds) {
-      siteFilter =
-        query.siteId && accessibleSiteIds.includes(query.siteId)
-          ? [query.siteId]
-          : accessibleSiteIds;
-    } else if (query.siteId) {
-      siteFilter = [query.siteId];
-    }
+    // Site access plus tickets assigned/offered to the caller (see
+    // incidentAccessWhere); clients are scoped by reporter instead.
+    const access =
+      user.role === UserRole.CLIENT_MANAGER_VIEWER
+        ? accessibleSiteIds
+          ? { siteId: { in: accessibleSiteIds } }
+          : undefined
+        : incidentAccessWhere(user, accessibleSiteIds);
 
     const where: Prisma.IncidentWhereInput = {
-      siteId: siteFilter ? { in: siteFilter } : undefined,
+      // ?siteId= only narrows what the caller may already see.
+      siteId: query.siteId ?? undefined,
       // Same reasoning as findOneScoped: site access is a staff-shaped
       // grant, not "this is my ticket." Forced, never client-settable —
       // there's no ?reportedByUserId= query param a customer could spoof
       // even if they tried; this branches on the caller's own role only.
       reportedByUserId: user.role === UserRole.CLIENT_MANAGER_VIEWER ? user.id : undefined,
-      // A Site Engineer's list is their own work only (see ownIncidentsFilter).
       // Under AND so it can't collide with the ?q= search's own OR below.
-      AND: ownIncidentsFilter(user) ?? undefined,
+      AND: access ?? undefined,
       // An explicit ?status= wins; slaAtRisk alone still implies "open"
       // (a resolved incident's stale fired-milestone history isn't
       // actionable risk) — matches ReportsService's own queue definition.
@@ -340,6 +339,21 @@ export class IncidentsService {
 
   async findOneScoped(id: string, user: AuthenticatedUser): Promise<Incident> {
     const incident = await this.findOne(id);
+    // Staff: site access, or the ticket is assigned/offered to them — the
+    // same rule as their list (incidentAccessWhere). Every incident
+    // sub-resource (comments, worklogs, attachments, transitions, routing
+    // offers) comes through here.
+    if (user.role !== UserRole.CLIENT_MANAGER_VIEWER) {
+      if (incident.ownerUserId === user.id) return incident;
+      const access = incidentAccessWhere(user, await this.authzService.getAccessibleSiteIds(user));
+      if (access) {
+        const visible = await this.prisma.incident.count({ where: { id, AND: access } });
+        if (visible === 0) {
+          throw new ForbiddenException("You do not have access to this incident");
+        }
+      }
+      return incident;
+    }
     await this.assertSiteAccess(user, incident.siteId);
     // Site access alone is staff-shaped scoping — every internal role at a
     // site can see every incident there. A CLIENT_MANAGER_VIEWER isn't staff:
@@ -347,19 +361,8 @@ export class IncidentsService {
     // "see every ticket your site has ever raised" (which would leak other
     // reporters' incidents, including ones with no connection to this
     // caller at all — see reportedByUserId, added for exactly this reason).
-    if (user.role === UserRole.CLIENT_MANAGER_VIEWER && incident.reportedByUserId !== user.id) {
+    if (incident.reportedByUserId !== user.id) {
       throw new ForbiddenException("You do not have access to this incident");
-    }
-    // A Site Engineer only reaches incidents they own or are currently being
-    // offered — the same rule as their list, enforced here because every
-    // incident sub-resource (comments, worklogs, attachments, transitions,
-    // routing offers) comes through this method.
-    const ownOnly = ownIncidentsFilter(user);
-    if (ownOnly && incident.ownerUserId !== user.id) {
-      const visible = await this.prisma.incident.count({ where: { id, AND: ownOnly } });
-      if (visible === 0) {
-        throw new ForbiddenException("You do not have access to this incident");
-      }
     }
     return incident;
   }

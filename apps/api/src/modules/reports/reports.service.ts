@@ -197,7 +197,10 @@ export class ReportsService {
     });
 
     const incidents: IncidentRow[] = await this.prisma.incident.findMany({
-      where: { siteId: { in: siteIds }, AND: incidentScope ?? undefined },
+      // Own-work callers (Site Engineer) count every ticket assigned or
+      // offered to them, even at a site they hold no grant for — same as
+      // their incident list; everyone else counts their sites' tickets.
+      where: incidentScope ? { AND: incidentScope } : { siteId: { in: siteIds } },
       select: {
         siteId: true,
         status: true,
@@ -402,7 +405,7 @@ export class ReportsService {
 
     const incidents: ResponseTrendRow[] = await this.prisma.incident.findMany({
       where: {
-        siteId: accessibleSiteIds ? { in: accessibleSiteIds } : undefined,
+        siteId: !incidentScope && accessibleSiteIds ? { in: accessibleSiteIds } : undefined,
         createdAt: { gte: from, lte: to },
         AND: incidentScope ?? undefined,
       },

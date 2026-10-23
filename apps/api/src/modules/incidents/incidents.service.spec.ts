@@ -884,11 +884,37 @@ describe("IncidentsService.update", () => {
 });
 
 describe("IncidentsService site-scope enforcement", () => {
-  it("findOneScoped throws when the caller can't access the incident's site", async () => {
-    const { service } = makeService({ canAccessSite: jest.fn().mockResolvedValue(false) });
-    await expect(service.findOneScoped("incident-1", engineer)).rejects.toBeInstanceOf(
+  it("findOneScoped throws when staff can't access the incident's site and it isn't theirs", async () => {
+    const { service, prisma } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ ownerUserId: null })),
+      getAccessibleSiteIds: jest.fn().mockResolvedValue(["site-b"]),
+    });
+    await expect(service.findOneScoped("incident-1", serviceDesk)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+    expect(prisma.incident.count).toHaveBeenCalledWith({
+      where: {
+        id: "incident-1",
+        AND: {
+          OR: [
+            { siteId: { in: ["site-b"] } },
+            { ownerUserId: serviceDesk.id },
+            { routingOffers: { some: { userId: serviceDesk.id, status: "PENDING" } } },
+          ],
+        },
+      },
+    });
+  });
+
+  it("findOneScoped lets the assignee open their ticket at a site they hold no grant for", async () => {
+    const { service, prisma } = makeService({
+      incidentFindUnique: jest
+        .fn()
+        .mockResolvedValue(baseIncident({ ownerUserId: serviceDesk.id })),
+      getAccessibleSiteIds: jest.fn().mockResolvedValue(["site-b"]),
+    });
+    await expect(service.findOneScoped("incident-1", serviceDesk)).resolves.toBeDefined();
+    expect(prisma.incident.count).not.toHaveBeenCalled();
   });
 
   it("findOneScoped allows staff to see any incident at a site they can access, regardless of who reported it", async () => {
@@ -978,7 +1004,28 @@ describe("IncidentsService site-scope enforcement", () => {
 });
 
 describe("IncidentsService.findAll", () => {
-  it("scopes to the caller's accessible sites when an explicit ?siteId isn't in scope", async () => {
+  const staffAccess = (siteIds: string[]) => ({
+    OR: [
+      { siteId: { in: siteIds } },
+      { ownerUserId: serviceDesk.id },
+      { routingOffers: { some: { userId: serviceDesk.id, status: "PENDING" } } },
+    ],
+  });
+
+  it("lists staff their sites' tickets plus any ticket assigned or offered to them elsewhere", async () => {
+    const { service, prisma } = makeService();
+    await service.findAll({ limit: 50, offset: 0 }, ["site-a", "site-b"], serviceDesk);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          siteId: undefined,
+          AND: staffAccess(["site-a", "site-b"]),
+        }),
+      }),
+    );
+  });
+
+  it("?siteId only narrows within what the caller may already see", async () => {
     const { service, prisma } = makeService();
     await service.findAll(
       { siteId: "site-not-mine", limit: 50, offset: 0 },
@@ -987,20 +1034,11 @@ describe("IncidentsService.findAll", () => {
     );
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ siteId: { in: ["site-a", "site-b"] } }),
+        where: expect.objectContaining({
+          siteId: "site-not-mine",
+          AND: staffAccess(["site-a", "site-b"]),
+        }),
       }),
-    );
-  });
-
-  it("narrows to just the requested site when it IS in the caller's scope", async () => {
-    const { service, prisma } = makeService();
-    await service.findAll(
-      { siteId: "site-a", limit: 50, offset: 0 },
-      ["site-a", "site-b"],
-      serviceDesk,
-    );
-    expect(prisma.incident.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ siteId: { in: ["site-a"] } }) }),
     );
   });
 
@@ -1049,12 +1087,12 @@ describe("IncidentsService.findAll", () => {
     );
   });
 
-  it("limits a SITE_ENGINEER to incidents they own or are currently offered", async () => {
+  it("limits a SITE_ENGINEER to incidents they own or are currently offered, at any site", async () => {
     const { service, prisma } = makeService();
     await service.findAll({ q: "disk", limit: 50, offset: 0 }, ["site-a"], engineer);
     const expected = expect.objectContaining({
       where: expect.objectContaining({
-        siteId: { in: ["site-a"] },
+        siteId: undefined,
         AND: {
           OR: [
             { ownerUserId: engineer.id },

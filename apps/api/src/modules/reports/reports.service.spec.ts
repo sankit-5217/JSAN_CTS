@@ -408,11 +408,11 @@ describe("ReportsService.getCommandCenterSummary — site scoping", () => {
 describe("ReportsService — own-incidents scope", () => {
   const scope = { OR: [{ ownerUserId: "engineer-1" }] };
 
-  it("narrows the command-center incident query to the caller's own incidents", async () => {
+  it("counts every incident the own-work caller owns or is offered, at any site", async () => {
     const { service, prisma } = makeService();
     await service.getCommandCenterSummary(["site-a"], scope);
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { siteId: { in: ["site-a"] }, AND: scope } }),
+      expect.objectContaining({ where: { AND: scope } }),
     );
   });
 
@@ -428,7 +428,7 @@ describe("ReportsService — own-incidents scope", () => {
     const { service, prisma } = makeService();
     await service.getCommandCenterSummary(["site-a"]);
     expect(prisma.incident.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { siteId: { in: ["site-a"] }, AND: undefined } }),
+      expect.objectContaining({ where: { siteId: { in: ["site-a"] } } }),
     );
   });
 });

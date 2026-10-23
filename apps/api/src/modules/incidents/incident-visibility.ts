@@ -32,3 +32,34 @@ export function ownIncidentsFilter(user: AuthenticatedUser): Prisma.IncidentWher
     ],
   };
 }
+
+/** Tickets assigned to the caller or currently being offered to them. */
+function assignedOrOffered(user: AuthenticatedUser): Prisma.IncidentWhereInput[] {
+  return [
+    { ownerUserId: user.id },
+    { routingOffers: { some: { userId: user.id, status: RoutingOfferStatus.PENDING } } },
+  ];
+}
+
+/**
+ * Which incidents a staff caller may see: those at sites they have access
+ * to, **plus** — whatever their site grants — the tickets assigned to them
+ * or being offered to them. Whoever a ticket is assigned to can always see
+ * and work it (only that ticket; the rest of its site stays hidden).
+ *
+ * A Site Engineer sees their own work only, so for them site grants don't
+ * widen anything. `undefined` = every incident (all-sites roles).
+ * Client viewers are scoped by reporter separately and never come here.
+ */
+export function incidentAccessWhere(
+  user: AuthenticatedUser,
+  accessibleSiteIds: string[] | null | undefined,
+): Prisma.IncidentWhereInput | undefined {
+  if (seesOwnIncidentsOnly(user)) {
+    return { OR: assignedOrOffered(user) };
+  }
+  if (!accessibleSiteIds) {
+    return undefined;
+  }
+  return { OR: [{ siteId: { in: accessibleSiteIds } }, ...assignedOrOffered(user)] };
+}
