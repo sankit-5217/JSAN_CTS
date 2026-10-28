@@ -30,9 +30,26 @@ type DraftUpdate = (update: (draft: ReportDraft) => ReportDraft) => void;
 
 /**
  * One row of the template: a bold label cell and the control beside it,
- * laid out like the issue-reporting sheet this form mirrors.
+ * laid out like the issue-reporting sheet this form mirrors. `stacked` puts
+ * the label above the control, for the narrow classification column.
  */
-export function FieldRow({ label, children }: { label: string; children: ReactNode }) {
+export function FieldRow({
+  label,
+  children,
+  stacked = false,
+}: {
+  label: string;
+  children: ReactNode;
+  stacked?: boolean;
+}) {
+  if (stacked) {
+    return (
+      <Stack spacing={0.5}>
+        <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{label}</Typography>
+        <Box sx={{ minWidth: 0 }}>{children}</Box>
+      </Stack>
+    );
+  }
   return (
     <Stack direction="row" alignItems="flex-start" spacing={1.5}>
       <Typography sx={{ width: 128, flexShrink: 0, fontWeight: 700, fontSize: 14, pt: 1.25 }}>
@@ -188,9 +205,10 @@ export function IssueTemplateForm({
   const templateOptions = catalog.templates.map((t) => ({ value: t.id, label: t.name }));
 
   return (
-    <Grid container spacing={3}>
+    // Ten columns so the split lands on 80 / 20.
+    <Grid container spacing={3} columns={10}>
       {/* Left: what happened */}
-      <Grid item xs={12} md={7}>
+      <Grid item xs={10} md={8}>
         <Stack spacing={2}>
           {topLeft}
 
@@ -283,13 +301,13 @@ export function IssueTemplateForm({
       </Grid>
 
       {/* Right: the classification sheet */}
-      <Grid item xs={12} md={5}>
+      <Grid item xs={10} md={2}>
         <Stack spacing={1.5}>
-          <FieldRow label="Reporter">
+          <FieldRow stacked label="Reporter">
             <TextField size="small" fullWidth value={reporter} InputProps={{ readOnly: true }} />
           </FieldRow>
 
-          <FieldRow label="Assignee Group">
+          <FieldRow stacked label="Assignee Group">
             <TextField
               select
               size="small"
@@ -316,7 +334,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow label="Assignee">
+          <FieldRow stacked label="Assignee">
             <TextField
               select
               size="small"
@@ -344,7 +362,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow label="CC List">
+          <FieldRow stacked label="CC List">
             <Box>
               <TextField
                 size="small"
@@ -386,9 +404,9 @@ export function IssueTemplateForm({
             </Box>
           </FieldRow>
 
-          <FieldRow label="Status">{status}</FieldRow>
+          <FieldRow stacked label="Status">{status}</FieldRow>
 
-          <FieldRow label="Ref Bug ID">
+          <FieldRow stacked label="Ref Bug ID">
             <TextField
               size="small"
               fullWidth
@@ -400,7 +418,7 @@ export function IssueTemplateForm({
             />
           </FieldRow>
 
-          <FieldRow label="Issue Type">
+          <FieldRow stacked label="Issue Type">
             <TextField
               select
               size="small"
@@ -418,7 +436,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow label="Priority:">
+          <FieldRow stacked label="Priority:">
             <TextField
               select
               size="small"
@@ -446,7 +464,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow label="Severity:">
+          <FieldRow stacked label="Severity:">
             <TextField
               select
               size="small"
@@ -467,7 +485,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow label="Component">
+          <FieldRow stacked label="Component">
             <TextField
               select
               size="small"
@@ -490,7 +508,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow label="Sub Component">
+          <FieldRow stacked label="Sub Component">
             <TextField
               select
               size="small"
