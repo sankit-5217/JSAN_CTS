@@ -7,6 +7,7 @@ import {
   type TicketAttachment,
 } from "./conversation";
 import { formatDateTime } from "../../time/clock";
+import { FieldRow, RECORD_BOX_SX } from "./IssueTemplateForm";
 
 /**
  * One message on a ticket's conversation, the same on the client portal
@@ -71,6 +72,37 @@ export function MessageBubble({
         <MessageFiles files={message.attachments} mine={mine} onDownload={onDownload} />
       )}
     </Box>
+  );
+}
+
+/**
+ * One message on the client's "Conversation with the service desk", recorded
+ * like the report's Description: the sender in the label cell, then the
+ * role and time over the same grey box, whoever sent it.
+ */
+export function MessageRecord({
+  message,
+  mine,
+  onDownload,
+}: {
+  message: ConversationMessage;
+  mine: boolean;
+  onDownload: (attachmentId: string) => void;
+}) {
+  return (
+    <FieldRow label={`${message.author.displayName}${mine ? " (you)" : ""}`}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", pt: 1.25 }}>
+        {roleLabel(message.author.role)} · {formatDateTime(message.createdAt)}
+      </Typography>
+      <Box sx={{ ...RECORD_BOX_SX, mt: 0.5 }}>
+        <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+          {message.body}
+        </Typography>
+        {message.attachments.length > 0 && (
+          <MessageFiles files={message.attachments} mine={false} onDownload={onDownload} />
+        )}
+      </Box>
+    </FieldRow>
   );
 }
 

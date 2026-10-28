@@ -9,6 +9,7 @@ import {
   CardContent,
   Chip,
   Divider,
+  Grid,
   Link,
   Stack,
   Step,
@@ -42,7 +43,7 @@ import {
   type ConversationMessage,
   type TicketAttachment,
 } from "./conversation";
-import { MessageBubble, StagedFiles } from "./MessageBubble";
+import { MessageRecord, StagedFiles } from "./MessageBubble";
 import { ReportEditNote } from "./ReportEditNote";
 import {
   buildConversation,
@@ -345,35 +346,48 @@ export function TicketDetailPage() {
         </Alert>
       )}
 
-      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
-        Conversation with the service desk
-      </Typography>
-      <Stack spacing={1.5} sx={{ mb: 3 }}>
-        {thread.length === 0 && (
-          <Typography color="text.secondary">
-            No updates yet. The service desk will post here once they've taken a look.
+      {/* Laid out like "Your report" above, so every message lines up with
+          the Description box and is just as wide. */}
+      <Card
+        elevation={0}
+        sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mb: 3 }}
+      >
+        <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
+            Conversation with the service desk
           </Typography>
-        )}
-        {thread.map((item) =>
-          item.type === "status" ? (
-            <Divider
-              key={`s-${item.at}-${item.status}`}
-              sx={{ fontSize: 12, color: "text.secondary" }}
-            >
-              {STATUS_LABEL[item.status]} · {formatDateTime(item.at)}
-            </Divider>
-          ) : item.type === "edit" ? (
-            <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
-          ) : (
-            <MessageBubble
-              key={item.comment.id}
-              message={item.comment}
-              mine={item.comment.authorId === myUserId}
-              onDownload={(attachmentId) => void downloadAttachment(attachmentId)}
-            />
-          ),
-        )}
-      </Stack>
+          <Grid container spacing={3} columns={10}>
+            <Grid item xs={10} md={8}>
+              <Stack spacing={2}>
+                {thread.length === 0 && (
+                  <Typography color="text.secondary">
+                    No updates yet. The service desk will post here once they've taken a look.
+                  </Typography>
+                )}
+                {thread.map((item) =>
+                  item.type === "status" ? (
+                    <Divider
+                      key={`s-${item.at}-${item.status}`}
+                      sx={{ fontSize: 12, color: "text.secondary" }}
+                    >
+                      {STATUS_LABEL[item.status]} · {formatDateTime(item.at)}
+                    </Divider>
+                  ) : item.type === "edit" ? (
+                    <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
+                  ) : (
+                    <MessageRecord
+                      key={item.comment.id}
+                      message={item.comment}
+                      mine={item.comment.authorId === myUserId}
+                      onDownload={(attachmentId) => void downloadAttachment(attachmentId)}
+                    />
+                  ),
+                )}
+              </Stack>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
 
       <Card
         elevation={0}

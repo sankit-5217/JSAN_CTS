@@ -60,6 +60,17 @@ export function FieldRow({
   );
 }
 
+/** The frozen Description box; ticket messages are recorded the same way. */
+export const RECORD_BOX_SX = {
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
+  p: 1.5,
+  borderRadius: 1,
+  border: "1px solid",
+  borderColor: "divider",
+  bgcolor: "action.hover",
+} as const;
+
 /** A stored value no longer offered (retired by an admin) still shows. */
 function withCurrent<T extends { value: string; label: string }>(
   options: T[],
@@ -261,14 +272,8 @@ export function IssueTemplateForm({
                 <Typography
                   variant="body2"
                   sx={{
-                    whiteSpace: "pre-wrap",
-                    overflowWrap: "anywhere",
-                    p: 1.5,
+                    ...RECORD_BOX_SX,
                     minHeight: 120,
-                    borderRadius: 1,
-                    border: "1px solid",
-                    borderColor: "divider",
-                    bgcolor: "action.hover",
                     color: draft.description ? "text.primary" : "text.secondary",
                   }}
                 >
