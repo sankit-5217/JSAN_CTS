@@ -37,7 +37,7 @@ import PersonOffOutlinedIcon from "@mui/icons-material/PersonOffOutlined";
 import PersonSearchOutlinedIcon from "@mui/icons-material/PersonSearchOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import TimerOutlinedIcon from "@mui/icons-material/TimerOutlined";
-import { apiDelete, apiGet, apiPatch, apiPost, apiUpload, getStoredToken } from "../api/client";
+import { apiGet, apiPatch, apiPost, getStoredToken } from "../api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "../api/jwt";
 import { severityColors } from "../theme/theme";
 import {
@@ -50,12 +50,13 @@ import {
 import { IssueTemplateForm, type TemplateGroup } from "./client/IssueTemplateForm";
 import { templateStatusText, type TemplateStatusOption } from "./client/issueStatus";
 import {
-  attachmentName,
+  openAttachment,
   sendMessage,
+  type AttachmentDisposition,
   type ConversationMessage,
   type TicketAttachment,
 } from "./client/conversation";
-import { MessageBubble, StagedFiles } from "./client/MessageBubble";
+import { MessageBubble, MessageFiles, StagedFiles } from "./client/MessageBubble";
 import { ReportEditNote } from "./client/ReportEditNote";
 import { buildConversation, type ReportEdit, type TicketProgress } from "./client/clientTicket";
 import { formatDateTime, formatTime } from "../time/clock";
@@ -1222,42 +1223,18 @@ export function IncidentDetailPage() {
     }
   };
 
-  // --- Attachments -------------------------------------------------------
-  const uploadFile = async (file: File) => {
+  // --- Files -------------------------------------------------------------
+  // View opens a file in the browser, Download saves it.
+  const openFile = async (attachmentId: string, disposition: AttachmentDisposition) => {
     if (!id) return;
     setActionError(null);
     try {
-      await apiUpload(`/incidents/${id}/attachments`, file);
-      refetch();
+      await openAttachment(id, attachmentId, disposition);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     }
   };
-
-  const downloadAttachment = async (attachmentId: string) => {
-    if (!id) return;
-    setActionError(null);
-    try {
-      const { url } = await apiGet<{ url: string }>(
-        `/incidents/${id}/attachments/${attachmentId}/download`,
-      );
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const removeAttachment = async (attachmentId: string) => {
-    if (!id) return;
-    if (!window.confirm("Remove this attachment? It won't be downloadable anymore.")) return;
-    setActionError(null);
-    try {
-      await apiDelete(`/incidents/${id}/attachments/${attachmentId}`);
-      refetch();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
-    }
-  };
+  const reportFiles = attachments.filter((a) => !a.commentId);
 
   if (error) {
     return (
@@ -1388,6 +1365,18 @@ export function IncidentDetailPage() {
                     : incident.reportedByUserId
                       ? "…"
                       : "Raised by staff or monitoring"
+                }
+                // Files sent with a message show in that message; the rest
+                // came with the report, so they show under its Description.
+                attachments={
+                  reportFiles.length > 0 ? (
+                    <MessageFiles
+                      files={reportFiles}
+                      onOpen={(attachmentId, disposition) =>
+                        void openFile(attachmentId, disposition)
+                      }
+                    />
+                  ) : undefined
                 }
                 routingLocked={!canRoute}
                 routingLockedHint="Service Desk/NOC or elevated roles only"
@@ -1672,7 +1661,7 @@ export function IncidentDetailPage() {
                           ? { label: "Internal" }
                           : { label: "To customer", color: "info" }
                     }
-                    onDownload={(attachmentId) => void downloadAttachment(attachmentId)}
+                    onOpen={(attachmentId, disposition) => void openFile(attachmentId, disposition)}
                   />
                 ) : null,
               )}
@@ -1755,50 +1744,6 @@ export function IncidentDetailPage() {
               files={commentFiles}
               onRemove={(i) => setCommentFiles((prev) => prev.filter((_, j) => j !== i))}
             />
-          </Paper>
-
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              Attachments
-            </Typography>
-            <Stack spacing={1} sx={{ mb: 2 }}>
-              {attachments.map((a) => (
-                <Stack key={a.id} direction="row" spacing={2} alignItems="center">
-                  <Typography variant="body2" sx={{ flex: 1, overflowWrap: "anywhere" }}>
-                    {attachmentName(a)} ({(a.sizeBytes / 1024).toFixed(1)} KB)
-                    {a.commentId && (
-                      <Typography component="span" variant="caption" color="text.secondary">
-                        {" "}
-                        · sent with a message
-                      </Typography>
-                    )}
-                  </Typography>
-                  <Button size="small" onClick={() => downloadAttachment(a.id)}>
-                    Download
-                  </Button>
-                  <Button size="small" color="error" onClick={() => removeAttachment(a.id)}>
-                    Remove
-                  </Button>
-                </Stack>
-              ))}
-              {attachments.length === 0 && (
-                <Typography variant="body2" color="text.secondary">
-                  No attachments yet.
-                </Typography>
-              )}
-            </Stack>
-            <Button component="label" variant="outlined">
-              Upload file
-              <input
-                type="file"
-                hidden
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) uploadFile(file);
-                  e.target.value = "";
-                }}
-              />
-            </Button>
           </Paper>
 
           <Paper sx={{ p: 2, mt: 3 }}>

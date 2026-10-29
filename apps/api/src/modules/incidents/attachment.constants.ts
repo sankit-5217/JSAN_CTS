@@ -61,3 +61,26 @@ export function isAllowedAttachment(contentType: string, originalName: string): 
   }
   return false;
 }
+
+/** View opens the file in the browser; Download saves it. */
+export const ATTACHMENT_DISPOSITIONS = ["inline", "attachment"] as const;
+export type AttachmentDisposition = (typeof ATTACHMENT_DISPOSITIONS)[number];
+
+/**
+ * The Content-Disposition signed into a file's link, named after the
+ * original file (the object key's `<uuid>-` prefix stripped). The plain
+ * `filename` is an ASCII fallback; `filename*` carries the real name.
+ */
+export function contentDispositionFor(
+  objectKey: string,
+  disposition: AttachmentDisposition,
+): string {
+  const name = (objectKey.split("/").pop() ?? objectKey).replace(/^[0-9a-f-]{36}-/, "");
+  const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
+  // RFC 5987 also wants ' ( ) * escaped, which encodeURIComponent leaves.
+  const encoded = encodeURIComponent(name).replace(
+    /['()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}

@@ -24,7 +24,7 @@ import CheckCircleOutlineOutlinedIcon from "@mui/icons-material/CheckCircleOutli
 import EngineeringOutlinedIcon from "@mui/icons-material/EngineeringOutlined";
 import ReportGmailerrorredOutlinedIcon from "@mui/icons-material/ReportGmailerrorredOutlined";
 import type { IncidentStatus, Priority } from "@cts-dc-opsdesk/shared-types";
-import { apiDelete, apiGet, apiPatch, apiPost, getStoredToken } from "../../api/client";
+import { apiGet, apiPatch, apiPost, getStoredToken } from "../../api/client";
 import { decodeJwtPayload } from "../../api/jwt";
 import {
   clientGroups,
@@ -38,12 +38,13 @@ import {
 import { IssueTemplateForm, type TemplateGroup } from "./IssueTemplateForm";
 import { templateStatusText } from "./issueStatus";
 import {
-  attachmentName,
+  openAttachment,
   sendMessage,
+  type AttachmentDisposition,
   type ConversationMessage,
   type TicketAttachment,
 } from "./conversation";
-import { MessageRecord, StagedFiles } from "./MessageBubble";
+import { MessageFiles, MessageRecord, StagedFiles } from "./MessageBubble";
 import { ReportEditNote } from "./ReportEditNote";
 import {
   buildConversation,
@@ -200,26 +201,12 @@ export function TicketDetailPage() {
     }
   };
 
-  // Only files the reporter attached themselves get a Delete (the backend
-  // enforces the same rule); a soft delete, the desk keeps the audit trail.
-  const removeAttachment = async (attachment: Attachment) => {
-    if (!window.confirm(`Remove ${attachmentName(attachment)} from this ticket?`)) return;
+  // View opens a file in the browser, Download saves it.
+  const openFile = async (attachmentId: string, disposition: AttachmentDisposition) => {
+    if (!id) return;
     setActionError(null);
     try {
-      await apiDelete(`/incidents/${id}/attachments/${attachment.id}`);
-      await refetch();
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const downloadAttachment = async (attachmentId: string) => {
-    setActionError(null);
-    try {
-      const { url } = await apiGet<{ url: string }>(
-        `/incidents/${id}/attachments/${attachmentId}/download`,
-      );
-      window.open(url, "_blank", "noopener,noreferrer");
+      await openAttachment(id, attachmentId, disposition);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     }
@@ -324,6 +311,10 @@ export function TicketDetailPage() {
           catalog={catalog}
           groups={groups}
           reporter={token ? (decodeJwtPayload(token)?.email ?? "") : ""}
+          // Files sent with a message show in that message; the rest came
+          // with the report, so they show under its Description.
+          files={attachments.filter((a) => !a.commentId)}
+          onOpenFile={(attachmentId, disposition) => void openFile(attachmentId, disposition)}
           onSaved={refetch}
         />
       ) : (
@@ -379,7 +370,9 @@ export function TicketDetailPage() {
                       key={item.comment.id}
                       message={item.comment}
                       mine={item.comment.authorId === myUserId}
-                      onDownload={(attachmentId) => void downloadAttachment(attachmentId)}
+                      onOpen={(attachmentId, disposition) =>
+                        void openFile(attachmentId, disposition)
+                      }
                     />
                   ),
                 )}
@@ -467,38 +460,6 @@ export function TicketDetailPage() {
         </CardContent>
       </Card>
 
-      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-        Attachments
-      </Typography>
-      <Stack spacing={1}>
-        {attachments.length === 0 && (
-          <Typography color="text.secondary" variant="body2">
-            None yet. A photo of fault lights, a label or a screenshot often speeds things up.
-          </Typography>
-        )}
-        {attachments.map((a) => (
-          <Stack key={a.id} direction="row" spacing={1} alignItems="center">
-            <Typography variant="body2" sx={{ flex: 1, overflowWrap: "anywhere" }}>
-              {attachmentName(a)} ({(a.sizeBytes / 1024).toFixed(1)} KB)
-              {a.uploadedById === myUserId && (
-                <Typography component="span" variant="caption" color="text.secondary">
-                  {" "}
-                  · added by you
-                </Typography>
-              )}
-            </Typography>
-            <Button size="small" onClick={() => downloadAttachment(a.id)}>
-              Download
-            </Button>
-            {a.uploadedById === myUserId && (
-              <Button size="small" color="error" onClick={() => void removeAttachment(a)}>
-                Delete
-              </Button>
-            )}
-          </Stack>
-        ))}
-      </Stack>
-
       {site && (
         <Card
           elevation={0}
@@ -532,12 +493,16 @@ function TicketReportEditor({
   catalog,
   groups,
   reporter,
+  files,
+  onOpenFile,
   onSaved,
 }: {
   incident: Incident;
   catalog: IssueCatalog;
   groups: SupportGroup[];
   reporter: string;
+  files: Attachment[];
+  onOpenFile: (attachmentId: string, disposition: AttachmentDisposition) => void;
   onSaved: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState<ReportDraft>(() => draftFromTicket(incident, catalog));
@@ -598,6 +563,9 @@ function TicketReportEditor({
           groups={groups}
           reporter={reporter}
           locked={locked}
+          attachments={
+            files.length > 0 ? <MessageFiles files={files} onOpen={onOpenFile} /> : undefined
+          }
           status={
             <TextField
               size="small"

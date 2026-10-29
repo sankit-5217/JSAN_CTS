@@ -2069,6 +2069,26 @@ describe("IncidentsService attachments", () => {
     expect(result).toEqual({ url: "https://signed.example/download" });
   });
 
+  it("signs View links inline and Download links as an attachment, under the original name", async () => {
+    const { service, prisma, storageService } = makeService();
+    (prisma.attachment.findUnique as jest.Mock).mockResolvedValue({
+      id: "attachment-1",
+      entityType: "INCIDENT",
+      entityId: "incident-1",
+      objectKey: "incidents/incident-1/0f8fad5b-d9cb-469f-a165-70867728950e-rack photo é.png",
+      deletedAt: null,
+    });
+
+    await service.getAttachmentDownloadUrl("incident-1", "attachment-1", engineer, "inline");
+    await service.getAttachmentDownloadUrl("incident-1", "attachment-1", engineer);
+
+    const calls = (storageService.getSignedDownloadUrl as jest.Mock).mock.calls;
+    expect(calls[0][2]).toBe(
+      `inline; filename="rack photo _.png"; filename*=UTF-8''rack%20photo%20%C3%A9.png`,
+    );
+    expect(calls[1][2]).toMatch(/^attachment; filename="rack photo _\.png"/);
+  });
+
   it("deleteAttachment soft-deletes, writes the timeline event + audit record, and never touches storage", async () => {
     const { service, prisma, tx, auditService, storageService } = makeService();
     (prisma.attachment.findUnique as jest.Mock).mockResolvedValue({

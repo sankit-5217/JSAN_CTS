@@ -33,7 +33,12 @@ import { InboxService } from "../inbox/inbox.service";
 import { incidentAccessWhere, ownIncidentsFilter } from "./incident-visibility";
 import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import { SlaService } from "../sla/sla.service";
-import { isAllowedAttachment, MAX_ATTACHMENT_SIZE_BYTES } from "./attachment.constants";
+import {
+  type AttachmentDisposition,
+  contentDispositionFor,
+  isAllowedAttachment,
+  MAX_ATTACHMENT_SIZE_BYTES,
+} from "./attachment.constants";
 import { assertSiteAcceptsNewWork } from "../sites/site-status";
 import { REPORT_FIELDS, ReportNames, ReportValues, diffReport, idsToName } from "./report-changes";
 import { IssueReportingService } from "./issue-reporting.service";
@@ -2179,15 +2184,24 @@ export class IncidentsService {
       : {};
   }
 
-  /** Short-lived signed URL, not a proxied stream or a public object (spec §17). */
+  /**
+   * Short-lived signed URL, not a proxied stream or a public object (spec §17).
+   * "inline" opens the file in the browser (View); "attachment" saves it
+   * under its original name (Download).
+   */
   async getAttachmentDownloadUrl(
     incidentId: string,
     attachmentId: string,
     user: AuthenticatedUser,
+    disposition: AttachmentDisposition = "attachment",
   ): Promise<{ url: string }> {
     await this.findOneScoped(incidentId, user);
     const attachment = await this.findLiveAttachment(incidentId, attachmentId, user);
-    const url = await this.storageService.getSignedDownloadUrl(attachment.objectKey);
+    const url = await this.storageService.getSignedDownloadUrl(
+      attachment.objectKey,
+      undefined,
+      contentDispositionFor(attachment.objectKey, disposition),
+    );
     return { url };
   }
 

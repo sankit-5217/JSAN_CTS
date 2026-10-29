@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseEnumPipe,
   ParseUUIDPipe,
   Patch,
   Post,
@@ -17,7 +18,7 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { tmpdir } from "os";
-import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { AuthzService } from "../auth/authz.service";
@@ -36,7 +37,11 @@ import { UpdateCcListDto } from "./dto/update-cc-list.dto";
 import { UpdateCustomerReportDto, UpdateIncidentDto } from "./dto/update-incident.dto";
 import { CUSTOMER_FEEDBACK_ROLES, IncidentCustomerService } from "./incident-customer.service";
 import { IncidentsService, UploadedAttachmentFile } from "./incidents.service";
-import { MAX_ATTACHMENT_SIZE_BYTES } from "./attachment.constants";
+import {
+  ATTACHMENT_DISPOSITIONS,
+  type AttachmentDisposition,
+  MAX_ATTACHMENT_SIZE_BYTES,
+} from "./attachment.constants";
 
 // Wider than CMDB's write set by exactly SERVICE_DESK_NOC — spec §4 gives
 // that role "Triage, acknowledge, route, update incidents" as its primary
@@ -288,12 +293,16 @@ export class IncidentsController {
   }
 
   @Get(":id/attachments/:attachmentId/download")
+  @ApiQuery({ name: "disposition", enum: ATTACHMENT_DISPOSITIONS, required: false })
   getAttachmentDownloadUrl(
     @Param("id") id: string,
     @Param("attachmentId") attachmentId: string,
     @CurrentUser() user: AuthenticatedUser,
+    // inline = View in the browser, attachment (default) = Download.
+    @Query("disposition", new ParseEnumPipe(ATTACHMENT_DISPOSITIONS, { optional: true }))
+    disposition?: AttachmentDisposition,
   ) {
-    return this.incidentsService.getAttachmentDownloadUrl(id, attachmentId, user);
+    return this.incidentsService.getAttachmentDownloadUrl(id, attachmentId, user, disposition);
   }
 
   @Delete(":id/attachments/:attachmentId")

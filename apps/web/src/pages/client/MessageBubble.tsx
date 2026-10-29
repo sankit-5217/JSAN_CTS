@@ -1,8 +1,11 @@
 import { Box, Button, Chip, Stack, Typography } from "@mui/material";
 import AttachFileOutlinedIcon from "@mui/icons-material/AttachFileOutlined";
+import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
+import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import {
   attachmentName,
   roleLabel,
+  type AttachmentDisposition,
   type ConversationMessage,
   type TicketAttachment,
 } from "./conversation";
@@ -12,19 +15,19 @@ import { FieldRow, RECORD_BOX_SX } from "./IssueTemplateForm";
 /**
  * One message on a ticket's conversation, the same on the client portal
  * and the staff incident page: the sender's name and role on top, then the
- * words, then any files sent with it (each downloadable).
+ * words, then any files sent with it (each with View and Download).
  */
 export function MessageBubble({
   message,
   mine,
   tag,
-  onDownload,
+  onOpen,
 }: {
   message: ConversationMessage;
   mine: boolean;
   /** A small label after the name (staff side: Internal / To customer). */
   tag?: { label: string; color?: "default" | "info" | "warning" };
-  onDownload: (attachmentId: string) => void;
+  onOpen: (attachmentId: string, disposition: AttachmentDisposition) => void;
 }) {
   return (
     <Box
@@ -69,7 +72,7 @@ export function MessageBubble({
         {message.body}
       </Typography>
       {message.attachments.length > 0 && (
-        <MessageFiles files={message.attachments} mine={mine} onDownload={onDownload} />
+        <MessageFiles files={message.attachments} mine={mine} onOpen={onOpen} />
       )}
     </Box>
   );
@@ -83,11 +86,11 @@ export function MessageBubble({
 export function MessageRecord({
   message,
   mine,
-  onDownload,
+  onOpen,
 }: {
   message: ConversationMessage;
   mine: boolean;
-  onDownload: (attachmentId: string) => void;
+  onOpen: (attachmentId: string, disposition: AttachmentDisposition) => void;
 }) {
   return (
     <FieldRow label={`${message.author.displayName}${mine ? " (you)" : ""}`}>
@@ -99,40 +102,61 @@ export function MessageRecord({
           {message.body}
         </Typography>
         {message.attachments.length > 0 && (
-          <MessageFiles files={message.attachments} mine={false} onDownload={onDownload} />
+          <MessageFiles files={message.attachments} onOpen={onOpen} />
         )}
       </Box>
     </FieldRow>
   );
 }
 
-function MessageFiles({
+/**
+ * Files on a ticket, each with View (opens in the browser) and Download
+ * (saves it). Used inside messages and under the report's Description.
+ */
+export function MessageFiles({
   files,
-  mine,
-  onDownload,
+  mine = false,
+  onOpen,
 }: {
   files: TicketAttachment[];
-  mine: boolean;
-  onDownload: (attachmentId: string) => void;
+  mine?: boolean;
+  onOpen: (attachmentId: string, disposition: AttachmentDisposition) => void;
 }) {
+  const buttonSx = mine ? { color: "inherit", borderColor: "currentColor" } : {};
   return (
-    <Stack spacing={0.5} sx={{ mt: 1 }}>
+    <Stack spacing={0.75} sx={{ mt: 1 }}>
       {files.map((a) => (
-        <Button
+        <Stack
           key={a.id}
-          size="small"
-          variant="outlined"
-          startIcon={<AttachFileOutlinedIcon fontSize="small" />}
-          onClick={() => onDownload(a.id)}
-          sx={{
-            justifyContent: "flex-start",
-            textTransform: "none",
-            overflowWrap: "anywhere",
-            ...(mine ? { color: "inherit", borderColor: "currentColor" } : {}),
-          }}
+          direction="row"
+          spacing={1}
+          alignItems="center"
+          flexWrap="wrap"
+          useFlexGap
         >
-          {attachmentName(a)} ({(a.sizeBytes / 1024).toFixed(1)} KB)
-        </Button>
+          <AttachFileOutlinedIcon fontSize="small" sx={{ opacity: 0.8 }} />
+          <Typography variant="body2" sx={{ flex: 1, minWidth: 120, overflowWrap: "anywhere" }}>
+            {attachmentName(a)} ({(a.sizeBytes / 1024).toFixed(1)} KB)
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<VisibilityOutlinedIcon fontSize="small" />}
+            onClick={() => onOpen(a.id, "inline")}
+            sx={{ textTransform: "none", ...buttonSx }}
+          >
+            View
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<FileDownloadOutlinedIcon fontSize="small" />}
+            onClick={() => onOpen(a.id, "attachment")}
+            sx={{ textTransform: "none", ...buttonSx }}
+          >
+            Download
+          </Button>
+        </Stack>
       ))}
     </Stack>
   );

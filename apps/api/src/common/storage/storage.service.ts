@@ -55,9 +55,19 @@ export class StorageService {
   /**
    * Satisfies spec §17's "signed access URLs" for attachments — the object
    * itself is never made public; every read goes through a short-lived link.
+   * `contentDisposition` is signed into the link, so the browser either shows
+   * the file (inline) or saves it (attachment).
    */
-  async getSignedDownloadUrl(key: string, expiresInSeconds = 300): Promise<string> {
-    const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+  async getSignedDownloadUrl(
+    key: string,
+    expiresInSeconds = 300,
+    contentDisposition?: string,
+  ): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      ...(contentDisposition ? { ResponseContentDisposition: contentDisposition } : {}),
+    });
     return getSignedUrl(this.client, command, { expiresIn: expiresInSeconds });
   }
 }
