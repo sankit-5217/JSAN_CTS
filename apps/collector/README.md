@@ -48,9 +48,9 @@ SNMP trap ingestion, buffered+retried delivery (memory or disk-backed),
 heartbeat (spec §26), and TLS/mTLS to the API are all wired end-to-end. What's
 still missing is packaging/tooling around it, not collector logic itself:
 
-- No `docker-compose.yml` service — `infra/docker/collector.Dockerfile` exists
-  and follows the same multi-stage pattern as `api.Dockerfile`/
-  `worker.Dockerfile`, but nothing runs it automatically yet.
+- `infra/docker/collector.Dockerfile` builds the on-site image (the only
+  Dockerfile left — api/web/worker deploy to Railway via Railpack), but
+  nothing builds or runs it automatically yet.
 - `EnvCredentialResolver` is a dev/default backing only — a real deployment
   needs a vault-backed `CredentialResolver`.
 - Hardware simulators live in `tools/site-lab` (iDRAC + iLO Redfish, vendor

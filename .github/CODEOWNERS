@@ -39,7 +39,7 @@
 /package.json                               @sankit-5217 @Anshul1505-h
 /pnpm-workspace.yaml                        @sankit-5217 @Anshul1505-h
 /pnpm-lock.yaml                             @sankit-5217 @Anshul1505-h
-/docker-compose.yml                         @sankit-5217 @Anshul1505-h
+/deploy/                                    @sankit-5217 @Anshul1505-h
 /infra/                                     @sankit-5217 @Anshul1505-h
 /.github/                                   @sankit-5217 @Anshul1505-h
 /docs/adr/                                  @sankit-5217 @Anshul1505-h
