@@ -88,10 +88,15 @@ describe("Linux installer (install.sh) rubric", () => {
     expect(body).toMatch(/dnf -y/);
   });
 
-  it("R5: upgrades the OS unless --skip-upgrade, and never reboots", () => {
+  it("R5: upgrades the OS only when asked (--upgrade), and never reboots", () => {
     expect(body).toContain("apt_get upgrade");
     expect(body).toContain("pkg_mgr upgrade");
-    expect(body).toContain("--skip-upgrade");
+    // Off by default: patching is the client's change, not the installer's.
+    expect(body).toContain("local upgrade=0");
+    expect(body).toContain("--upgrade) upgrade=1 ;;");
+    expect(body).toMatch(/if \[ "\$upgrade" -eq 1 \]; then\n[^\n]*\n\s+upgrade_os\n/);
+    // The old opt-out still parses, and changes nothing.
+    expect(body).toContain("--skip-upgrade) upgrade=0 ;;");
     // No command that restarts the machine (the reboot-required *check* is fine).
     expect(body).not.toMatch(
       /(^|[;&|]\s*)(sudo\s+)?(reboot|shutdown|poweroff|systemctl\s+(reboot|poweroff))\b/m,
@@ -100,7 +105,8 @@ describe("Linux installer (install.sh) rubric", () => {
   });
 
   it("R6: supported distributions only", () => {
-    for (const os of ["ubuntu:24.04", "debian:12", "rocky:9*", "rhel:8*"]) expect(body).toContain(os);
+    for (const os of ["ubuntu:24.04", "debian:12", "rocky:9*", "rhel:8*"])
+      expect(body).toContain(os);
     expect(body).toContain("Unsupported OS");
   });
 
@@ -142,6 +148,13 @@ describe("Linux installer (install.sh) rubric", () => {
   it("R12: sends a machine-id hash, never the raw id", () => {
     expect(body).toContain("sha256sum /etc/machine-id");
     expect(body).not.toMatch(/"machineId":"\$\(cat/);
+  });
+
+  it("R22: sends the hardware serial, limited to safe characters, to match its asset", () => {
+    expect(body).toContain("/sys/class/dmi/id/product_serial");
+    expect(body).toContain("dmidecode -s system-serial-number");
+    expect(body).toContain("tr -cd 'A-Za-z0-9 ._:/-'");
+    expect(body).toContain('"serial":"%s"');
   });
 
   it("R13: verifies config and service, and Done only once the server confirms the agent", () => {
@@ -207,28 +220,43 @@ describe("Windows installer simulation and lint", () => {
   const hasPs = available(ps, ["-NoProfile", "-Command", "exit 0"]);
   const hasAnalyzer =
     hasPs &&
-    available(ps, ["-NoProfile", "-Command", "if (Get-Module -ListAvailable PSScriptAnalyzer) { exit 0 } else { exit 1 }"]);
+    available(ps, [
+      "-NoProfile",
+      "-Command",
+      "if (Get-Module -ListAvailable PSScriptAnalyzer) { exit 0 } else { exit 1 }",
+    ]);
 
-  (hasPs ? it : it.skip)("R1-R19: simulated install, re-run, no-confirmation, refusal and uninstall all pass", () => {
-    const sim = join(__dirname, "test", "install-ps1.sim.ps1");
-    const r = spawnSync(ps, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", sim], {
-      encoding: "utf8",
-      timeout: 120_000,
-    });
-    expect(r.stdout).toContain("0 check(s) failed");
-    expect(r.stdout).not.toMatch(/^FAIL/m);
-    expect(r.status).toBe(0);
-  }, 150_000);
+  (hasPs ? it : it.skip)(
+    "R1-R19: simulated install, re-run, no-confirmation, refusal and uninstall all pass",
+    () => {
+      const sim = join(__dirname, "test", "install-ps1.sim.ps1");
+      const r = spawnSync(ps, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", sim], {
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      expect(r.stdout).toContain("0 check(s) failed");
+      expect(r.stdout).not.toMatch(/^FAIL/m);
+      expect(r.status).toBe(0);
+    },
+    150_000,
+  );
 
-  (hasAnalyzer ? it : it.skip)("R18: PSScriptAnalyzer is clean", () => {
-    const f = join(__dirname, "scripts", "install.ps1");
-    const cmd =
-      `$r = Invoke-ScriptAnalyzer -Path '${f}' -Severity Error,Warning,Information -ExcludeRule PSAvoidUsingWriteHost;` +
-      `$r | ForEach-Object { "$($_.Line): $($_.RuleName)" }; exit $(if ($r) { 1 } else { 0 })`;
-    const r = spawnSync(ps, ["-NoProfile", "-Command", cmd], { encoding: "utf8", timeout: 120_000 });
-    expect(r.stdout.trim()).toBe("");
-    expect(r.status).toBe(0);
-  }, 150_000);
+  (hasAnalyzer ? it : it.skip)(
+    "R18: PSScriptAnalyzer is clean",
+    () => {
+      const f = join(__dirname, "scripts", "install.ps1");
+      const cmd =
+        `$r = Invoke-ScriptAnalyzer -Path '${f}' -Severity Error,Warning,Information -ExcludeRule PSAvoidUsingWriteHost;` +
+        `$r | ForEach-Object { "$($_.Line): $($_.RuleName)" }; exit $(if ($r) { 1 } else { 0 })`;
+      const r = spawnSync(ps, ["-NoProfile", "-Command", cmd], {
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      expect(r.stdout.trim()).toBe("");
+      expect(r.status).toBe(0);
+    },
+    150_000,
+  );
 });
 
 describe("Windows installer (install.ps1) rubric", () => {
@@ -254,7 +282,9 @@ describe("Windows installer (install.ps1) rubric", () => {
   });
 
   it("R7: checks the network first", () => {
-    expect(body.indexOf("health/live")).toBeLessThan(body.indexOf("Invoke-WebRequest -Uri $MsiUrl"));
+    expect(body.indexOf("health/live")).toBeLessThan(
+      body.indexOf("Invoke-WebRequest -Uri $MsiUrl"),
+    );
     expect(body).toContain("Net.Sockets.TcpClient");
   });
 
@@ -289,6 +319,12 @@ describe("Windows installer (install.ps1) rubric", () => {
 
   it("R12: machine GUID is hashed", () => {
     expect(body).toContain("SHA256]::Create()");
+  });
+
+  it("R22: sends the BIOS serial, limited to safe characters, to match its asset", () => {
+    expect(body).toContain("(Get-CimInstance Win32_BIOS).SerialNumber");
+    expect(body).toContain("-replace '[^A-Za-z0-9 ._:/-]', ''");
+    expect(body).toContain("serial = $serial");
   });
 
   it("R18: PowerShell parses it", () => {

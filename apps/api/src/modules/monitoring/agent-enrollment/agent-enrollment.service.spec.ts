@@ -9,6 +9,7 @@ import {
   agentHostName,
   errorScript,
   hashCode,
+  usableSerial,
 } from "./agent-enrollment.service";
 
 const SITE = { id: "11111111-1111-4111-8111-111111111111", code: "SITE04" };
@@ -42,6 +43,23 @@ function setup() {
         const row = rows.get(where.codeHash);
         return row ? { ...row, site: { code: SITE.code } } : null;
       }),
+      findMany: jest.fn(async () =>
+        [...rows.values()].map((r) => ({ ...r, site: { code: SITE.code } })),
+      ),
+      // The machine cap: a conditional increment, like the real query.
+      updateMany: jest.fn(async ({ where }) => {
+        const row = [...rows.values()].find((r) => r.id === where.id);
+        if (!row || (row.enrolledCount as number) >= where.enrolledCount.lt) return { count: 0 };
+        row.enrolledCount = (row.enrolledCount as number) + 1;
+        return { count: 1 };
+      }),
+      update: jest.fn(async ({ where, data }) => {
+        const row = [...rows.values()].find((r) => r.id === where.id)!;
+        if (data.enrolledCount?.decrement) {
+          row.enrolledCount = (row.enrolledCount as number) - data.enrolledCount.decrement;
+        }
+        return row;
+      }),
     },
     $transaction: jest.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   } as unknown as PrismaService;
@@ -59,8 +77,10 @@ function setup() {
     agentHostAvailability: jest.fn(async () => "AVAILABLE"),
   } as unknown as ZabbixService;
   const cmdb = {
-    findByCode: jest.fn(async () => null),
+    findByAgentHost: jest.fn(async () => null),
+    findBySerial: jest.fn(async () => []),
     create: jest.fn(async () => ({ id: "ci-1" })),
+    mergeMetadata: jest.fn(async () => ({ id: "ci-1" })),
   } as unknown as CmdbService;
   const config = {
     get: jest.fn(() => "https://api.example.com"),
@@ -72,7 +92,10 @@ function setup() {
 describe("AgentEnrollmentService", () => {
   it("creates a link: stores only the hash, returns the code and commands once, audits without the code", async () => {
     const { svc, rows, auditRecords } = setup();
-    const res = await svc.create({ siteId: SITE.id, label: "Acme servers" }, ACTOR);
+    const res = await svc.create(
+      { siteId: SITE.id, label: "Acme servers", maxMachines: 10 },
+      ACTOR,
+    );
 
     expect(res.code).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect([...rows.keys()]).toEqual([hashCode(res.code)]);
@@ -86,20 +109,23 @@ describe("AgentEnrollmentService", () => {
     expect(res.commands.windowsCurl).toContain("[Console]::In.ReadToEnd() | iex");
     expect(res.status).toBe("ACTIVE");
     expect(JSON.stringify(auditRecords)).not.toContain(res.code);
-    expect(auditRecords[0]).toMatchObject({ action: "AGENT_ENROLLMENT_CREATED", actorId: "admin-1" });
+    expect(auditRecords[0]).toMatchObject({
+      action: "AGENT_ENROLLMENT_CREATED",
+      actorId: "admin-1",
+    });
   });
 
-  it("defaults to 7 days", async () => {
+  it("defaults to 3 days", async () => {
     const { svc } = setup();
-    const res = await svc.create({ siteId: SITE.id }, ACTOR);
+    const res = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
     const days = (new Date(res.expiresAt).getTime() - Date.now()) / 86_400_000;
-    expect(days).toBeGreaterThan(6.9);
-    expect(days).toBeLessThanOrEqual(7);
+    expect(days).toBeGreaterThan(2.9);
+    expect(days).toBeLessThanOrEqual(3);
   });
 
   it("serves the installer with the link's values filled in", async () => {
     const { svc } = setup();
-    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
     const sh = await svc.renderInstaller(code, "linux");
     expect(sh).toContain(`readonly ENROLL_CODE="${code}"`);
     expect(sh).toContain('readonly SITE_CODE="SITE04"');
@@ -113,8 +139,10 @@ describe("AgentEnrollmentService", () => {
     ["unknown", () => "B".repeat(43)],
   ])("404s a %s code", async (_label, mutate) => {
     const { svc } = setup();
-    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
-    await expect(svc.renderInstaller(mutate(code), "linux")).rejects.toBeInstanceOf(NotFoundException);
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
+    await expect(svc.renderInstaller(mutate(code), "linux")).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it.each([
@@ -122,16 +150,16 @@ describe("AgentEnrollmentService", () => {
     ["revoked", { revokedAt: new Date() }],
   ])("404s an %s link", async (_label, patch) => {
     const { svc, rows } = setup();
-    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
     Object.assign(rows.get(hashCode(code))!, patch);
-    await expect(svc.register(code, { hostname: "web-01", os: "linux", machineId: MACHINE })).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      svc.register(code, { hostname: "web-01", os: "linux", machineId: MACHINE }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it("registers a machine: Zabbix host with its own PSK, CMDB record, audit without the PSK", async () => {
     const { svc, zabbix, cmdb, auditRecords } = setup();
-    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
     const res = await svc.register(code, {
       hostname: "web-01",
       os: "linux",
@@ -147,7 +175,12 @@ describe("AgentEnrollmentService", () => {
     });
     expect(res.psk).toMatch(/^[a-f0-9]{64}$/);
     expect(zabbix.upsertAgentHost).toHaveBeenCalledWith(
-      expect.objectContaining({ host: "SITE04-WEB-01", siteCode: "SITE04", os: "linux", psk: res.psk }),
+      expect.objectContaining({
+        host: "SITE04-WEB-01",
+        siteCode: "SITE04",
+        os: "linux",
+        psk: res.psk,
+      }),
     );
     expect(cmdb.create).toHaveBeenCalledWith(
       expect.objectContaining({ ciCode: "SITE04-WEB-01", siteId: SITE.id, ciType: "SERVER" }),
@@ -159,24 +192,24 @@ describe("AgentEnrollmentService", () => {
 
   it("re-enrolling the same machine refreshes it without a second CMDB record", async () => {
     const { svc, cmdb } = setup();
-    (cmdb.findByCode as jest.Mock).mockResolvedValue({
+    (cmdb.findByAgentHost as jest.Mock).mockResolvedValue({
       id: "ci-1",
       siteId: SITE.id,
       metadata: { machineId: MACHINE },
     });
-    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
     await svc.register(code, { hostname: "web-01", os: "linux", machineId: MACHINE });
     expect(cmdb.create).not.toHaveBeenCalled();
   });
 
   it("refuses a different machine with the same name (no silent takeover)", async () => {
     const { svc, cmdb, zabbix } = setup();
-    (cmdb.findByCode as jest.Mock).mockResolvedValue({
+    (cmdb.findByAgentHost as jest.Mock).mockResolvedValue({
       id: "ci-1",
       siteId: SITE.id,
       metadata: { machineId: "b".repeat(32) },
     });
-    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
     await expect(
       svc.register(code, { hostname: "web-01", os: "linux", machineId: MACHINE }),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -185,19 +218,226 @@ describe("AgentEnrollmentService", () => {
 
   it("refuses a name that belongs to another site", async () => {
     const { svc, cmdb } = setup();
-    (cmdb.findByCode as jest.Mock).mockResolvedValue({ id: "ci-9", siteId: "other-site", metadata: null });
-    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    (cmdb.findByAgentHost as jest.Mock).mockResolvedValue({
+      id: "ci-9",
+      siteId: "other-site",
+      metadata: null,
+    });
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
     await expect(
       svc.register(code, { hostname: "web-01", os: "windows", machineId: MACHINE }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });
 
+describe("governance: link limits and change reference", () => {
+  it("records the machine cap and the client's change reference, and audits both", async () => {
+    const { svc, auditRecords } = setup();
+    const res = await svc.create(
+      { siteId: SITE.id, maxMachines: 25, changeReference: " CHG0012345 " },
+      ACTOR,
+    );
+    expect(res).toMatchObject({ maxMachines: 25, changeReference: "CHG0012345", status: "ACTIVE" });
+    expect(auditRecords[0]).toMatchObject({
+      action: "AGENT_ENROLLMENT_CREATED",
+      after: expect.objectContaining({ maxMachines: 25, changeReference: "CHG0012345" }),
+    });
+  });
+
+  it("stops enrolling new machines at the cap; a re-run on an enrolled machine still works", async () => {
+    const { svc, cmdb, zabbix, rows } = setup();
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 1 }, ACTOR);
+    await svc.register(code, { hostname: "web-01", os: "linux", machineId: MACHINE });
+    expect(rows.get(hashCode(code))!.enrolledCount).toBe(1);
+
+    (zabbix.upsertAgentHost as jest.Mock).mockClear();
+    const second = svc.register(code, {
+      hostname: "web-02",
+      os: "linux",
+      machineId: "b".repeat(32),
+    });
+    await expect(second).rejects.toMatchObject({
+      response: expect.objectContaining({ code: "ENROLLMENT_LINK_FULL" }),
+    });
+    expect(zabbix.upsertAgentHost).not.toHaveBeenCalled();
+
+    (cmdb.findByAgentHost as jest.Mock).mockResolvedValue({
+      id: "ci-1",
+      ciCode: "SITE04-WEB-01",
+      siteId: SITE.id,
+      metadata: { machineId: MACHINE },
+    });
+    await svc.register(code, { hostname: "web-01", os: "linux", machineId: MACHINE });
+    expect(rows.get(hashCode(code))!.enrolledCount).toBe(1);
+    expect((await svc.list(SITE.id))[0]).toMatchObject({ status: "FULL", maxMachines: 1 });
+  });
+
+  it("gives the machine's place back when Zabbix fails", async () => {
+    const { svc, zabbix, rows } = setup();
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 1 }, ACTOR);
+    (zabbix.upsertAgentHost as jest.Mock).mockRejectedValueOnce(new Error("Zabbix down"));
+    await expect(
+      svc.register(code, { hostname: "web-01", os: "linux", machineId: MACHINE }),
+    ).rejects.toThrow("Zabbix down");
+    expect(rows.get(hashCode(code))!.enrolledCount).toBe(0);
+  });
+
+  it("puts the change reference on every enrollment's audit event", async () => {
+    const { svc, auditRecords } = setup();
+    const { code } = await svc.create(
+      { siteId: SITE.id, maxMachines: 5, changeReference: "CAB-88" },
+      ACTOR,
+    );
+    await svc.register(code, { hostname: "web-01", os: "linux", machineId: MACHINE });
+    expect(auditRecords.at(-1)).toMatchObject({
+      action: "AGENT_ENROLLED",
+      after: expect.objectContaining({ changeReference: "CAB-88" }),
+    });
+  });
+
+  it("warns while agents still connect to a Railway TCP proxy address", async () => {
+    const { svc, zabbix } = setup();
+    expect((await svc.create({ siteId: SITE.id, maxMachines: 1 }, ACTOR)).warnings).toEqual([]);
+    (zabbix.agentInstallTarget as jest.Mock).mockResolvedValueOnce({
+      version: "7.0.31",
+      serverAddress: "iriguchi.proxy.rlwy.net:12762",
+    });
+    const res = await svc.create({ siteId: SITE.id, maxMachines: 1 }, ACTOR);
+    expect(res.warnings).toHaveLength(1);
+    expect(res.warnings[0]).toContain("iriguchi.proxy.rlwy.net:12762");
+  });
+});
+
+describe("governance: matching machines to the asset register", () => {
+  const IMPORTED = {
+    id: "ci-imported",
+    ciCode: "PUNE-R12-SRV07",
+    siteId: SITE.id,
+    metadata: null,
+  };
+
+  it("links a new machine to the imported asset with its serial, keeping the asset's code", async () => {
+    const { svc, cmdb, zabbix, auditRecords } = setup();
+    (cmdb.findBySerial as jest.Mock).mockResolvedValue([IMPORTED]);
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
+    await svc.register(code, {
+      hostname: "web-01",
+      os: "linux",
+      machineId: MACHINE,
+      serial: " 7XK2M93 ",
+    });
+
+    expect(cmdb.findBySerial).toHaveBeenCalledWith("7XK2M93");
+    expect(cmdb.create).not.toHaveBeenCalled();
+    expect(cmdb.mergeMetadata).toHaveBeenCalledWith(
+      "ci-imported",
+      expect.objectContaining({
+        agentHost: "SITE04-WEB-01",
+        machineId: MACHINE,
+        zabbixHostId: "10500",
+      }),
+      { actorId: "admin-1", correlationId: "agent-enrollment:enr-1" },
+    );
+    expect(zabbix.upsertAgentHost).toHaveBeenCalledWith(
+      expect.objectContaining({ host: "SITE04-WEB-01", ciCode: "PUNE-R12-SRV07" }),
+    );
+    expect(auditRecords.at(-1)).toMatchObject({
+      after: expect.objectContaining({ assetMatch: "SERIAL", ciCode: "PUNE-R12-SRV07" }),
+    });
+  });
+
+  it("creates an unmatched machine as PLANNED, awaiting review, with its serial", async () => {
+    const { svc, cmdb } = setup();
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
+    await svc.register(code, {
+      hostname: "web-01",
+      os: "linux",
+      machineId: MACHINE,
+      serial: "ABC123",
+    });
+    expect(cmdb.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ciCode: "SITE04-WEB-01",
+        lifecycleStatus: "PLANNED",
+        serialOrServiceTag: "ABC123",
+        metadata: expect.objectContaining({
+          reviewStatus: "AWAITING_REVIEW",
+          agentHost: "SITE04-WEB-01",
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    ["another site", [{ ...IMPORTED, siteId: "other-site" }], "AGENT_SERIAL_OTHER_SITE"],
+    [
+      "several assets here",
+      [IMPORTED, { ...IMPORTED, id: "ci-dup", ciCode: "DUP" }],
+      "AGENT_SERIAL_AMBIGUOUS",
+    ],
+    [
+      "an asset enrolled from another machine",
+      [{ ...IMPORTED, metadata: { machineId: "c".repeat(32) } }],
+      "AGENT_SERIAL_TAKEN",
+    ],
+  ])("refuses a serial that matches %s, before any change", async (_label, matches, errorCode) => {
+    const { svc, cmdb, zabbix, rows } = setup();
+    (cmdb.findBySerial as jest.Mock).mockResolvedValue(matches);
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
+    await expect(
+      svc.register(code, {
+        hostname: "web-01",
+        os: "linux",
+        machineId: MACHINE,
+        serial: "7XK2M93",
+      }),
+    ).rejects.toMatchObject({ response: expect.objectContaining({ code: errorCode }) });
+    expect(zabbix.upsertAgentHost).not.toHaveBeenCalled();
+    expect(rows.get(hashCode(code))!.enrolledCount).toBe(0);
+  });
+
+  it("ignores placeholder serials instead of matching on them", async () => {
+    const { svc, cmdb } = setup();
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
+    await svc.register(code, {
+      hostname: "web-01",
+      os: "linux",
+      machineId: MACHINE,
+      serial: "To Be Filled By O.E.M.",
+    });
+    expect(cmdb.findBySerial).not.toHaveBeenCalled();
+    expect(cmdb.create).toHaveBeenCalledWith(
+      expect.objectContaining({ serialOrServiceTag: undefined, lifecycleStatus: "PLANNED" }),
+      expect.anything(),
+    );
+  });
+});
+
+describe("usableSerial", () => {
+  it.each([
+    [undefined, null],
+    ["", null],
+    ["   ", null],
+    ["0000000", null],
+    ["Not Specified", null],
+    ["Default string", null],
+    [" 7XK2M93 ", "7XK2M93"],
+    ["VMware-56 4d  1a", "VMware-56 4d 1a"],
+  ])("%p → %p", (input, expected) => {
+    expect(usableSerial(input)).toBe(expected);
+  });
+});
+
 describe("installer status check (R13)", () => {
   it("reports what Zabbix sees for the machine that enrolled the name", async () => {
     const { svc, cmdb } = setup();
-    (cmdb.findByCode as jest.Mock).mockResolvedValue({ id: "ci-1", siteId: SITE.id, metadata: { machineId: MACHINE } });
-    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    (cmdb.findByAgentHost as jest.Mock).mockResolvedValue({
+      id: "ci-1",
+      siteId: SITE.id,
+      metadata: { machineId: MACHINE },
+    });
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
     await expect(svc.status(code, { hostname: "web-01", machineId: MACHINE })).resolves.toEqual({
       hostName: "SITE04-WEB-01",
       agent: "AVAILABLE",
@@ -206,16 +446,16 @@ describe("installer status check (R13)", () => {
 
   it("does not answer for another machine, another site or an unknown name", async () => {
     const { svc, cmdb } = setup();
-    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
     for (const ci of [
       null,
       { id: "ci-1", siteId: SITE.id, metadata: { machineId: "b".repeat(32) } },
       { id: "ci-1", siteId: "other", metadata: { machineId: MACHINE } },
     ]) {
-      (cmdb.findByCode as jest.Mock).mockResolvedValueOnce(ci);
-      await expect(svc.status(code, { hostname: "web-01", machineId: MACHINE })).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      (cmdb.findByAgentHost as jest.Mock).mockResolvedValueOnce(ci);
+      await expect(
+        svc.status(code, { hostname: "web-01", machineId: MACHINE }),
+      ).rejects.toBeInstanceOf(NotFoundException);
     }
   });
 });
@@ -233,7 +473,7 @@ describe("R20: a bad link fails clearly with a non-zero exit", () => {
 
   it("explains a server-side problem too (Zabbix not ready)", async () => {
     const { svc, zabbix } = setup();
-    const { code } = await svc.create({ siteId: SITE.id }, ACTOR);
+    const { code } = await svc.create({ siteId: SITE.id, maxMachines: 10 }, ACTOR);
     const { ServiceUnavailableException } = await import("@nestjs/common");
     (zabbix.agentInstallTarget as jest.Mock).mockRejectedValueOnce(
       new ServiceUnavailableException({ code: "X", message: "Zabbix is switched off" }),

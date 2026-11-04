@@ -781,16 +781,20 @@ model ZabbixConnection {
 /// site's machines may use it until it expires or is revoked. Only a SHA-256
 /// of the code is stored; the code itself is shown once, when created.
 model AgentEnrollment {
-  id            String    @id @default(uuid())
-  siteId        String    @map("site_id")
-  label         String?   @db.VarChar(120)
-  codeHash      String    @unique @map("code_hash") @db.VarChar(64)
-  expiresAt     DateTime  @map("expires_at")
-  revokedAt     DateTime? @map("revoked_at")
-  enrolledCount Int       @default(0) @map("enrolled_count")
-  lastUsedAt    DateTime? @map("last_used_at")
-  createdById   String    @map("created_by_id")
-  createdAt     DateTime  @default(now()) @map("created_at")
+  id              String    @id @default(uuid())
+  siteId          String    @map("site_id")
+  label           String?   @db.VarChar(120)
+  codeHash        String    @unique @map("code_hash") @db.VarChar(64)
+  expiresAt       DateTime  @map("expires_at")
+  revokedAt       DateTime? @map("revoked_at")
+  /// Machines this link may enroll; re-running on an enrolled machine doesn't count.
+  maxMachines     Int       @map("max_machines")
+  enrolledCount   Int       @default(0) @map("enrolled_count")
+  /// The client's change / CAB reference, if they gave one.
+  changeReference String?   @map("change_reference") @db.VarChar(60)
+  lastUsedAt      DateTime? @map("last_used_at")
+  createdById     String    @map("created_by_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
   site Site @relation(fields: [siteId], references: [id])
 

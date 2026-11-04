@@ -26,9 +26,11 @@ import { formatDateTime } from "../time/clock";
 interface Enrollment {
   id: string;
   label: string | null;
-  status: "ACTIVE" | "EXPIRED" | "REVOKED";
+  status: "ACTIVE" | "FULL" | "EXPIRED" | "REVOKED";
   expiresAt: string;
   enrolledCount: number;
+  maxMachines: number;
+  changeReference: string | null;
   lastUsedAt: string | null;
   createdAt: string;
 }
@@ -36,10 +38,15 @@ interface Enrollment {
 interface CreatedEnrollment extends Enrollment {
   code: string;
   commands: { linux: string; windowsPowerShell: string; windowsCurl: string };
+  warnings: string[];
 }
+
+/** Same bound as the API (MAX_MACHINES_PER_LINK). */
+const MAX_MACHINES_PER_LINK = 500;
 
 const STATUS_COLOR: Record<Enrollment["status"], "success" | "default" | "error"> = {
   ACTIVE: "success",
+  FULL: "default",
   EXPIRED: "default",
   REVOKED: "error",
 };
@@ -95,7 +102,9 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
   const [rows, setRows] = useState<Enrollment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState("");
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(3);
+  const [maxMachines, setMaxMachines] = useState("");
+  const [changeReference, setChangeReference] = useState("");
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<CreatedEnrollment | null>(null);
 
@@ -110,6 +119,10 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
 
   useEffect(load, [load]);
 
+  const machines = Number(maxMachines);
+  const machinesValid =
+    Number.isInteger(machines) && machines >= 1 && machines <= MAX_MACHINES_PER_LINK;
+
   const create = async () => {
     setBusy(true);
     setError(null);
@@ -118,9 +131,13 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
         siteId,
         label: label.trim() || undefined,
         expiresInDays: days,
+        maxMachines: machines,
+        changeReference: changeReference.trim() || undefined,
       });
       setCreated(res);
       setLabel("");
+      setMaxMachines("");
+      setChangeReference("");
       load();
     } catch (err) {
       setError(zabbixErrorMessage(err).message);
@@ -145,10 +162,11 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
       <Typography variant="h6">Monitoring agents</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 820 }}>
         Create a link and send the command to {siteCode}&apos;s IT team. They run it on each server
-        they want monitored (any number of servers, until the link expires). The agent connects out
-        to JSAN over an encrypted channel — no inbound port or VPN is needed. On Linux it also
-        updates the OS packages first (add <code>-s -- --skip-upgrade</code> after <code>bash</code>{" "}
-        to skip that).
+        they want monitored, up to the link&apos;s machine limit and until it expires. The agent
+        connects out to JSAN over an encrypted channel — no inbound port or VPN is needed. OS
+        packages are left alone (on Linux, <code>-s -- --upgrade</code> after <code>bash</code> also
+        updates them). Each machine is matched to its asset by serial number; one that isn&apos;t in
+        the asset register is added as PLANNED for review.
       </Typography>
 
       {error && (
@@ -168,6 +186,26 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
         />
         <TextField
           size="small"
+          required
+          type="number"
+          label="Max machines"
+          value={maxMachines}
+          onChange={(e) => setMaxMachines(e.target.value)}
+          error={maxMachines !== "" && !machinesValid}
+          helperText={maxMachines !== "" && !machinesValid ? `1 to ${MAX_MACHINES_PER_LINK}` : " "}
+          inputProps={{ min: 1, max: MAX_MACHINES_PER_LINK, step: 1 }}
+          sx={{ width: 140 }}
+        />
+        <TextField
+          size="small"
+          label="Client change ref (optional)"
+          value={changeReference}
+          onChange={(e) => setChangeReference(e.target.value)}
+          inputProps={{ maxLength: 60 }}
+          sx={{ minWidth: 200 }}
+        />
+        <TextField
+          size="small"
           select
           label="Valid for"
           value={days}
@@ -180,16 +218,27 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
             </MenuItem>
           ))}
         </TextField>
-        <Button variant="contained" onClick={create} disabled={busy}>
+        <Button
+          variant="contained"
+          onClick={create}
+          disabled={busy || !machinesValid}
+          sx={{ alignSelf: "flex-start" }}
+        >
           {busy ? "Creating…" : "Create install link"}
         </Button>
       </Stack>
 
+      {created?.warnings.map((w) => (
+        <Alert key={w} severity="warning" sx={{ mb: 2 }}>
+          {w}
+        </Alert>
+      ))}
       {created && (
         <Alert severity="success" sx={{ mb: 2 }} onClose={() => setCreated(null)}>
           <Typography variant="body2" sx={{ mb: 1 }}>
-            Link created, valid until {formatDateTime(created.expiresAt)}. Copy the commands now —
-            they are not shown again.
+            Link created for up to {created.maxMachines} machine
+            {created.maxMachines > 1 ? "s" : ""}, valid until {formatDateTime(created.expiresAt)}.
+            Copy the commands now — they are not shown again.
           </Typography>
           <Stack spacing={1.5}>
             <CommandBox label="Linux (as root / with sudo)" command={created.commands.linux} />
@@ -216,6 +265,7 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
           <TableHead>
             <TableRow>
               <TableCell>Label</TableCell>
+              <TableCell>Change ref</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Expires</TableCell>
               <TableCell align="right">Machines enrolled</TableCell>
@@ -227,14 +277,17 @@ export function AgentEnrollmentCard({ siteId, siteCode }: { siteId: string; site
             {rows.map((r) => (
               <TableRow key={r.id}>
                 <TableCell>{r.label ?? "—"}</TableCell>
+                <TableCell>{r.changeReference ?? "—"}</TableCell>
                 <TableCell>
                   <Chip size="small" label={r.status} color={STATUS_COLOR[r.status]} />
                 </TableCell>
                 <TableCell>{formatDateTime(r.expiresAt)}</TableCell>
-                <TableCell align="right">{r.enrolledCount}</TableCell>
+                <TableCell align="right">
+                  {r.enrolledCount} / {r.maxMachines}
+                </TableCell>
                 <TableCell>{r.lastUsedAt ? formatDateTime(r.lastUsedAt) : "—"}</TableCell>
                 <TableCell align="right">
-                  {r.status === "ACTIVE" && (
+                  {(r.status === "ACTIVE" || r.status === "FULL") && (
                     <Button size="small" color="error" onClick={() => revoke(r.id)}>
                       Revoke
                     </Button>

@@ -9,10 +9,12 @@
 #   $env:OPSDESK_UNINSTALL  = '1'       remove the agent and its configuration
 #
 # What it does, unattended: checks that OpsDesk and the JSAN Zabbix server are
-# reachable, registers this machine with OpsDesk (site __OPSDESK_SITE__),
+# reachable, registers this machine with OpsDesk (site __OPSDESK_SITE__) with
+# its hardware serial number so it is matched to its asset record,
 # installs Zabbix agent 2 __OPSDESK_ZBX_VERSION__ (official MSI from cdn.zabbix.com) and connects it
 # OUT to the JSAN Zabbix server, encrypted (TLS-PSK). The agent only listens on
-# 127.0.0.1, so no inbound port is opened. Safe to run again.
+# 127.0.0.1, so no inbound port is opened. Windows Update is never touched.
+# Safe to run again.
 # Log: C:\ProgramData\OpsDesk\agent-install.log
 
 # Everything runs inside this block: a partially downloaded script fails to
@@ -128,7 +130,12 @@
     $machineHash = (-join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($guid)) | ForEach-Object { $_.ToString('x2') })).Substring(0, 32)
     $address = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
       Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1).IPAddress
-    $body = @{ hostname = $name; os = 'windows'; osVersion = $os.Caption; machineId = $machineHash; address = "$address" } | ConvertTo-Json
+    # Hardware serial / service tag, to match this machine to its asset record.
+    $serial = ''
+    try { $serial = "$((Get-CimInstance Win32_BIOS).SerialNumber)" } catch { $serial = '' }
+    $serial = ($serial -replace '[^A-Za-z0-9 ._:/-]', '').Trim()
+    if ($serial.Length -gt 64) { $serial = $serial.Substring(0, 64) }
+    $body = @{ hostname = $name; os = 'windows'; osVersion = $os.Caption; machineId = $machineHash; address = "$address"; serial = $serial } | ConvertTo-Json
     try {
       $reg = Invoke-RestMethod -Method Post -Uri "$OpsdeskApi/enroll/$EnrollCode/register" -ContentType 'application/json' -Body $body -TimeoutSec 60
     } catch {

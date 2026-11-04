@@ -9,26 +9,44 @@ Windows (admin PS):     irm https://<api>/api/v1/enroll/<code>/install.ps1 | iex
 Windows (curl.exe):     curl.exe -fsSL https://<api>/api/v1/enroll/<code>/install.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command "[Console]::In.ReadToEnd() | iex"
 ```
 
-Linux options go after `bash -s --`: `--skip-upgrade`, `--name WEB01`, `--uninstall`.
+Linux options go after `bash -s --`: `--upgrade` (also update the OS packages; off by
+default), `--name WEB01`, `--uninstall`. The old `--skip-upgrade` is still accepted and
+changes nothing.
 Windows options are environment variables set first: `$env:OPSDESK_AGENT_NAME='WEB01'`,
 `$env:OPSDESK_UNINSTALL='1'`.
 
 ## How it works
 
 1. **Admin** (Super Admin / Delivery-Ops Manager): `POST /monitoring/agent-enrollments`
-   `{ siteId, label?, expiresInDays (1-30, default 7) }`. The response carries the
-   code and ready-made commands **once**; only a SHA-256 of the code is stored.
-   The link works for **any number of that client's machines** until it expires
-   or is revoked (`POST /monitoring/agent-enrollments/:id/revoke`).
+   `{ siteId, maxMachines (1-500, required), label?, changeReference?, expiresInDays
+   (1-30, default 3) }`. The response carries the code and ready-made commands
+   **once**, plus `warnings` (e.g. the agent server address is still a Railway TCP
+   proxy); only a SHA-256 of the code is stored. The link enrolls up to
+   `maxMachines` **new** machines (re-running on an enrolled machine doesn't count;
+   a full link shows `FULL`) until it expires or is revoked
+   (`POST /monitoring/agent-enrollments/:id/revoke`). `changeReference` is the
+   client's change / CAB number, recorded on every enrollment's audit event.
 2. **Client** runs the command. The script is generated per link
    (`GET /enroll/:code/install.sh|install.ps1`) with the API address, site,
    Zabbix version and agent server address filled in.
-3. The script registers the machine (`POST /enroll/:code/register`). OpsDesk
-   creates or refreshes the Zabbix host `<SITE>-<HOSTNAME>` (own PSK, `site`/`ci`
-   tags, group `Clients/<SITE>`, template "Linux/Windows by Zabbix agent active")
-   and a CMDB record (`SERVER`, managed by `SHARED`, criticality `MEDIUM` —
-   edit it in the CMDB afterwards). Everything is audited as the admin who made
-   the link (correlation id `agent-enrollment:<id>`).
+3. The script registers the machine (`POST /enroll/:code/register`), sending its
+   hardware serial (Linux DMI / `dmidecode`, Windows `Win32_BIOS`). OpsDesk creates
+   or refreshes the Zabbix host `<SITE>-<HOSTNAME>` (own PSK, `site`/`ci` tags,
+   group `Clients/<SITE>`, template "Linux/Windows by Zabbix agent active") and ties
+   it to its CMDB record:
+   - **already enrolled** (same name, same machine): refreshed in place;
+   - **serial matches one asset at the site** (e.g. from the imported asset
+     register): linked to that asset, which keeps its own code; the Zabbix `ci`
+     tag is the asset's code and `metadata.agentHost` records the host;
+   - **no match**: a new CI (`SERVER`, `SHARED`, `MEDIUM`) in **PLANNED** status
+     with `metadata.reviewStatus = AWAITING_REVIEW`. An admin checks it and sets it
+     ACTIVE (or retires it) in the CMDB.
+
+   Refused before any change: a serial that belongs to another site's asset, that
+   matches several assets at the site, or whose asset was enrolled from another
+   machine (fix the asset register, then re-run). Placeholder serials ("To Be
+   Filled By O.E.M.", "Not Specified", all zeros, …) are ignored. Everything is
+   audited as the admin who made the link (correlation id `agent-enrollment:<id>`).
 4. The agent connects to the **agent server address** set in Monitoring →
    Zabbix settings (production: the Railway TCP proxy `iriguchi.proxy.rlwy.net:12762`).
 
@@ -45,7 +63,7 @@ all of these. IDs are referenced by the tests in `installer-scripts.spec.ts`.
 | R2 | **Fails fast and loudly** | `set -Eeuo pipefail`, `ERR` trap with line + log path | `$ErrorActionPreference='Stop'`, `Set-StrictMode`, one catch printing the reason |
 | R3 | **Needs admin rights, says so** | root check with the exact `sudo` command | Administrator check with "Run as administrator" hint |
 | R4 | **Unattended — never prompts** | `DEBIAN_FRONTEND=noninteractive`, `NEEDRESTART_MODE=a`, `-y`, `--force-confdef/confold`, dpkg lock wait | `msiexec /qn /norestart` |
-| R5 | **OS update as the client asked** | `apt-get update` + `upgrade` (or `dnf upgrade`), opt-out `--skip-upgrade`, **never reboots**, warns if a reboot is pending | not touched (Windows Update / WSUS) |
+| R5 | **OS update only when asked** | off by default (patching is the client's change control); `--upgrade` runs `apt-get upgrade` (or `dnf upgrade`), **never reboots**, warns if a reboot is pending | not touched (Windows Update / WSUS) |
 | R6 | **Supported OS detected, others refused clearly** | Ubuntu 20.04/22.04/24.04, Debian 11/12, RHEL-family 8/9; x86_64/aarch64 | 64-bit Windows |
 | R7 | **Network checked before changing anything else** | HTTPS to OpsDesk + TCP to the Zabbix server, with the port to open | same |
 | R8 | **No inbound exposure** | `ListenIP=127.0.0.1`, `Server=127.0.0.1` | same |
@@ -62,6 +80,7 @@ all of these. IDs are referenced by the tests in `installer-scripts.spec.ts`.
 | R19 | **Coexists with an existing agent** | own loopback port 31050 (not 10050); an agent the client already runs is left alone | same |
 | R20 | **A bad link fails clearly** | invalid/expired/revoked link (or server not ready) → a script that prints the reason and `exit 1`, served with HTTP 200 because `curl -f … \| bash` would otherwise show only "error: 404" and exit 0 | prints the reason and throws |
 | R21 | **Every advertised one-liner really runs** | `curl -fsSL … \| sudo bash` run for real on a clean Ubuntu 24.04 (see Verification) | `irm … \| iex` and the curl.exe form verified; **not** `powershell -Command -`, which reads stdin line by line and silently skips the multi-line script |
+| R22 | **Sends the hardware serial for asset matching** | `/sys/class/dmi/id/product_serial`, else `dmidecode`; only `[A-Za-z0-9 ._:/-]`, max 64 | `Win32_BIOS.SerialNumber`, same filter |
 
 ## Verification (2026-10-14, production)
 
@@ -93,10 +112,16 @@ silently running nothing (R21).
 The test machine was then uninstalled, its Zabbix host disabled, its CMDB record set to
 RETIRED and the test link revoked.
 
+Changed 2026-11-04 (governance review: OS upgrade opt-in, machine cap, change
+reference, serial matching): covered by the automated tests above; **not yet re-run live**
+on a clean machine against production.
+
 ## Troubleshooting
 
 | Message | Fix |
 | --- | --- |
+| `This link has already enrolled its limit of N machine(s)` | Create a new link for the remaining machines |
+| `Serial … belongs to an asset at another site` / `matches N assets at this site` / `already enrolled with serial …` | Fix the asset register (wrong site, duplicate records, or a reused serial), then re-run |
 | `This enrollment link is invalid, expired or revoked` | Create a new link for the site |
 | `Cannot reach the JSAN Zabbix server at host:port` | Client firewall: allow outbound TCP to that port |
 | `Another machine is already enrolled as …` | Two machines share a name: re-run with `--name` (Windows `$env:OPSDESK_AGENT_NAME`) |

@@ -29,6 +29,42 @@ const SCRIPT_FILES: Record<InstallerOs, string> = {
   windows: "install.ps1",
 };
 
+/**
+ * Agents should connect to a stable address JSAN controls. A Railway TCP
+ * proxy's host and port can change (every installed agent would lose its
+ * server) and clients must open an unusual outbound port for it.
+ */
+const UNSTABLE_AGENT_ENDPOINT = /\.(proxy\.)?rlwy\.net(:\d+)?$/i;
+
+/**
+ * Values firmware reports when it has no real serial. Matching on these
+ * would tie unrelated machines to one asset.
+ */
+const PLACEHOLDER_SERIALS = new Set([
+  "none",
+  "n/a",
+  "na",
+  "not specified",
+  "not applicable",
+  "default string",
+  "to be filled by o.e.m.",
+  "system serial number",
+  "chassis serial number",
+  "serial number",
+  "invalid",
+  "0123456789",
+  "123456789",
+]);
+
+/** The serial worth matching on, or null for an empty or placeholder one. */
+export function usableSerial(raw: string | undefined): string | null {
+  const serial = (raw ?? "").trim().replace(/\s+/g, " ");
+  if (!serial || /^0+$/.test(serial) || PLACEHOLDER_SERIALS.has(serial.toLowerCase())) {
+    return null;
+  }
+  return serial;
+}
+
 /** Enrollment codes are 32 random bytes, base64url (43 chars). */
 const CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
@@ -64,10 +100,11 @@ export class AgentEnrollmentService {
     if (!site) throw new NotFoundException(`Site ${dto.siteId} not found`);
     await assertSiteAcceptsNewWork(this.prisma, dto.siteId);
     // Fail now (not on the client's machine) if Zabbix can't take agents yet.
-    await this.zabbix.agentInstallTarget();
+    const target = await this.zabbix.agentInstallTarget();
 
     const code = randomBytes(32).toString("base64url");
-    const days = dto.expiresInDays ?? 7;
+    const days = dto.expiresInDays ?? 3;
+    const changeReference = dto.changeReference?.trim() || null;
     const row = await this.prisma.$transaction(async (tx) => {
       const created = await tx.agentEnrollment.create({
         data: {
@@ -75,6 +112,8 @@ export class AgentEnrollmentService {
           label: dto.label?.trim() || null,
           codeHash: hashCode(code),
           expiresAt: new Date(Date.now() + days * 24 * 3600 * 1000),
+          maxMachines: dto.maxMachines,
+          changeReference,
           createdById: actor.actorId,
         },
       });
@@ -85,14 +124,28 @@ export class AgentEnrollmentService {
           entityId: created.id,
           action: "AGENT_ENROLLMENT_CREATED",
           // Never the code itself: it is a credential.
-          after: { siteCode: site.code, label: created.label, expiresAt: created.expiresAt },
+          after: {
+            siteCode: site.code,
+            label: created.label,
+            expiresAt: created.expiresAt,
+            maxMachines: created.maxMachines,
+            changeReference: created.changeReference,
+          },
           correlationId: actor.correlationId,
         },
         tx,
       );
       return created;
     });
-    return { ...this.toView(row, site.code), code, commands: this.commands(code) };
+    const warnings = UNSTABLE_AGENT_ENDPOINT.test(target.serverAddress)
+      ? [
+          `Agents will connect to ${target.serverAddress}, a Railway TCP proxy address. Its host ` +
+            "and port can change, which would disconnect every installed agent, and clients must " +
+            "allow an unusual outbound port. Set a stable JSAN host name as the agent server " +
+            "address in Monitoring → Zabbix settings before sending links to clients.",
+        ]
+      : [];
+    return { ...this.toView(row, site.code), code, commands: this.commands(code), warnings };
   }
 
   async list(siteId?: string) {
@@ -175,75 +228,105 @@ export class AgentEnrollmentService {
 
   /**
    * Called by the installer on the client's machine. Creates or refreshes the
-   * machine's Zabbix host (new PSK every time) and its CMDB record, audited as
-   * the admin who created the link.
+   * machine's Zabbix host (new PSK every time) and ties it to its CMDB record,
+   * audited as the admin who created the link:
+   *  - already enrolled (same name, same machine): refreshed in place;
+   *  - new, and its hardware serial matches one asset at the link's site:
+   *    linked to that imported asset, which keeps its own code;
+   *  - new, no match: a new CI in PLANNED status, awaiting review, until an
+   *    admin checks it and sets it ACTIVE in the CMDB.
+   * Only a new machine counts towards the link's machine cap.
    */
   async register(code: string, dto: RegisterAgentDto) {
     const { enrollment, siteCode } = await this.resolve(code);
     const target = await this.zabbix.agentInstallTarget();
     const host = agentHostName(siteCode, dto.hostname);
-    const ciCode = host;
+    const serial = usableSerial(dto.serial);
     const actor: ActorContext = {
       actorId: enrollment.createdById,
       correlationId: `agent-enrollment:${enrollment.id}`,
     };
 
     // A different machine already enrolled under this name: never take it over.
-    const existingCi = await this.cmdb.findByCode(ciCode);
-    if (existingCi && existingCi.siteId !== enrollment.siteId) {
+    const enrolled = await this.cmdb.findByAgentHost(host);
+    if (enrolled && enrolled.siteId !== enrollment.siteId) {
       throw new ConflictException({
         code: "AGENT_NAME_OTHER_SITE",
-        message: `${ciCode} is already registered to another site`,
+        message: `${host} is already registered to another site`,
       });
     }
-    const knownMachine = (existingCi?.metadata as { machineId?: string } | null)?.machineId;
+    const knownMachine = machineIdOf(enrolled);
     if (knownMachine && knownMachine !== dto.machineId) {
       throw new ConflictException({
         code: "AGENT_NAME_TAKEN",
         message: `Another machine is already enrolled as ${host}. Rename this one or re-run with --name <NAME> (Windows: $env:OPSDESK_AGENT_NAME).`,
       });
     }
+    const asset =
+      enrolled ?? (serial ? await this.assetForSerial(serial, enrollment.siteId, dto) : null);
+    const assetMatch = enrolled ? "ALREADY_ENROLLED" : asset ? "SERIAL" : "NEW_AWAITING_REVIEW";
+
+    // Reserve the machine's place on the link before touching Zabbix, so a
+    // full link changes nothing.
+    const isNewMachine = !enrolled;
+    if (isNewMachine) {
+      await this.takeMachineSlot(enrollment);
+    }
 
     const psk = randomBytes(32).toString("hex");
     const pskIdentity = `opsdesk-${host}`;
-    const zbx = await this.zabbix.upsertAgentHost({
-      host,
-      name: `${dto.hostname} (${siteCode})`,
-      siteCode,
-      ciCode,
-      os: dto.os,
-      pskIdentity,
-      psk,
-    });
-
-    const metadata = {
-      enrolledVia: "agent-enrollment",
-      enrollmentId: enrollment.id,
-      machineId: dto.machineId,
-      os: dto.os,
-      osVersion: dto.osVersion ?? null,
-      zabbixHostId: zbx.hostId,
-    };
-    if (!existingCi) {
-      await this.cmdb.create(
-        {
-          ciCode,
-          siteId: enrollment.siteId,
-          ciType: "SERVER",
-          name: dto.hostname,
-          managementAddress: dto.address || undefined,
-          managedBy: "SHARED",
-          criticality: "MEDIUM",
-          metadata,
-        },
-        actor,
-      );
+    let zbx: { hostId: string; created: boolean };
+    try {
+      zbx = await this.zabbix.upsertAgentHost({
+        host,
+        name: `${dto.hostname} (${siteCode})`,
+        siteCode,
+        ciCode: asset?.ciCode ?? host,
+        os: dto.os,
+        pskIdentity,
+        psk,
+      });
+      const metadata = {
+        enrolledVia: "agent-enrollment",
+        enrollmentId: enrollment.id,
+        agentHost: host,
+        machineId: dto.machineId,
+        os: dto.os,
+        osVersion: dto.osVersion ?? null,
+        zabbixHostId: zbx.hostId,
+      };
+      if (!asset) {
+        await this.cmdb.create(
+          {
+            ciCode: host,
+            siteId: enrollment.siteId,
+            ciType: "SERVER",
+            name: dto.hostname,
+            serialOrServiceTag: serial ?? undefined,
+            managementAddress: dto.address || undefined,
+            managedBy: "SHARED",
+            criticality: "MEDIUM",
+            // Not in the imported asset register: an admin reviews it and
+            // sets it ACTIVE (or retires it) in the CMDB.
+            lifecycleStatus: "PLANNED",
+            metadata: { ...metadata, reviewStatus: "AWAITING_REVIEW" },
+          },
+          actor,
+        );
+      } else if (!enrolled) {
+        await this.cmdb.mergeMetadata(asset.id, metadata, actor);
+      }
+    } catch (err) {
+      if (isNewMachine) {
+        await this.releaseMachineSlot(enrollment.id);
+      }
+      throw err;
     }
 
     await this.prisma.$transaction(async (tx) => {
       await tx.agentEnrollment.update({
         where: { id: enrollment.id },
-        data: { enrolledCount: { increment: 1 }, lastUsedAt: new Date() },
+        data: { lastUsedAt: new Date() },
       });
       await this.audit.record(
         {
@@ -258,6 +341,10 @@ export class AgentEnrollmentService {
             os: dto.os,
             osVersion: dto.osVersion ?? null,
             address: dto.address ?? null,
+            serial,
+            assetMatch,
+            ciCode: asset?.ciCode ?? host,
+            changeReference: enrollment.changeReference,
             zabbixHostId: zbx.hostId,
             newHost: zbx.created,
           },
@@ -266,8 +353,67 @@ export class AgentEnrollmentService {
         tx,
       );
     });
-    this.logger.log(`agent ${host} enrolled (${zbx.created ? "new" : "re-enrolled"})`);
+
+    this.logger.log(
+      `agent ${host} enrolled (${zbx.created ? "new" : "re-enrolled"}, ${assetMatch})`,
+    );
     return { hostName: host, serverActive: target.serverAddress, pskIdentity, psk };
+  }
+
+  /**
+   * The imported asset a new machine's serial points at: exactly one CI at
+   * the link's site, not already enrolled from another machine. A serial
+   * that belongs to another site, or to several assets here, is refused -
+   * the asset register needs fixing, not a guess.
+   */
+  private async assetForSerial(serial: string, siteId: string, dto: RegisterAgentDto) {
+    const matches = await this.cmdb.findBySerial(serial);
+    const here = matches.filter((ci) => ci.siteId === siteId);
+    if (here.length === 0 && matches.length > 0) {
+      throw new ConflictException({
+        code: "AGENT_SERIAL_OTHER_SITE",
+        message: `Serial ${serial} belongs to an asset at another site. Ask JSAN to check the asset register.`,
+      });
+    }
+    if (here.length > 1) {
+      throw new ConflictException({
+        code: "AGENT_SERIAL_AMBIGUOUS",
+        message: `Serial ${serial} matches ${here.length} assets at this site. Ask JSAN to fix the duplicate asset records.`,
+      });
+    }
+    const [asset] = here;
+    if (!asset) {
+      return null;
+    }
+    const enrolledFrom = machineIdOf(asset);
+    if (enrolledFrom && enrolledFrom !== dto.machineId) {
+      throw new ConflictException({
+        code: "AGENT_SERIAL_TAKEN",
+        message: `Another machine is already enrolled with serial ${serial}. Ask JSAN to check the asset register.`,
+      });
+    }
+    return asset;
+  }
+
+  /** One more machine on the link, or a refusal once it is full. */
+  private async takeMachineSlot(enrollment: AgentEnrollment): Promise<void> {
+    const { count } = await this.prisma.agentEnrollment.updateMany({
+      where: { id: enrollment.id, enrolledCount: { lt: enrollment.maxMachines } },
+      data: { enrolledCount: { increment: 1 } },
+    });
+    if (count === 0) {
+      throw new ConflictException({
+        code: "ENROLLMENT_LINK_FULL",
+        message: `This link has already enrolled its limit of ${enrollment.maxMachines} machine(s). Ask JSAN for a new link.`,
+      });
+    }
+  }
+
+  private async releaseMachineSlot(id: string): Promise<void> {
+    await this.prisma.agentEnrollment.update({
+      where: { id },
+      data: { enrolledCount: { decrement: 1 } },
+    });
   }
 
   /**
@@ -277,8 +423,8 @@ export class AgentEnrollmentService {
   async status(code: string, dto: AgentStatusDto) {
     const { enrollment, siteCode } = await this.resolve(code);
     const host = agentHostName(siteCode, dto.hostname);
-    const ci = await this.cmdb.findByCode(host);
-    const knownMachine = (ci?.metadata as { machineId?: string } | null)?.machineId;
+    const ci = await this.cmdb.findByAgentHost(host);
+    const knownMachine = machineIdOf(ci);
     if (
       !ci ||
       ci.siteId !== enrollment.siteId ||
@@ -346,12 +492,25 @@ export class AgentEnrollmentService {
       label: row.label,
       expiresAt: row.expiresAt.toISOString(),
       revokedAt: row.revokedAt?.toISOString() ?? null,
-      status: row.revokedAt ? "REVOKED" : row.expiresAt.getTime() <= now ? "EXPIRED" : "ACTIVE",
+      status: row.revokedAt
+        ? "REVOKED"
+        : row.expiresAt.getTime() <= now
+          ? "EXPIRED"
+          : row.enrolledCount >= row.maxMachines
+            ? "FULL"
+            : "ACTIVE",
       enrolledCount: row.enrolledCount,
+      maxMachines: row.maxMachines,
+      changeReference: row.changeReference,
       lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
     };
   }
+}
+
+/** The machine id an enrolled CI was registered from, if any. */
+function machineIdOf(ci: { metadata: unknown } | null): string | undefined {
+  return (ci?.metadata as { machineId?: string } | null)?.machineId;
 }
 
 /** "SITE04" + "web-01.corp" → "SITE04-WEB-01.CORP" (a valid Zabbix host name and CMDB code). */

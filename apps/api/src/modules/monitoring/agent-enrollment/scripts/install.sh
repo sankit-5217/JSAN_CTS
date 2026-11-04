@@ -5,16 +5,19 @@
 #   curl -fsSL __OPSDESK_API__/enroll/<code>/install.sh | sudo bash
 #
 # Options (put them after "bash -s --"):
-#   ... | sudo bash -s -- --skip-upgrade   leave the installed OS packages as they are
+#   ... | sudo bash -s -- --upgrade        also update the OS packages first (off by default)
 #   ... | sudo bash -s -- --name WEB01     enroll this machine under another name
 #   ... | sudo bash -s -- --uninstall      remove the agent and its configuration
 #
 # What it does, unattended (no questions asked):
 #   1. checks the OS and that OpsDesk and the JSAN Zabbix server are reachable
-#   2. updates the OS packages (apt-get update + upgrade, or dnf upgrade);
-#      existing configuration files are kept and the machine is never rebooted
+#   2. only with --upgrade: updates the OS packages (apt-get upgrade or dnf
+#      upgrade); existing configuration files are kept, never reboots. Without
+#      it the installed packages are left alone - patching stays under the
+#      client's own change control
 #   3. installs Zabbix agent 2 __OPSDESK_ZBX_SERIES__ from repo.zabbix.com
-#   4. registers this machine with OpsDesk (site __OPSDESK_SITE__)
+#   4. registers this machine with OpsDesk (site __OPSDESK_SITE__), sending
+#      its hardware serial number so it is matched to its asset record
 #   5. connects the agent OUT to the JSAN Zabbix server, encrypted (TLS-PSK);
 #      the agent only listens on 127.0.0.1, no inbound port is opened
 #   6. checks the agent is running and connected
@@ -67,7 +70,7 @@ usage() {
 JSAN OpsDesk monitoring agent installer (site $SITE_CODE)
 
   curl -fsSL $OPSDESK_API/enroll/<code>/install.sh | sudo bash
-  ... | sudo bash -s -- --skip-upgrade   leave the installed OS packages as they are
+  ... | sudo bash -s -- --upgrade        also update the OS packages first (off by default)
   ... | sudo bash -s -- --name WEB01     enroll this machine under another name
   ... | sudo bash -s -- --uninstall      remove the agent and its configuration
 EOF
@@ -197,8 +200,21 @@ install_agent() {
   command -v zabbix_agent2 >/dev/null 2>&1 || die "zabbix-agent2 did not install correctly."
 }
 
+# The hardware serial / service tag, so OpsDesk can match this machine to
+# its imported asset record. Empty when the firmware doesn't report one.
+hardware_serial() {
+  local serial=""
+  if [ -r /sys/class/dmi/id/product_serial ]; then
+    serial=$(cat /sys/class/dmi/id/product_serial 2>/dev/null || true)
+  fi
+  if [ -z "$serial" ] && command -v dmidecode >/dev/null 2>&1; then
+    serial=$(dmidecode -s system-serial-number 2>/dev/null || true)
+  fi
+  printf '%s' "$serial" | tr -cd 'A-Za-z0-9 ._:/-' | sed -E 's/^ +| +$//g' | cut -c1-64
+}
+
 register_machine() {
-  local name machine_hash address body resp http
+  local name machine_hash address serial body resp http
   name=${NAME_OVERRIDE:-$(hostname -s 2>/dev/null || hostname)}
   REG_NAME=$name
   [ -n "$name" ] || die "Cannot work out this machine's name; pass --name <NAME>."
@@ -209,8 +225,10 @@ register_machine() {
   fi
   MACHINE_HASH=$machine_hash
   address=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1)
-  body=$(printf '{"hostname":"%s","os":"linux","osVersion":"%s","machineId":"%s","address":"%s"}' \
-    "$(json_escape "$name")" "$(json_escape "$OS_PRETTY")" "$machine_hash" "$(json_escape "${address:-}")")
+  serial=$(hardware_serial)
+  body=$(printf '{"hostname":"%s","os":"linux","osVersion":"%s","machineId":"%s","address":"%s","serial":"%s"}' \
+    "$(json_escape "$name")" "$(json_escape "$OS_PRETTY")" "$machine_hash" "$(json_escape "${address:-}")" \
+    "$(json_escape "$serial")")
   # shellcheck disable=SC2310 # curl_api is one curl call; its failure is handled right here
   resp=$(curl_api -w $'\n%{http_code}' -X POST -H 'Content-Type: application/json' \
     --data-binary @- "$OPSDESK_API/enroll/$ENROLL_CODE/register" <<<"$body") ||
@@ -311,11 +329,13 @@ main() {
     exit 1
   }
 
-  local skip_upgrade=0 uninstall=0
+  local upgrade=0 uninstall=0
   NAME_OVERRIDE=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --skip-upgrade) skip_upgrade=1 ;;
+      --upgrade) upgrade=1 ;;
+      # The old opt-out; skipping is now the default.
+      --skip-upgrade) upgrade=0 ;;
       --uninstall) uninstall=1 ;;
       --name)
         shift
@@ -326,7 +346,7 @@ main() {
         usage
         return 0
         ;;
-      *) die "Unknown option: $1 (options: --skip-upgrade, --name <NAME>, --uninstall)" ;;
+      *) die "Unknown option: $1 (options: --upgrade, --name <NAME>, --uninstall)" ;;
     esac
     shift
   done
@@ -352,11 +372,11 @@ main() {
   check_network
   say "  OpsDesk and the JSAN Zabbix server are reachable"
 
-  if [ "$skip_upgrade" -eq 1 ]; then
-    step "Updating the operating system - skipped (--skip-upgrade)"
-  else
-    step "Updating the operating system (unattended, no reboot)"
+  if [ "$upgrade" -eq 1 ]; then
+    step "Updating the operating system (--upgrade: unattended, no reboot)"
     upgrade_os
+  else
+    step "Updating the operating system - skipped (add --upgrade to update the OS packages)"
   fi
 
   step "Installing Zabbix agent 2 ($ZBX_SERIES)"

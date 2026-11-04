@@ -5,7 +5,8 @@ scenario; each says when to use it, exact commands, and how to verify
 success — not just a description of the problem.
 
 Also: [Site inventory → Zabbix monitoring coverage](inventory-monitoring-coverage.md),
-[agent installer](agent-installer.md), [Zabbix integration](zabbix-integration.md),
+[agent installer](agent-installer.md) and its
+[client security sheet](agent-client-security-sheet.md), [Zabbix integration](zabbix-integration.md),
 [Railway deploy](railway-deploy.md).
 
 ## Database restore
