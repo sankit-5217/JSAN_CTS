@@ -400,7 +400,7 @@ function routingEmptyMessage(s: RoutingSuggestions, category: string): string {
     case "NO_SKILL_REQUIREMENTS":
       return `No skills are configured as required for category "${category}" — assign manually or to a group.`;
     case "NO_ENGINEERS_ON_SHIFT":
-      return "Nobody is on shift at this site right now — assign manually or to a group queue.";
+      return "Nobody with access to this site is on shift right now — assign manually or to a group queue.";
     case "NO_QUALIFIED_ENGINEER":
       return `Nobody on shift here has every required skill${
         s.uncoveredSkills.length

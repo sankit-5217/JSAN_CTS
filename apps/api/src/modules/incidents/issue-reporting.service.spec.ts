@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, NotFoundException } from "@nest
 import { IssueCatalogKind, UserRole } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { AuthzService } from "../auth/authz.service";
 import { IssueReportingService } from "./issue-reporting.service";
 
 const option = (
@@ -93,7 +94,17 @@ function makeService(overrides: Record<string, unknown> = {}) {
   const auditService = {
     record: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
-  return { service: new IssueReportingService(prisma, auditService), prisma, auditService, tx };
+  // Every assignee has access to the site unless a test says otherwise.
+  const authzService = {
+    usersWithSiteAccess: jest.fn(async (ids: string[]) => new Set(ids)),
+  } as unknown as AuthzService;
+  return {
+    service: new IssueReportingService(prisma, auditService, authzService),
+    prisma,
+    auditService,
+    authzService,
+    tx,
+  };
 }
 
 const actor = { actorId: "admin-1" };
@@ -171,7 +182,7 @@ describe("IssueReportingService.assertValidSelections", () => {
 describe("IssueReportingService.resolveAssignment", () => {
   it("falls back to the default (Service Desk) group when none was picked", async () => {
     const { service } = makeService();
-    await expect(service.resolveAssignment(undefined, undefined)).resolves.toEqual({
+    await expect(service.resolveAssignment("site-1", undefined, undefined)).resolves.toEqual({
       ownerGroupId: "grp-desk",
       ownerUserId: null,
     });
@@ -181,7 +192,7 @@ describe("IssueReportingService.resolveAssignment", () => {
     const { service } = makeService({
       supportGroup: { findFirst: jest.fn().mockResolvedValue(null), findUnique: jest.fn() },
     });
-    await expect(service.resolveAssignment(undefined, undefined)).resolves.toEqual({
+    await expect(service.resolveAssignment("site-1", undefined, undefined)).resolves.toEqual({
       ownerGroupId: null,
       ownerUserId: null,
     });
@@ -189,7 +200,7 @@ describe("IssueReportingService.resolveAssignment", () => {
 
   it("rejects an unknown group", async () => {
     const { service } = makeService();
-    await expect(service.resolveAssignment("grp-nope", undefined)).rejects.toThrow(
+    await expect(service.resolveAssignment("site-1", "grp-nope", undefined)).rejects.toThrow(
       "Unknown assignee group",
     );
   });
@@ -210,7 +221,7 @@ describe("IssueReportingService.resolveAssignment", () => {
       },
       supportGroupMember: { findUnique: jest.fn().mockResolvedValue({ id: "m-1" }) },
     });
-    await expect(service.resolveAssignment("grp-storage", "eng-1")).resolves.toEqual({
+    await expect(service.resolveAssignment("site-1", "grp-storage", "eng-1")).resolves.toEqual({
       ownerGroupId: "grp-storage",
       ownerUserId: "eng-1",
     });
@@ -231,9 +242,9 @@ describe("IssueReportingService.resolveAssignment", () => {
         }),
       },
     });
-    await expect(outsider.service.resolveAssignment("grp-storage", "eng-1")).rejects.toThrow(
-      "Vikas is not a member of Storage",
-    );
+    await expect(
+      outsider.service.resolveAssignment("site-1", "grp-storage", "eng-1"),
+    ).rejects.toThrow("Vikas is not a member of Storage");
 
     const customer = makeService({
       user: {
@@ -245,9 +256,95 @@ describe("IssueReportingService.resolveAssignment", () => {
         }),
       },
     });
-    await expect(customer.service.resolveAssignment(undefined, "cust-1")).rejects.toThrow(
+    await expect(customer.service.resolveAssignment("site-1", undefined, "cust-1")).rejects.toThrow(
       "Assignee must be an active staff member",
     );
+  });
+
+  it("rejects a group member who has no access to the ticket's site", async () => {
+    const { service, authzService } = makeService({
+      supportGroup: {
+        findFirst: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({ id: "grp-storage", name: "Storage" }),
+      },
+      user: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: "eng-1",
+          displayName: "Vikas",
+          isActive: true,
+          role: UserRole.SITE_ENGINEER,
+        }),
+      },
+      supportGroupMember: { findUnique: jest.fn().mockResolvedValue({ id: "m-1" }) },
+    });
+    (authzService.usersWithSiteAccess as jest.Mock).mockResolvedValue(new Set());
+    await expect(service.resolveAssignment("site-1", "grp-storage", "eng-1")).rejects.toThrow(
+      "Vikas has no access to this ticket's site",
+    );
+    expect(authzService.usersWithSiteAccess).toHaveBeenCalledWith(["eng-1"], "site-1");
+  });
+});
+
+describe("IssueReportingService.assertAssignable", () => {
+  const engineer = {
+    id: "eng-1",
+    displayName: "Vikas",
+    isActive: true,
+    role: UserRole.SITE_ENGINEER,
+  };
+
+  it("accepts an active engineer with site access, without requiring group membership", async () => {
+    const { service, prisma } = makeService({
+      supportGroup: {
+        findFirst: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({ id: "grp-storage", name: "Storage" }),
+      },
+      user: { findUnique: jest.fn().mockResolvedValue(engineer) },
+    });
+    await expect(
+      service.assertAssignable("site-1", "grp-storage", "eng-1"),
+    ).resolves.toBeUndefined();
+    expect(prisma.supportGroupMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("rejects an engineer without access to the site", async () => {
+    const { service, authzService } = makeService({
+      user: { findUnique: jest.fn().mockResolvedValue(engineer) },
+    });
+    (authzService.usersWithSiteAccess as jest.Mock).mockResolvedValue(new Set());
+    await expect(service.assertAssignable("site-1", undefined, "eng-1")).rejects.toThrow(
+      "Vikas has no access to this ticket's site",
+    );
+  });
+
+  it("rejects an unknown group, a client user and a deactivated user", async () => {
+    const { service } = makeService();
+    await expect(service.assertAssignable("site-1", "grp-nope", undefined)).rejects.toThrow(
+      "Unknown assignee group",
+    );
+    const client = makeService({
+      user: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ ...engineer, role: UserRole.CLIENT_MANAGER_VIEWER }),
+      },
+    });
+    await expect(client.service.assertAssignable("site-1", undefined, "eng-1")).rejects.toThrow(
+      "Assignee must be an active staff member",
+    );
+    const inactive = makeService({
+      user: { findUnique: jest.fn().mockResolvedValue({ ...engineer, isActive: false }) },
+    });
+    await expect(inactive.service.assertAssignable("site-1", undefined, "eng-1")).rejects.toThrow(
+      "Assignee must be an active staff member",
+    );
+  });
+
+  it("checks nothing when the owner is being cleared or left alone", async () => {
+    const { service, prisma, authzService } = makeService();
+    await expect(service.assertAssignable("site-1", null, undefined)).resolves.toBeUndefined();
+    expect(prisma.supportGroup.findUnique).not.toHaveBeenCalled();
+    expect(authzService.usersWithSiteAccess).not.toHaveBeenCalled();
   });
 });
 
@@ -480,10 +577,10 @@ describe("IssueReportingService retired values and client group picks", () => {
       },
     });
     await expect(
-      service.resolveAssignment("grp-storage", undefined, { clientPick: true }),
+      service.resolveAssignment("site-1", "grp-storage", undefined, { clientPick: true }),
     ).rejects.toThrow("Storage team can't be picked as the assignee group");
     // Staff routing to the same group is fine.
-    await expect(service.resolveAssignment("grp-storage", undefined)).resolves.toEqual({
+    await expect(service.resolveAssignment("site-1", "grp-storage", undefined)).resolves.toEqual({
       ownerGroupId: "grp-storage",
       ownerUserId: null,
     });
@@ -502,7 +599,7 @@ describe("IssueReportingService retired values and client group picks", () => {
       },
     });
     await expect(
-      service.resolveAssignment("grp-infra", undefined, { clientPick: true }),
+      service.resolveAssignment("site-1", "grp-infra", undefined, { clientPick: true }),
     ).resolves.toEqual({ ownerGroupId: "grp-infra", ownerUserId: null });
   });
 });

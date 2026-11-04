@@ -55,6 +55,8 @@ function makeService(opts: {
   groups?: Record<string, { id: string; name: string; memberIds: string[] }>;
   policy?: { id: string; autoAssignEnabled: boolean } | null;
   canAccessSite?: boolean;
+  /** Rostered engineers with no access to the site (default: everyone has it). */
+  noSiteAccess?: string[];
 }) {
   const tx = {
     routingPolicy: {
@@ -88,6 +90,9 @@ function makeService(opts: {
   } as unknown as AuditService;
   const authzService = {
     canAccessSite: jest.fn().mockResolvedValue(opts.canAccessSite ?? true),
+    usersWithSiteAccess: jest.fn(
+      async (ids: string[]) => new Set(ids.filter((id) => !opts.noSiteAccess?.includes(id))),
+    ),
   } as unknown as AuthzService;
   const incidentsService = {
     findOne: jest.fn().mockResolvedValue(opts.incident ?? incident()),
@@ -134,6 +139,7 @@ function makeService(opts: {
     auditService,
     incidentsService,
     shiftsService,
+    authzService,
     tx,
   };
 }
@@ -169,6 +175,30 @@ describe("RoutingService.suggestForIncident", () => {
 
     expect(shiftsService.getLiveRoster).toHaveBeenCalledWith({ siteId: "site-1" }, null, NOW);
     expect(result.reason).toBe("NO_ENGINEERS_ON_SHIFT");
+  });
+
+  it("leaves out rostered engineers who have no access to the incident's site", async () => {
+    const { service, authzService } = makeService({
+      working: [rosterEntry("eng-a"), rosterEntry("eng-b")],
+      skills: { "eng-a": [STORAGE.id], "eng-b": [STORAGE.id] },
+      noSiteAccess: ["eng-b"],
+    });
+    const result = await service.suggestForIncident("inc-1", USER, NOW);
+
+    expect(authzService.usersWithSiteAccess).toHaveBeenCalledWith(["eng-a", "eng-b"], "site-1");
+    expect(result.candidates.map((c) => c.userId)).toEqual(["eng-a"]);
+  });
+
+  it("reports nobody on shift when no rostered engineer has access to the site", async () => {
+    const { service } = makeService({
+      working: [rosterEntry("eng-a")],
+      skills: { "eng-a": [STORAGE.id] },
+      noSiteAccess: ["eng-a"],
+    });
+    const result = await service.suggestForIncident("inc-1", USER, NOW);
+
+    expect(result.reason).toBe("NO_ENGINEERS_ON_SHIFT");
+    expect(result.candidates).toEqual([]);
   });
 
   it("requires every skill and lists the ones nobody on shift holds", async () => {

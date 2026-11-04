@@ -589,6 +589,7 @@ export class IncidentsService {
     await assertSiteAcceptsNewWork(this.prisma, dto.siteId);
     await this.issueReporting.assertValidSelections(dto, { requireIssueType: true });
     const assignment = await this.issueReporting.resolveAssignment(
+      dto.siteId,
       dto.ownerGroupId,
       dto.ownerUserId,
       { clientPick: true },
@@ -682,6 +683,25 @@ export class IncidentsService {
     return after;
   }
 
+  /**
+   * A desk edit or status change that sets a new group/assignee: the new
+   * value must be a real group / an active staff member with access to the
+   * ticket's site. Only values that actually change are checked — the edit
+   * form round-trips the current owner, who may since have lost a grant.
+   */
+  private async assertNewOwnerAssignable(
+    incident: Incident,
+    dto: { ownerGroupId?: string; ownerUserId?: string },
+  ): Promise<void> {
+    const changed = (next: string | undefined, current: string | null) =>
+      next !== undefined && next !== current ? next : undefined;
+    await this.issueReporting.assertAssignable(
+      incident.siteId,
+      changed(dto.ownerGroupId, incident.ownerGroupId),
+      changed(dto.ownerUserId, incident.ownerUserId),
+    );
+  }
+
   async update(id: string, dto: UpdateIncidentDto, user: AuthenticatedUser, actor: ActorContext) {
     const before = await this.findOneScoped(id, user);
     const ownerChanged =
@@ -699,6 +719,9 @@ export class IncidentsService {
       throw new ForbiddenException(
         "Only Service Desk/NOC or an elevated role can reassign ownership or override priority",
       );
+    }
+    if (ownerChanged) {
+      await this.assertNewOwnerAssignable(before, dto);
     }
     this.assertDescriptionUnchanged(before, dto.description);
 
@@ -813,6 +836,7 @@ export class IncidentsService {
             ? undefined
             : (before.ownerUserId ?? undefined);
       const resolved = await this.issueReporting.resolveAssignment(
+        before.siteId,
         dto.ownerGroupId ?? before.ownerGroupId ?? undefined,
         wantedUser,
         { clientPick: groupChanged },
@@ -1171,6 +1195,8 @@ export class IncidentsService {
       }
     }
 
+    await this.assertNewOwnerAssignable(incident, dto);
+
     let openAlertsAtResolve: Awaited<ReturnType<typeof this.findOpenAlertsForIncident>> = [];
     if (dto.toStatus === "RESOLVED") {
       openAlertsAtResolve = await this.findOpenAlertsForIncident(id);
@@ -1354,6 +1380,9 @@ export class IncidentsService {
     if (incident.status !== IncidentStatus.NEW || incident.ownerUserId) {
       return null;
     }
+    // Routing only offers engineers with access to the site, but a grant
+    // can be removed while an offer is pending.
+    await this.issueReporting.assertAssignable(incident.siteId, ownerGroupId, ownerUserId);
 
     const dto = { toStatus: IncidentStatus.ASSIGNED, ownerUserId };
     const rule = findTransitionRule(incident.status, dto.toStatus);

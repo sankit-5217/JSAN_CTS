@@ -221,6 +221,7 @@ function makeService(
   const issueReporting = {
     assertValidSelections: jest.fn().mockResolvedValue(undefined),
     resolveAssignment: jest.fn().mockResolvedValue({ ownerGroupId: null, ownerUserId: null }),
+    assertAssignable: jest.fn().mockResolvedValue(undefined),
     resolveRefIncidentNo: jest.fn().mockImplementation((v: string) => Promise.resolve(v)),
     normalizeCcEmails: jest.fn().mockImplementation((v?: string[]) => v ?? []),
     ...overrides.issueReporting,
@@ -491,7 +492,7 @@ describe("IncidentsService.createFromCustomer", () => {
       }),
     });
     await service.createFromCustomer(customerDto, { actorId: clientViewer.id }, clientViewer);
-    expect(issueReporting.resolveAssignment).toHaveBeenCalledWith(undefined, undefined, {
+    expect(issueReporting.resolveAssignment).toHaveBeenCalledWith("site-a", undefined, undefined, {
       clientPick: true,
     });
     expect(tx.incident.create).toHaveBeenCalledWith(
@@ -582,6 +583,44 @@ function updateKeeping(before: ReturnType<typeof baseIncident>) {
 }
 
 describe("IncidentsService.update", () => {
+  it("checks a new assignee against the ticket's site and saves nothing when refused", async () => {
+    const before = baseIncident({ ownerUserId: engineer.id });
+    const { service, tx, issueReporting } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(before),
+      issueReporting: {
+        assertAssignable: jest
+          .fn()
+          .mockRejectedValue(new BadRequestException("Vikas has no access to this ticket's site")),
+      },
+    });
+    await expect(
+      service.update("incident-1", { ownerUserId: "eng-other-site" }, serviceDesk, {
+        actorId: serviceDesk.id,
+      }),
+    ).rejects.toThrow("Vikas has no access to this ticket's site");
+    expect(issueReporting.assertAssignable).toHaveBeenCalledWith(
+      "site-a",
+      undefined,
+      "eng-other-site",
+    );
+    expect(tx.incident.update).not.toHaveBeenCalled();
+  });
+
+  it("doesn't re-check the current owner the edit form round-trips", async () => {
+    const before = baseIncident({ ownerUserId: engineer.id, ownerGroupId: "grp-1" });
+    const { service, issueReporting } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(before),
+      txIncident: { update: jest.fn().mockResolvedValue(before) },
+    });
+    await service.update(
+      "incident-1",
+      { ownerUserId: engineer.id, ownerGroupId: "grp-1", shortDescription: "Disk 3 failed" },
+      serviceDesk,
+      { actorId: serviceDesk.id },
+    );
+    expect(issueReporting.assertAssignable).not.toHaveBeenCalled();
+  });
+
   it("emails the assignee, Cc the reporter and CC list, when the desk changes something customer-visible", async () => {
     const before = baseIncident({
       ownerUserId: engineer.id,
@@ -1156,6 +1195,31 @@ describe("IncidentsService.countOpenOwnedByPriority", () => {
 });
 
 describe("IncidentsService.createTransition", () => {
+  it("refuses an owner set during a transition who can't work at the ticket's site", async () => {
+    const { service, tx, issueReporting } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
+      issueReporting: {
+        assertAssignable: jest
+          .fn()
+          .mockRejectedValue(new BadRequestException("Vikas has no access to this ticket's site")),
+      },
+    });
+    await expect(
+      service.createTransition(
+        "incident-1",
+        { toStatus: IncidentStatus.ASSIGNED, ownerUserId: "eng-other-site" },
+        { actorId: serviceDesk.id },
+        serviceDesk,
+      ),
+    ).rejects.toThrow("Vikas has no access to this ticket's site");
+    expect(issueReporting.assertAssignable).toHaveBeenCalledWith(
+      "site-a",
+      undefined,
+      "eng-other-site",
+    );
+    expect(tx.incident.update).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid (from, to) pair", async () => {
     const { service } = makeService({
       incidentFindUnique: jest.fn().mockResolvedValue(baseIncident({ status: IncidentStatus.NEW })),
@@ -2463,6 +2527,21 @@ describe("IncidentsService incident.created event", () => {
 });
 
 describe("IncidentsService.autoAssign", () => {
+  it("refuses an engineer who has since lost access to the site", async () => {
+    const { service, tx } = makeService({
+      incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
+      issueReporting: {
+        assertAssignable: jest
+          .fn()
+          .mockRejectedValue(new BadRequestException("Eng has no access to this ticket's site")),
+      },
+    });
+    await expect(service.autoAssign("incident-1", "eng-1", "corr-1", "eng-1")).rejects.toThrow(
+      "Eng has no access to this ticket's site",
+    );
+    expect(tx.incident.updateMany).not.toHaveBeenCalled();
+  });
+
   it("moves a NEW unowned incident to ASSIGNED as a system action", async () => {
     const { service, tx, auditService, notifications } = makeService({
       incidentFindUnique: jest.fn().mockResolvedValue(baseIncident()),
@@ -3219,9 +3298,14 @@ describe("IncidentsService issue template v2", () => {
         { actorId: clientViewer.id },
         clientViewer,
       );
-      expect(issueReporting.resolveAssignment).toHaveBeenCalledWith("grp-infra", undefined, {
-        clientPick: true,
-      });
+      expect(issueReporting.resolveAssignment).toHaveBeenCalledWith(
+        "site-a",
+        "grp-infra",
+        undefined,
+        {
+          clientPick: true,
+        },
+      );
     });
 
     it("refuses edits once the ticket is closed", async () => {

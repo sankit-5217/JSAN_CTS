@@ -47,4 +47,23 @@ export class AuthzService {
     const accessible = await this.getAccessibleSiteIds(user);
     return accessible === null || accessible.includes(siteId);
   }
+
+  /**
+   * Which of `userIds` may work at `siteId`: an all-sites role, or an
+   * explicit UserSiteAccess grant for it. Used to check *someone else* —
+   * an assignee or routing candidate — rather than the caller.
+   */
+  async usersWithSiteAccess(userIds: string[], siteId: string): Promise<Set<string>> {
+    if (userIds.length === 0) {
+      return new Set();
+    }
+    const rows = await this.prisma.user.findMany({
+      where: {
+        id: { in: userIds },
+        OR: [{ role: { in: [...ALL_SITES_ROLES] } }, { siteAccess: { some: { siteId } } }],
+      },
+      select: { id: true },
+    });
+    return new Set(rows.map((r) => r.id));
+  }
 }

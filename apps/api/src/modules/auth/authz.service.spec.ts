@@ -69,4 +69,41 @@ describe("AuthzService", () => {
       await expect(service.canAccessSite(scopedUser, "site-z")).resolves.toBe(false);
     });
   });
+
+  describe("usersWithSiteAccess", () => {
+    it("keeps users with an all-sites role or a grant for the site", async () => {
+      const findMany = jest.fn().mockResolvedValue([{ id: "eng-1" }, { id: "desk-1" }]);
+      const service = new AuthzService({ user: { findMany } } as unknown as PrismaService);
+
+      const result = await service.usersWithSiteAccess(["eng-1", "eng-2", "desk-1"], "site-a");
+
+      expect(result).toEqual(new Set(["eng-1", "desk-1"]));
+      expect(findMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: ["eng-1", "eng-2", "desk-1"] },
+          OR: [
+            {
+              role: {
+                in: [
+                  UserRole.SUPER_ADMIN,
+                  UserRole.SERVICE_DESK_NOC,
+                  UserRole.DELIVERY_OPS_MANAGER,
+                  UserRole.AUDITOR_READ_ONLY,
+                ],
+              },
+            },
+            { siteAccess: { some: { siteId: "site-a" } } },
+          ],
+        },
+        select: { id: true },
+      });
+    });
+
+    it("skips the query for an empty list", async () => {
+      const findMany = jest.fn();
+      const service = new AuthzService({ user: { findMany } } as unknown as PrismaService);
+      await expect(service.usersWithSiteAccess([], "site-a")).resolves.toEqual(new Set());
+      expect(findMany).not.toHaveBeenCalled();
+    });
+  });
 });

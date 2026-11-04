@@ -14,6 +14,7 @@ import {
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
+import { AuthzService } from "../auth/authz.service";
 import {
   CreateIssueCatalogOptionDto,
   CreateIssueTemplateDto,
@@ -93,6 +94,7 @@ export class IssueReportingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly authzService: AuthzService,
   ) {}
 
   // --- Catalog reads -----------------------------------------------------
@@ -394,12 +396,13 @@ export class IssueReportingService {
   /**
    * Assignee Group / Assignee as submitted on the form. No group picked →
    * the default group (Service Desk), if one is flagged. An assignee must be
-   * an active staff member of that group; a reporter can't route a ticket
-   * to an arbitrary user. `clientPick`: the reporter chose this group
-   * themselves, so it must be one offered to clients (flagged
-   * isClientSelectable, or the default group).
+   * an active staff member of that group with access to the ticket's site;
+   * a reporter can't route a ticket to an arbitrary user. `clientPick`: the
+   * reporter chose this group themselves, so it must be one offered to
+   * clients (flagged isClientSelectable, or the default group).
    */
   async resolveAssignment(
+    siteId: string,
     ownerGroupId: string | undefined,
     ownerUserId: string | undefined,
     opts: { clientPick?: boolean } = {},
@@ -422,10 +425,7 @@ export class IssueReportingService {
     if (!ownerUserId) {
       return { ownerGroupId: group?.id ?? null, ownerUserId: null };
     }
-    const user = await this.prisma.user.findUnique({ where: { id: ownerUserId } });
-    if (!user || !user.isActive || user.role === UserRole.CLIENT_MANAGER_VIEWER) {
-      throw new BadRequestException("Assignee must be an active staff member");
-    }
+    const user = await this.assertStaffAssignee(siteId, ownerUserId);
     if (!group) {
       throw new BadRequestException("Pick an assignee group before an assignee");
     }
@@ -436,6 +436,44 @@ export class IssueReportingService {
       throw new BadRequestException(`${user.displayName} is not a member of ${group.name}`);
     }
     return { ownerGroupId: group.id, ownerUserId: user.id };
+  }
+
+  /**
+   * The staff-side owner checks, for a desk edit or a status change that
+   * sets a new group and/or assignee: the group must exist, and the
+   * assignee must be an active staff member with access to the ticket's
+   * site. Group membership isn't required here — the desk may hand a
+   * ticket to anyone qualified — only on the client form. `null` clears.
+   */
+  async assertAssignable(
+    siteId: string,
+    ownerGroupId: string | null | undefined,
+    ownerUserId: string | null | undefined,
+  ): Promise<void> {
+    if (ownerGroupId) {
+      const group = await this.prisma.supportGroup.findUnique({ where: { id: ownerGroupId } });
+      if (!group) {
+        throw new BadRequestException("Unknown assignee group");
+      }
+    }
+    if (ownerUserId) {
+      await this.assertStaffAssignee(siteId, ownerUserId);
+    }
+  }
+
+  /** Active, staff (not a client) and able to work at `siteId`. Assigning
+   *  a ticket lets that person see it (incidentAccessWhere), so this is
+   *  what keeps one site's tickets away from another site's engineers. */
+  private async assertStaffAssignee(siteId: string, userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.isActive || user.role === UserRole.CLIENT_MANAGER_VIEWER) {
+      throw new BadRequestException("Assignee must be an active staff member");
+    }
+    const allowed = await this.authzService.usersWithSiteAccess([user.id], siteId);
+    if (!allowed.has(user.id)) {
+      throw new BadRequestException(`${user.displayName} has no access to this ticket's site`);
+    }
+    return user;
   }
 
   /**
