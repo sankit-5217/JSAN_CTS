@@ -10,29 +10,24 @@ export interface TicketAttachment {
   createdAt: string;
 }
 
-/** GET /incidents/:id/comments: who wrote it, by name, and the files sent with it. */
+/** GET /incidents/:id/comments: who wrote it (by email), and the files sent with it. */
 export interface ConversationMessage {
   id: string;
   authorId: string;
   body: string;
   isInternal: boolean;
   createdAt: string;
-  author: { id: string; displayName: string; role: string | null };
+  author: { id: string; displayName: string; email?: string | null; role: string | null };
   attachments: TicketAttachment[];
 }
 
-const ROLE_LABEL: Record<string, string> = {
-  CLIENT_MANAGER_VIEWER: "Client",
-  SERVICE_DESK_NOC: "Service desk",
-  SITE_ENGINEER: "Engineer",
-  INFRASTRUCTURE_LEAD: "Infrastructure lead",
-  DELIVERY_OPS_MANAGER: "Delivery manager",
-  SUPER_ADMIN: "JSAN team",
-};
-
-/** "Client", "Service desk", "Engineer"... for the line above a message. */
-export function roleLabel(role: string | null): string {
-  return (role && ROLE_LABEL[role]) ?? "JSAN team";
+/** Who sent a message or saved an edit, as shown on it: their email. */
+export function senderLabel(person: {
+  email?: string | null;
+  displayName?: string;
+  name?: string;
+}): string {
+  return person.email || person.displayName || person.name || "Unknown user";
 }
 
 /** The original file name, without the uuid prefix the object key carries. */

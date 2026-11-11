@@ -4,7 +4,7 @@ import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import {
   attachmentName,
-  roleLabel,
+  senderLabel,
   type AttachmentDisposition,
   type ConversationMessage,
   type TicketAttachment,
@@ -14,8 +14,8 @@ import { FieldRow, RECORD_BOX_SX } from "./IssueTemplateForm";
 
 /**
  * One message on a ticket's conversation, the same on the client portal
- * and the staff incident page: the sender's name and role on top, then the
- * words, then any files sent with it (each with View and Download).
+ * and the staff incident page: the sender's email and the time on top, then
+ * the words, then any files sent with it (each with View and Download).
  */
 export function MessageBubble({
   message,
@@ -44,12 +44,11 @@ export function MessageBubble({
       }}
     >
       <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
-        <Typography variant="caption" sx={{ fontWeight: 700 }}>
-          {message.author.displayName}
-          {mine ? " (you)" : ""}
+        <Typography variant="caption" sx={{ fontWeight: 700, overflowWrap: "anywhere" }}>
+          {senderLabel(message.author)}
         </Typography>
         <Typography variant="caption" sx={{ opacity: 0.8 }}>
-          {roleLabel(message.author.role)} · {formatDateTime(message.createdAt)}
+          · {formatDateTime(message.createdAt)}
         </Typography>
         {tag && (
           <Chip
@@ -80,8 +79,8 @@ export function MessageBubble({
 
 /**
  * One message on the client's "Conversation with the service desk", recorded
- * like the report's Description: the sender in the label cell, then the
- * role and time over the same grey box, whoever sent it.
+ * like the report's Description (same column, same grey box): the sender's
+ * email and the time over the box, whoever sent it.
  */
 export function MessageRecord({
   message,
@@ -93,9 +92,15 @@ export function MessageRecord({
   onOpen: (attachmentId: string, disposition: AttachmentDisposition) => void;
 }) {
   return (
-    <FieldRow label={`${message.author.displayName}${mine ? " (you)" : ""}`}>
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block", pt: 1.25 }}>
-        {roleLabel(message.author.role)} · {formatDateTime(message.createdAt)}
+    <FieldRow label="">
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+        <Box
+          component="span"
+          sx={{ fontWeight: 700, color: mine ? "primary.main" : "text.primary" }}
+        >
+          {senderLabel(message.author)}
+        </Box>{" "}
+        · {formatDateTime(message.createdAt)}
       </Typography>
       <Box sx={{ ...RECORD_BOX_SX, mt: 0.5 }}>
         <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>

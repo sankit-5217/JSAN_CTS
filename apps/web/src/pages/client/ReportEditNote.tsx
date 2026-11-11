@@ -2,13 +2,14 @@ import { Box, Stack, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import EditNoteOutlinedIcon from "@mui/icons-material/EditNoteOutlined";
 import { formatDateTime } from "../../time/clock";
-import { roleLabel } from "./conversation";
+import { senderLabel } from "./conversation";
 import type { ReportEdit } from "./clientTicket";
 
 /**
- * A change the reporter made to their report, shown in the ticket's
- * conversation to both the client and the service desk: who, when (in the
- * viewer's own clock, zone written) and each field's old → new value.
+ * Changes made to the report, shown in the ticket's conversation to both
+ * the client and the staff: who (by email), when (in the viewer's own
+ * clock, zone written) and each field's old → new value. One box holds a
+ * person's back-to-back edits (see buildConversation).
  */
 export function ReportEditNote({ edit }: { edit: ReportEdit }) {
   return (
@@ -29,7 +30,7 @@ export function ReportEditNote({ edit }: { edit: ReportEdit }) {
         <EditNoteOutlinedIcon fontSize="small" color="info" />
         <Typography variant="body2" sx={{ fontWeight: 600 }}>
           Report updated
-          {edit.by ? ` by ${edit.by.name} (${roleLabel(edit.by.role)})` : ""}
+          {edit.by ? ` by ${senderLabel(edit.by)}` : ""}
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ ml: "auto !important" }}>
           {formatDateTime(edit.at)}

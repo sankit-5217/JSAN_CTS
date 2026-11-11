@@ -289,7 +289,7 @@ export function ClientHomePage() {
             >
               <CardContent>
                 <Box sx={{ color: "primary.main", mb: 1 }}>{step.icon}</Box>
-                <Typography sx={{ fontWeight: 700, fontSize: 14.5, mb: 0.5 }}>
+                <Typography sx={{ fontWeight: 700, fontSize: 13.5, mb: 0.5 }}>
                   {step.title}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">

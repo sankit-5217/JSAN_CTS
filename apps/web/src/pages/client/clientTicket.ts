@@ -74,7 +74,7 @@ export interface TicketProgress {
 /** One saved edit of the report: who, when, each field's old → new value. */
 export interface ReportEdit {
   at: string;
-  by: { name: string; role: string | null } | null;
+  by: { name: string; email?: string | null; role: string | null } | null;
   /** False for edits saved before values were recorded: field names only. */
   detailed: boolean;
   changes: { label: string; from: string | null; to: string | null }[];
@@ -148,5 +148,50 @@ export function buildConversation<C extends { createdAt: string }>(
   for (const edit of progress?.reportEdits ?? []) {
     if (edit.changes.length > 0) items.push({ type: "edit", at: edit.at, edit });
   }
-  return items.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  items.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  return mergeEditRuns(items);
+}
+
+/** Who saved an edit, for telling one editor's run from the next. */
+function editorKey(edit: ReportEdit): string {
+  return edit.by ? (edit.by.email ?? edit.by.name) : "";
+}
+
+/**
+ * Back-to-back report edits by the same person become one box: every
+ * field they changed, each from its first old value to its last new one,
+ * timed at their latest save. Another person's edit, a message or a
+ * status change in between starts a new box.
+ */
+function mergeEditRuns<C extends { createdAt: string }>(
+  items: ConversationItem<C>[],
+): ConversationItem<C>[] {
+  const out: ConversationItem<C>[] = [];
+  for (const item of items) {
+    const prev = out[out.length - 1];
+    if (
+      item.type === "edit" &&
+      prev?.type === "edit" &&
+      editorKey(prev.edit) === editorKey(item.edit)
+    ) {
+      const changes = prev.edit.changes.map((c) => ({ ...c }));
+      for (const c of item.edit.changes) {
+        const seen = changes.find((x) => x.label === c.label);
+        if (seen) seen.to = c.to;
+        else changes.push({ ...c });
+      }
+      out[out.length - 1] = {
+        type: "edit",
+        at: item.at,
+        edit: {
+          ...item.edit,
+          detailed: prev.edit.detailed && item.edit.detailed,
+          changes,
+        },
+      };
+    } else {
+      out.push(item);
+    }
+  }
+  return out;
 }

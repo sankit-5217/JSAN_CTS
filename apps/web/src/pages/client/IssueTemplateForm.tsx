@@ -45,14 +45,14 @@ export function FieldRow({
   if (stacked) {
     return (
       <Stack spacing={0.5}>
-        <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{label}</Typography>
+        <Typography sx={{ fontWeight: 700, fontSize: 13 }}>{label}</Typography>
         <Box sx={{ minWidth: 0 }}>{children}</Box>
       </Stack>
     );
   }
   return (
     <Stack direction="row" alignItems="flex-start" spacing={1.5}>
-      <Typography sx={{ width: 128, flexShrink: 0, fontWeight: 700, fontSize: 14, pt: 1.25 }}>
+      <Typography sx={{ width: 112, flexShrink: 0, fontWeight: 700, fontSize: 13, pt: 1 }}>
         {label}
       </Typography>
       <Box sx={{ flex: 1, minWidth: 0 }}>{children}</Box>

@@ -270,8 +270,8 @@ export function IssueReportingPage() {
             gridTemplateColumns: { xs: "1fr", sm: "max-content 1fr" },
             columnGap: 2,
             rowGap: 0.5,
-            "& dt": { fontWeight: 600, fontSize: 14 },
-            "& dd": { m: 0, fontSize: 14, color: "text.secondary", mb: { xs: 1, sm: 0 } },
+            "& dt": { fontWeight: 600, fontSize: 13 },
+            "& dd": { m: 0, fontSize: 13, color: "text.secondary", mb: { xs: 1, sm: 0 } },
           }}
         >
           {(Object.keys(TEMPLATE_STATUS_LABEL) as TemplateStatus[]).map((st) => (

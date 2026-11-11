@@ -201,7 +201,7 @@ export function NotificationBell({ linkFor, sounds = false }: NotificationBellPr
           justifyContent="space-between"
           sx={{ px: 2, py: 1.25 }}
         >
-          <Typography sx={{ fontWeight: 700, fontSize: 15 }}>
+          <Typography sx={{ fontWeight: 700, fontSize: 14 }}>
             Notifications
             {unread > 0 && (
               <Typography component="span" sx={{ ml: 1, fontSize: 12.5, color: "text.secondary" }}>

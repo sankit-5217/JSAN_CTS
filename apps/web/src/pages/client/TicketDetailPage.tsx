@@ -232,7 +232,7 @@ export function TicketDetailPage() {
 
   return (
     <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
-      <Link component={RouterLink} to="/client/tickets" sx={{ fontSize: 14 }}>
+      <Link component={RouterLink} to="/client/tickets" sx={{ fontSize: 13 }}>
         ← My tickets
       </Link>
 
@@ -340,51 +340,6 @@ export function TicketDetailPage() {
         </Alert>
       )}
 
-      {/* Laid out like "Your report" above, so every message lines up with
-          the Description box and is just as wide. */}
-      <Card
-        elevation={0}
-        sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mb: 3 }}
-      >
-        <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
-            Conversation with the service desk
-          </Typography>
-          <Grid container spacing={3} columns={10}>
-            <Grid item xs={10} md={8}>
-              <Stack spacing={2}>
-                {thread.length === 0 && (
-                  <Typography color="text.secondary">
-                    No updates yet. The service desk will post here once they've taken a look.
-                  </Typography>
-                )}
-                {thread.map((item) =>
-                  item.type === "status" ? (
-                    <Divider
-                      key={`s-${item.at}-${item.status}`}
-                      sx={{ fontSize: 12, color: "text.secondary" }}
-                    >
-                      {STATUS_LABEL[item.status]} · {formatDateTime(item.at)}
-                    </Divider>
-                  ) : item.type === "edit" ? (
-                    <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
-                  ) : (
-                    <MessageRecord
-                      key={item.comment.id}
-                      message={item.comment}
-                      mine={item.comment.authorId === myUserId}
-                      onOpen={(attachmentId, disposition) =>
-                        void openFile(attachmentId, disposition)
-                      }
-                    />
-                  ),
-                )}
-              </Stack>
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
       <Card
         elevation={0}
         sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mb: 3 }}
@@ -460,6 +415,51 @@ export function TicketDetailPage() {
             files={replyFiles}
             onRemove={(i) => setReplyFiles((prev) => prev.filter((_, j) => j !== i))}
           />
+        </CardContent>
+      </Card>
+
+      {/* Laid out like "Your report" above, so every message lines up with
+          the Description box and is just as wide. */}
+      <Card
+        elevation={0}
+        sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mb: 3 }}
+      >
+        <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
+            Conversation with the service desk
+          </Typography>
+          <Grid container spacing={3} columns={10}>
+            <Grid item xs={10} md={8}>
+              <Stack spacing={2}>
+                {thread.length === 0 && (
+                  <Typography color="text.secondary">
+                    No updates yet. The service desk will post here once they've taken a look.
+                  </Typography>
+                )}
+                {thread.map((item) =>
+                  item.type === "status" ? (
+                    <Divider
+                      key={`s-${item.at}-${item.status}`}
+                      sx={{ fontSize: 12, color: "text.secondary" }}
+                    >
+                      {STATUS_LABEL[item.status]} · {formatDateTime(item.at)}
+                    </Divider>
+                  ) : item.type === "edit" ? (
+                    <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
+                  ) : (
+                    <MessageRecord
+                      key={item.comment.id}
+                      message={item.comment}
+                      mine={item.comment.authorId === myUserId}
+                      onOpen={(attachmentId, disposition) =>
+                        void openFile(attachmentId, disposition)
+                      }
+                    />
+                  ),
+                )}
+              </Stack>
+            </Grid>
+          </Grid>
         </CardContent>
       </Card>
 

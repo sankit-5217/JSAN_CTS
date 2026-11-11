@@ -33,7 +33,7 @@ export interface IncidentProgress {
 
 export interface ReportEdit {
   at: Date;
-  by: { name: string; role: UserRole | null } | null;
+  by: { name: string; email: string | null; role: UserRole | null } | null;
   detailed: boolean;
   changes: { label: string; from: string | null; to: string | null }[];
 }
@@ -142,7 +142,7 @@ export class IncidentCustomerService {
     const actors = actorIds.length
       ? await this.prisma.user.findMany({
           where: { id: { in: actorIds } },
-          select: { id: true, displayName: true, role: true },
+          select: { id: true, displayName: true, email: true, role: true },
         })
       : [];
     const byId = new Map(actors.map((a) => [a.id, a]));
@@ -150,7 +150,7 @@ export class IncidentCustomerService {
     return events.map((e) => {
       const payload = (e.payload ?? {}) as { changes?: unknown; fields?: unknown };
       const actor = e.actorId ? byId.get(e.actorId) : undefined;
-      const by = actor ? { name: actor.displayName, role: actor.role } : null;
+      const by = actor ? { name: actor.displayName, email: actor.email, role: actor.role } : null;
       if (Array.isArray(payload.changes)) {
         const changes = (payload.changes as { label?: unknown; from?: unknown; to?: unknown }[])
           .filter((c) => typeof c?.label === "string")

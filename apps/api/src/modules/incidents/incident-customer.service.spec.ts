@@ -53,11 +53,14 @@ function makeService(
     incidentComment: { count: jest.fn().mockResolvedValue(opts.replies ?? 0) },
     user: {
       findUnique: jest.fn().mockResolvedValue({ displayName: "Rahul" }),
-      findMany: jest
-        .fn()
-        .mockResolvedValue([
-          { id: "cust-1", displayName: "Priya", role: UserRole.CLIENT_MANAGER_VIEWER },
-        ]),
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: "cust-1",
+          displayName: "Priya",
+          email: "priya@client.example",
+          role: UserRole.CLIENT_MANAGER_VIEWER,
+        },
+      ]),
     },
     supportGroup: { findUnique: jest.fn().mockResolvedValue({ name: "Windows & Servers" }) },
   };
@@ -253,7 +256,7 @@ describe("IncidentCustomerService.getProgress: report edits in the conversation 
     expect(progress.reportEdits).toEqual([
       {
         at: at(5),
-        by: { name: "Priya", role: UserRole.CLIENT_MANAGER_VIEWER },
+        by: { name: "Priya", email: "priya@client.example", role: UserRole.CLIENT_MANAGER_VIEWER },
         detailed: true,
         changes: [{ label: "Priority", from: "P3", to: "P2" }],
       },

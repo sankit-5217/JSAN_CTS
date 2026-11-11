@@ -130,7 +130,7 @@ export function NotificationSoundsPage() {
         <Typography variant="h5" sx={{ fontWeight: 700 }}>
           Notification sounds
         </Typography>
-        <Typography sx={{ color: "text.secondary", fontSize: 14 }}>
+        <Typography sx={{ color: "text.secondary", fontSize: 13 }}>
           Which sound the ops console plays for each notification, by ticket priority or alert
           severity. Critical repeats every 10 seconds until the user opens the bell. Each user can
           still mute or turn tiers down for themselves from the speaker button in the top bar.

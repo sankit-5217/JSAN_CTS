@@ -1865,7 +1865,7 @@ describe("IncidentsService comment visibility", () => {
     );
   });
 
-  it("names the author of every message, for both sides", async () => {
+  it("names the author of every message, with their email, for both sides", async () => {
     const comments = [
       {
         id: "c1",
@@ -1887,14 +1887,31 @@ describe("IncidentsService comment visibility", () => {
         .fn()
         .mockResolvedValue(baseIncident({ reportedByUserId: clientViewer.id })),
       userFindMany: jest.fn().mockResolvedValue([
-        { id: clientViewer.id, displayName: "Priya Client", role: UserRole.CLIENT_MANAGER_VIEWER },
-        { id: engineer.id, displayName: "Rahul Engineer", role: UserRole.SITE_ENGINEER },
+        {
+          id: clientViewer.id,
+          displayName: "Priya Client",
+          email: "priya@client.example",
+          role: UserRole.CLIENT_MANAGER_VIEWER,
+        },
+        {
+          id: engineer.id,
+          displayName: "Rahul Engineer",
+          email: "rahul@jsan.example",
+          role: UserRole.SITE_ENGINEER,
+        },
       ]),
     });
     (prisma.incidentComment.findMany as jest.Mock).mockResolvedValue(comments);
 
     const result = await service.listComments("incident-1", clientViewer);
     expect(result.map((c) => c.author.displayName)).toEqual(["Priya Client", "Rahul Engineer"]);
+    expect(result.map((c) => c.author.email)).toEqual([
+      "priya@client.example",
+      "rahul@jsan.example",
+    ]);
+    expect(prisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ email: true }) }),
+    );
   });
 
   it("returns every comment for a non-viewer role", async () => {

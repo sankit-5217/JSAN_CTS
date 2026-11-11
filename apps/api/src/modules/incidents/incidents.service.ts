@@ -165,7 +165,7 @@ export interface TemplateStatusOption {
 /** A conversation message as both portals read it: who wrote it, by name,
  *  and the files sent with it. */
 export type CommentView = IncidentComment & {
-  author: { id: string; displayName: string; role: UserRole | null };
+  author: { id: string; displayName: string; email: string | null; role: UserRole | null };
   attachments: Attachment[];
 };
 
@@ -2020,10 +2020,10 @@ export class IncidentsService {
         attachments: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
       },
     });
-    // Both sides of the conversation see who wrote each message, by name.
+    // Both sides of the conversation see who wrote each message, by email.
     const authors = await this.prisma.user.findMany({
       where: { id: { in: [...new Set(comments.map((c) => c.authorId))] } },
-      select: { id: true, displayName: true, role: true },
+      select: { id: true, displayName: true, email: true, role: true },
     });
     const byId = new Map(authors.map((a) => [a.id, a]));
     // The query already leaves internal notes out for a customer; this is
@@ -2034,7 +2034,12 @@ export class IncidentsService {
         : comments;
     return visible.map((c) => ({
       ...c,
-      author: byId.get(c.authorId) ?? { id: c.authorId, displayName: "Unknown user", role: null },
+      author: byId.get(c.authorId) ?? {
+        id: c.authorId,
+        displayName: "Unknown user",
+        email: null,
+        role: null,
+      },
     }));
   }
 

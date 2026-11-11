@@ -86,4 +86,60 @@ describe("buildConversation", () => {
       "edit",
     ]);
   });
+
+  describe("report edits: one box per run of the same person's edits", () => {
+    const edit = (at: string, email: string, label: string, from: string, to: string) => ({
+      at,
+      by: { name: email, email, role: null },
+      detailed: true,
+      changes: [{ label, from, to }],
+    });
+    const run = (
+      edits: ReturnType<typeof edit>[],
+      comments: { id: string; createdAt: string }[] = [],
+    ) => buildConversation(comments, { milestones: [], reportEdits: edits });
+
+    it("merges back-to-back edits by the same person, first old value to last new one", () => {
+      const items = run([
+        edit("2026-10-15T09:01:00.000Z", "priya@client.example", "Priority", "P3", "P2"),
+        edit("2026-10-15T09:02:00.000Z", "priya@client.example", "Severity", "Low", "High"),
+        edit("2026-10-15T09:03:00.000Z", "priya@client.example", "Priority", "P2", "P1"),
+      ]);
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        type: "edit",
+        at: "2026-10-15T09:03:00.000Z",
+        edit: {
+          changes: [
+            { label: "Priority", from: "P3", to: "P1" },
+            { label: "Severity", from: "Low", to: "High" },
+          ],
+        },
+      });
+    });
+
+    it("starts a new box when someone else edits", () => {
+      const items = run([
+        edit("2026-10-15T09:01:00.000Z", "priya@client.example", "Priority", "P3", "P2"),
+        edit("2026-10-15T09:02:00.000Z", "desk@jsan.example", "Priority", "P2", "P1"),
+        edit("2026-10-15T09:03:00.000Z", "priya@client.example", "Severity", "Low", "High"),
+      ]);
+      expect(items.map((i) => (i.type === "edit" ? i.edit.by?.email : ""))).toEqual([
+        "priya@client.example",
+        "desk@jsan.example",
+        "priya@client.example",
+      ]);
+    });
+
+    it("starts a new box when a message comes between", () => {
+      const items = run(
+        [
+          edit("2026-10-15T09:01:00.000Z", "priya@client.example", "Priority", "P3", "P2"),
+          edit("2026-10-15T09:03:00.000Z", "priya@client.example", "Severity", "Low", "High"),
+        ],
+        [{ id: "m1", createdAt: "2026-10-15T09:02:00.000Z" }],
+      );
+      expect(items.map((i) => i.type)).toEqual(["edit", "comment", "edit"]);
+    });
+  });
 });
