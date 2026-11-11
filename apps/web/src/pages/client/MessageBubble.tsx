@@ -1,3 +1,4 @@
+import { useEffect, useRef, type ReactNode } from "react";
 import { Box, Button, Chip, Stack, Typography } from "@mui/material";
 import AttachFileOutlinedIcon from "@mui/icons-material/AttachFileOutlined";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
@@ -10,7 +11,7 @@ import {
   type TicketAttachment,
 } from "./conversation";
 import { formatDateTime } from "../../time/clock";
-import { FieldRow, RECORD_BOX_SX } from "./IssueTemplateForm";
+import { RECORD_BOX_SX } from "./IssueTemplateForm";
 
 /**
  * One message on a ticket's conversation, the same on the client portal
@@ -78,9 +79,9 @@ export function MessageBubble({
 }
 
 /**
- * One message on the client's "Conversation with the service desk", recorded
- * like the report's Description (same column, same grey box): the sender's
- * email and the time over the box, whoever sent it.
+ * One message on the client's conversation, recorded like the report's
+ * Description (same grey box): the sender's email and the time over the
+ * box, whoever sent it.
  */
 export function MessageRecord({
   message,
@@ -92,7 +93,7 @@ export function MessageRecord({
   onOpen: (attachmentId: string, disposition: AttachmentDisposition) => void;
 }) {
   return (
-    <FieldRow label="">
+    <Box>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
         <Box
           component="span"
@@ -110,7 +111,36 @@ export function MessageRecord({
           <MessageFiles files={message.attachments} onOpen={onOpen} />
         )}
       </Box>
-    </FieldRow>
+    </Box>
+  );
+}
+
+/**
+ * A ticket's conversation, kept to a fixed height under the report's
+ * Description so the message box and the template fields stay on screen:
+ * it scrolls inside itself and opens on the newest entry (and follows new
+ * ones as they arrive).
+ */
+export function ConversationScroll({ count, children }: { count: number; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [count]);
+  return (
+    <Box
+      ref={ref}
+      sx={{
+        maxHeight: "40vh",
+        overflowY: "auto",
+        border: "1px solid",
+        borderColor: "divider",
+        borderRadius: 1,
+        p: 1.5,
+      }}
+    >
+      <Stack spacing={1.5}>{children}</Stack>
+    </Box>
   );
 }
 

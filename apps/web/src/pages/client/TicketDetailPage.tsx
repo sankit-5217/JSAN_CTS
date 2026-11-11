@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router-dom";
 import {
   Alert,
@@ -9,7 +9,6 @@ import {
   CardContent,
   Chip,
   Divider,
-  Grid,
   Link,
   MenuItem,
   Stack,
@@ -36,7 +35,7 @@ import {
   type ReportDraft,
   type TicketFields,
 } from "./issueReporting";
-import { IssueTemplateForm, type TemplateGroup } from "./IssueTemplateForm";
+import { FieldRow, IssueTemplateForm, type TemplateGroup } from "./IssueTemplateForm";
 import { templateStatusText } from "./issueStatus";
 import {
   openAttachment,
@@ -45,7 +44,7 @@ import {
   type ConversationMessage,
   type TicketAttachment,
 } from "./conversation";
-import { MessageFiles, MessageRecord, StagedFiles } from "./MessageBubble";
+import { ConversationScroll, MessageFiles, MessageRecord, StagedFiles } from "./MessageBubble";
 import { ReportEditNote } from "./ReportEditNote";
 import {
   buildConversation,
@@ -230,6 +229,121 @@ export function TicketDetailPage() {
   const handler = progress.handledBy;
   const activity = portal && !finished ? describeActivity(portal.activity, relativeTime) : null;
 
+  // Under the report's Description: the message box, then the
+  // conversation (scrolling inside itself), so neither needs the page to
+  // scroll.
+  const belowDescription = (
+    <>
+      <FieldRow label="Message">
+        <Box>
+          {actionError && (
+            <Alert severity="error" sx={{ mb: 1.5 }} onClose={() => setActionError(null)}>
+              {actionError}
+            </Alert>
+          )}
+          {finished && (
+            <Alert severity="info" sx={{ mb: 1.5 }}>
+              This ticket is {incident.status === "CLOSED" ? "closed" : "cancelled"}. If the problem
+              is back,{" "}
+              <Link component={RouterLink} to="/client/report">
+                report a new issue
+              </Link>{" "}
+              and mention {incident.incidentNo}.
+            </Alert>
+          )}
+          <TextField
+            inputRef={replyRef}
+            label="Message the service desk"
+            placeholder="Answer a question, share an update, or ask for news"
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void sendReply();
+            }}
+            multiline
+            minRows={2}
+            fullWidth
+          />
+          <Stack
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            sx={{ mt: 1.5 }}
+            flexWrap="wrap"
+            useFlexGap
+          >
+            <Button
+              variant="contained"
+              disabled={(!reply.trim() && replyFiles.length === 0) || sending}
+              onClick={sendReply}
+              sx={{ textTransform: "none", fontWeight: 600, px: 4 }}
+            >
+              {sending
+                ? replyFiles.length > 0
+                  ? "Sending and uploading..."
+                  : "Sending..."
+                : "Send"}
+            </Button>
+            <Button
+              component="label"
+              variant="outlined"
+              disabled={sending}
+              startIcon={<AttachFileOutlinedIcon />}
+              sx={{ textTransform: "none" }}
+            >
+              Attach photos or files
+              <input
+                type="file"
+                hidden
+                multiple
+                onChange={(e) => {
+                  const picked = Array.from(e.target.files ?? []);
+                  setReplyFiles((prev) => [...prev, ...picked]);
+                  e.target.value = "";
+                }}
+              />
+            </Button>
+            <Typography variant="caption" color="text.secondary">
+              Ctrl+Enter to send
+            </Typography>
+          </Stack>
+          <StagedFiles
+            files={replyFiles}
+            onRemove={(i) => setReplyFiles((prev) => prev.filter((_, j) => j !== i))}
+          />
+        </Box>
+      </FieldRow>
+      <FieldRow label="Conversation">
+        <ConversationScroll count={thread.length}>
+          {thread.length === 0 && (
+            <Typography color="text.secondary">
+              No updates yet. The service desk will post here once they've taken a look.
+            </Typography>
+          )}
+          {thread.map((item) =>
+            item.type === "status" ? (
+              <Divider
+                key={`s-${item.at}-${item.status}`}
+                sx={{ fontSize: 12, color: "text.secondary" }}
+              >
+                {STATUS_LABEL[item.status]} · {formatDateTime(item.at)}
+              </Divider>
+            ) : item.type === "edit" ? (
+              <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
+            ) : (
+              <MessageRecord
+                key={item.comment.id}
+                message={item.comment}
+                mine={item.comment.authorId === myUserId}
+                onOpen={(attachmentId, disposition) => void openFile(attachmentId, disposition)}
+              />
+            ),
+          )}
+        </ConversationScroll>
+      </FieldRow>
+    </>
+  );
+
   return (
     <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
       <Link component={RouterLink} to="/client/tickets" sx={{ fontSize: 13 }}>
@@ -319,6 +433,7 @@ export function TicketDetailPage() {
           files={attachments.filter((a) => !a.commentId)}
           onOpenFile={(attachmentId, disposition) => void openFile(attachmentId, disposition)}
           onSaved={refetch}
+          belowDescription={belowDescription}
         />
       ) : (
         <Typography color="text.secondary" sx={{ mb: 3 }}>
@@ -333,135 +448,6 @@ export function TicketDetailPage() {
         onReply={focusReply}
         onFeedbackSent={refetch}
       />
-
-      {actionError && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError(null)}>
-          {actionError}
-        </Alert>
-      )}
-
-      <Card
-        elevation={0}
-        sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mb: 3 }}
-      >
-        <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-          {finished && (
-            <Alert severity="info" sx={{ mb: 1.5 }}>
-              This ticket is {incident.status === "CLOSED" ? "closed" : "cancelled"}. If the problem
-              is back,{" "}
-              <Link component={RouterLink} to="/client/report">
-                report a new issue
-              </Link>{" "}
-              and mention {incident.incidentNo}.
-            </Alert>
-          )}
-          <TextField
-            inputRef={replyRef}
-            label="Message the service desk"
-            placeholder="Answer a question, share an update, or ask for news"
-            value={reply}
-            onChange={(e) => setReply(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void sendReply();
-            }}
-            multiline
-            minRows={3}
-            fullWidth
-          />
-          <Stack
-            direction="row"
-            spacing={1}
-            alignItems="center"
-            sx={{ mt: 1.5 }}
-            flexWrap="wrap"
-            useFlexGap
-          >
-            <Button
-              variant="contained"
-              disabled={(!reply.trim() && replyFiles.length === 0) || sending}
-              onClick={sendReply}
-              sx={{ textTransform: "none", fontWeight: 600, px: 4 }}
-            >
-              {sending
-                ? replyFiles.length > 0
-                  ? "Sending and uploading..."
-                  : "Sending..."
-                : "Send"}
-            </Button>
-            <Button
-              component="label"
-              variant="outlined"
-              disabled={sending}
-              startIcon={<AttachFileOutlinedIcon />}
-              sx={{ textTransform: "none" }}
-            >
-              Attach photos or files
-              <input
-                type="file"
-                hidden
-                multiple
-                onChange={(e) => {
-                  const picked = Array.from(e.target.files ?? []);
-                  setReplyFiles((prev) => [...prev, ...picked]);
-                  e.target.value = "";
-                }}
-              />
-            </Button>
-            <Typography variant="caption" color="text.secondary">
-              Ctrl+Enter to send
-            </Typography>
-          </Stack>
-          <StagedFiles
-            files={replyFiles}
-            onRemove={(i) => setReplyFiles((prev) => prev.filter((_, j) => j !== i))}
-          />
-        </CardContent>
-      </Card>
-
-      {/* Laid out like "Your report" above, so every message lines up with
-          the Description box and is just as wide. */}
-      <Card
-        elevation={0}
-        sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mb: 3 }}
-      >
-        <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
-            Conversation with the service desk
-          </Typography>
-          <Grid container spacing={3} columns={10}>
-            <Grid item xs={10} md={8}>
-              <Stack spacing={2}>
-                {thread.length === 0 && (
-                  <Typography color="text.secondary">
-                    No updates yet. The service desk will post here once they've taken a look.
-                  </Typography>
-                )}
-                {thread.map((item) =>
-                  item.type === "status" ? (
-                    <Divider
-                      key={`s-${item.at}-${item.status}`}
-                      sx={{ fontSize: 12, color: "text.secondary" }}
-                    >
-                      {STATUS_LABEL[item.status]} · {formatDateTime(item.at)}
-                    </Divider>
-                  ) : item.type === "edit" ? (
-                    <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
-                  ) : (
-                    <MessageRecord
-                      key={item.comment.id}
-                      message={item.comment}
-                      mine={item.comment.authorId === myUserId}
-                      onOpen={(attachmentId, disposition) =>
-                        void openFile(attachmentId, disposition)
-                      }
-                    />
-                  ),
-                )}
-              </Stack>
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
 
       {site && (
         <Card
@@ -500,6 +486,7 @@ function TicketReportEditor({
   files,
   onOpenFile,
   onSaved,
+  belowDescription,
 }: {
   incident: Incident;
   catalog: IssueCatalog;
@@ -510,6 +497,8 @@ function TicketReportEditor({
   files: Attachment[];
   onOpenFile: (attachmentId: string, disposition: AttachmentDisposition) => void;
   onSaved: () => Promise<void>;
+  /** The message box and conversation, under the Description. */
+  belowDescription: ReactNode;
 }) {
   const [draft, setDraft] = useState<ReportDraft>(() => draftFromTicket(incident, catalog));
   const [dirty, setDirty] = useState(false);
@@ -569,6 +558,7 @@ function TicketReportEditor({
           groups={groups}
           reporter={reporter}
           locked={locked}
+          belowDescription={belowDescription}
           // Picked when the issue was reported, then frozen: the backend
           // has no way to move a ticket to another site.
           site={

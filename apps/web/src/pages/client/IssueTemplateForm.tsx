@@ -96,6 +96,9 @@ interface IssueTemplateFormProps {
   site?: ReactNode;
   /** The Attachments row's content; no row when omitted. */
   attachments?: ReactNode;
+  /** Rows under the Description (and its files) in the left column: on a
+   *  ticket, the message box and then the conversation. */
+  belowDescription?: ReactNode;
   /** Routing fields (Assignee Group, Assignee, Priority) read-only. */
   routingLocked?: boolean;
   routingLockedHint?: string;
@@ -125,6 +128,7 @@ export function IssueTemplateForm({
   status,
   site,
   attachments,
+  belowDescription,
   routingLocked = false,
   routingLockedHint,
   locked = false,
@@ -271,7 +275,7 @@ export function IssueTemplateForm({
                   variant="body2"
                   sx={{
                     ...RECORD_BOX_SX,
-                    minHeight: 120,
+                    minHeight: 72,
                     color: draft.description ? "text.primary" : "text.secondary",
                   }}
                 >
@@ -300,6 +304,8 @@ export function IssueTemplateForm({
           </FieldRow>
 
           {attachments && <FieldRow label="Attachments">{attachments}</FieldRow>}
+
+          {belowDescription}
         </Stack>
       </Grid>
 

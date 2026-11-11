@@ -47,7 +47,7 @@ import {
   type IssueCatalog,
   type ReportDraft,
 } from "./client/issueReporting";
-import { IssueTemplateForm, type TemplateGroup } from "./client/IssueTemplateForm";
+import { FieldRow, IssueTemplateForm, type TemplateGroup } from "./client/IssueTemplateForm";
 import { templateStatusText, type TemplateStatusOption } from "./client/issueStatus";
 import {
   openAttachment,
@@ -56,7 +56,12 @@ import {
   type ConversationMessage,
   type TicketAttachment,
 } from "./client/conversation";
-import { MessageBubble, MessageFiles, StagedFiles } from "./client/MessageBubble";
+import {
+  ConversationScroll,
+  MessageBubble,
+  MessageFiles,
+  StagedFiles,
+} from "./client/MessageBubble";
 import { ReportEditNote } from "./client/ReportEditNote";
 import { buildConversation, type ReportEdit, type TicketProgress } from "./client/clientTicket";
 import { formatDateTime, formatTime } from "../time/clock";
@@ -1247,6 +1252,120 @@ export function IncidentDetailPage() {
     return <Typography color="text.secondary">Loading...</Typography>;
   }
 
+  // Under the template's Description: the message box, then the
+  // conversation (scrolling inside itself), as on the client's page.
+  const conversationRows = (
+    <>
+      <FieldRow label="Message">
+        <Box>
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={commentInternal ? "internal" : "customer"}
+            onChange={(_, v: "internal" | "customer" | null) =>
+              v && setCommentInternal(v === "internal")
+            }
+            sx={{ mb: 1 }}
+          >
+            <ToggleButton value="internal" sx={{ textTransform: "none", px: 2 }}>
+              Internal note
+            </ToggleButton>
+            <ToggleButton value="customer" sx={{ textTransform: "none", px: 2 }}>
+              Reply to customer
+            </ToggleButton>
+          </ToggleButtonGroup>
+          <TextField
+            fullWidth
+            multiline
+            minRows={2}
+            size="small"
+            label={commentInternal ? "Internal note (staff only)" : "Reply to the customer"}
+            helperText={
+              commentInternal
+                ? "Only staff see this."
+                : incident.reportedByUserId
+                  ? "The customer sees this on their ticket and is notified. Write in plain language."
+                  : "Visible to customers, but no customer reported this ticket, so nobody is notified."
+            }
+            value={commentBody}
+            onChange={(e) => setCommentBody(e.target.value)}
+            sx={{
+              mb: 1,
+              ...(commentInternal
+                ? {}
+                : {
+                    "& .MuiOutlinedInput-root": {
+                      bgcolor: (t) => alpha(t.palette.info.main, 0.04),
+                    },
+                  }),
+            }}
+          />
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Button
+              variant="contained"
+              color={commentInternal ? "primary" : "info"}
+              disabled={(!commentBody.trim() && commentFiles.length === 0) || commentSending}
+              onClick={submitComment}
+            >
+              {commentSending
+                ? "Sending..."
+                : commentInternal
+                  ? "Add internal note"
+                  : "Send to customer"}
+            </Button>
+            <Button component="label" variant="outlined" disabled={commentSending}>
+              Attach files
+              <input
+                type="file"
+                hidden
+                multiple
+                onChange={(e) => {
+                  const picked = Array.from(e.target.files ?? []);
+                  setCommentFiles((prev) => [...prev, ...picked]);
+                  e.target.value = "";
+                }}
+              />
+            </Button>
+          </Stack>
+          <StagedFiles
+            files={commentFiles}
+            onRemove={(i) => setCommentFiles((prev) => prev.filter((_, j) => j !== i))}
+          />
+        </Box>
+      </FieldRow>
+      <FieldRow label="Conversation">
+        <ConversationScroll count={comments.length + (customerProgress?.reportEdits?.length ?? 0)}>
+          {/* Messages plus the reporter's report edits, in time order
+              (status changes have their own timeline below). */}
+          {buildConversation(comments, customerProgress, { statuses: false }).map((item) =>
+            item.type === "edit" ? (
+              <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
+            ) : item.type === "comment" ? (
+              <MessageBubble
+                key={item.comment.id}
+                message={item.comment}
+                mine={item.comment.authorId === currentUserId}
+                tag={
+                  item.comment.authorId === incident.reportedByUserId
+                    ? { label: "Customer", color: "warning" }
+                    : item.comment.isInternal
+                      ? { label: "Internal" }
+                      : { label: "To customer", color: "info" }
+                }
+                onOpen={(attachmentId, disposition) => void openFile(attachmentId, disposition)}
+              />
+            ) : null,
+          )}
+          {comments.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              No messages yet.
+            </Typography>
+          )}
+        </ConversationScroll>
+      </FieldRow>
+    </>
+  );
+
   return (
     <Box>
       <CustomerStatusBanner incident={incident} progress={customerProgress} />
@@ -1378,6 +1497,7 @@ export function IncidentDetailPage() {
                     />
                   ) : undefined
                 }
+                belowDescription={conversationRows}
                 routingLocked={!canRoute}
                 routingLockedHint="Service Desk/NOC or elevated roles only"
                 currentOwner={editOwnerUser}
@@ -1519,115 +1639,6 @@ export function IncidentDetailPage() {
           </Grid>
         )}
       </Grid>
-
-      {/* Message box, then the conversation, right under the template so
-          both are on screen without scrolling past the workflow panels. */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Conversation
-        </Typography>
-        <ToggleButtonGroup
-          exclusive
-          size="small"
-          value={commentInternal ? "internal" : "customer"}
-          onChange={(_, v: "internal" | "customer" | null) =>
-            v && setCommentInternal(v === "internal")
-          }
-          sx={{ mb: 1 }}
-        >
-          <ToggleButton value="internal" sx={{ textTransform: "none", px: 2 }}>
-            Internal note
-          </ToggleButton>
-          <ToggleButton value="customer" sx={{ textTransform: "none", px: 2 }}>
-            Reply to customer
-          </ToggleButton>
-        </ToggleButtonGroup>
-        <TextField
-          fullWidth
-          multiline
-          minRows={2}
-          size="small"
-          label={commentInternal ? "Internal note (staff only)" : "Reply to the customer"}
-          helperText={
-            commentInternal
-              ? "Only staff see this."
-              : incident.reportedByUserId
-                ? "The customer sees this on their ticket and is notified. Write in plain language."
-                : "Visible to customers, but no customer reported this ticket, so nobody is notified."
-          }
-          value={commentBody}
-          onChange={(e) => setCommentBody(e.target.value)}
-          sx={{
-            mb: 1,
-            ...(commentInternal
-              ? {}
-              : {
-                  "& .MuiOutlinedInput-root": {
-                    bgcolor: (t) => alpha(t.palette.info.main, 0.04),
-                  },
-                }),
-          }}
-        />
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-          <Button
-            variant="contained"
-            color={commentInternal ? "primary" : "info"}
-            disabled={(!commentBody.trim() && commentFiles.length === 0) || commentSending}
-            onClick={submitComment}
-          >
-            {commentSending
-              ? "Sending..."
-              : commentInternal
-                ? "Add internal note"
-                : "Send to customer"}
-          </Button>
-          <Button component="label" variant="outlined" disabled={commentSending}>
-            Attach files
-            <input
-              type="file"
-              hidden
-              multiple
-              onChange={(e) => {
-                const picked = Array.from(e.target.files ?? []);
-                setCommentFiles((prev) => [...prev, ...picked]);
-                e.target.value = "";
-              }}
-            />
-          </Button>
-        </Stack>
-        <StagedFiles
-          files={commentFiles}
-          onRemove={(i) => setCommentFiles((prev) => prev.filter((_, j) => j !== i))}
-        />
-        <Stack spacing={1.25} sx={{ mt: 2 }}>
-          {/* Messages plus the reporter's report edits, in time order
-              (status changes have their own timeline below). */}
-          {buildConversation(comments, customerProgress, { statuses: false }).map((item) =>
-            item.type === "edit" ? (
-              <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
-            ) : item.type === "comment" ? (
-              <MessageBubble
-                key={item.comment.id}
-                message={item.comment}
-                mine={item.comment.authorId === currentUserId}
-                tag={
-                  item.comment.authorId === incident.reportedByUserId
-                    ? { label: "Customer", color: "warning" }
-                    : item.comment.isInternal
-                      ? { label: "Internal" }
-                      : { label: "To customer", color: "info" }
-                }
-                onOpen={(attachmentId, disposition) => void openFile(attachmentId, disposition)}
-              />
-            ) : null,
-          )}
-          {comments.length === 0 && (
-            <Typography variant="body2" color="text.secondary">
-              No messages yet.
-            </Typography>
-          )}
-        </Stack>
-      </Paper>
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
