@@ -10,17 +10,14 @@ import {
 
 /**
  * One site as the customer sees it: whether anything is open there, how to
- * reach the service desk by phone or email.
+ * reach the service desk by phone or email. The site's name isn't shown
+ * here; it appears only in the Site dropdown on a report or ticket.
  */
 export function SitePanel({ site }: { site: PortalSite }) {
   return (
     <Card elevation={0} sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
       <CardContent sx={{ p: { xs: 2.5, sm: 3 } }}>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-          <Typography sx={{ fontWeight: 700, mr: 0.5 }}>{site.name}</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
-            {site.code}
-          </Typography>
           <Chip
             size="small"
             color={SITE_STATE_COLOR[site.state]}

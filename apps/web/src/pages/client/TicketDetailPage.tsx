@@ -11,6 +11,7 @@ import {
   Divider,
   Grid,
   Link,
+  MenuItem,
   Stack,
   Step,
   StepLabel,
@@ -72,6 +73,7 @@ import { formatDateTime } from "../../time/clock";
 interface Incident extends TicketFields {
   id: string;
   incidentNo: string;
+  siteId: string;
   status: IncidentStatus;
   priority: Priority;
   category: string;
@@ -135,7 +137,7 @@ export function TicketDetailPage() {
   // itself still renders if the overview hasn't loaded or fails.
   const { overview, ticketsById } = useClientPortal();
   const portal = id ? ticketsById.get(id) : undefined;
-  const site = overview?.sites.find((s) => s.id === portal?.siteId);
+  const site = overview?.sites.find((s) => s.id === (incident?.siteId ?? portal?.siteId));
 
   const refetch = useCallback(() => {
     if (!id) return Promise.resolve();
@@ -311,6 +313,7 @@ export function TicketDetailPage() {
           catalog={catalog}
           groups={groups}
           reporter={token ? (decodeJwtPayload(token)?.email ?? "") : ""}
+          siteName={site?.name ?? null}
           // Files sent with a message show in that message; the rest came
           // with the report, so they show under its Description.
           files={attachments.filter((a) => !a.commentId)}
@@ -493,6 +496,7 @@ function TicketReportEditor({
   catalog,
   groups,
   reporter,
+  siteName,
   files,
   onOpenFile,
   onSaved,
@@ -501,6 +505,8 @@ function TicketReportEditor({
   catalog: IssueCatalog;
   groups: SupportGroup[];
   reporter: string;
+  /** The ticket's site; null until the portal overview has loaded. */
+  siteName: string | null;
   files: Attachment[];
   onOpenFile: (attachmentId: string, disposition: AttachmentDisposition) => void;
   onSaved: () => Promise<void>;
@@ -563,6 +569,20 @@ function TicketReportEditor({
           groups={groups}
           reporter={reporter}
           locked={locked}
+          // Picked when the issue was reported, then frozen: the backend
+          // has no way to move a ticket to another site.
+          site={
+            <TextField
+              select
+              size="small"
+              fullWidth
+              disabled
+              value={incident.siteId}
+              helperText="Set when the issue was reported"
+            >
+              <MenuItem value={incident.siteId}>{siteName ?? "Loading..."}</MenuItem>
+            </TextField>
+          }
           attachments={
             files.length > 0 ? <MessageFiles files={files} onOpen={onOpenFile} /> : undefined
           }

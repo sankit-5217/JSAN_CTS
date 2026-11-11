@@ -23,7 +23,7 @@ import {
   type IssueCatalog,
   type ReportDraft,
 } from "./issueReporting";
-import { FieldRow, IssueTemplateForm, type TemplateGroup } from "./IssueTemplateForm";
+import { IssueTemplateForm, type TemplateGroup } from "./IssueTemplateForm";
 import { describeFailedUpload } from "./conversation";
 
 interface Site {
@@ -71,7 +71,8 @@ export function ReportIssuePage() {
         setCatalog(cat);
         setSites(items);
         setGroups(clientGroups(groupRes));
-        if (items.length === 1) setSiteId(items[0].id);
+        // No site is pre-selected, even when only one is offered: the
+        // reporter always picks it. It can't be changed once raised.
         // "Service Desk is default": pre-select the flagged group.
         setDraft((d) => ({ ...d, ownerGroupId: cat.defaultAssigneeGroupId ?? "" }));
       })
@@ -115,29 +116,38 @@ export function ReportIssuePage() {
     return <Typography color="text.secondary">Loading the report form...</Typography>;
   }
 
-  const siteRow = (
-    <FieldRow label="Site">
-      {sites.length > 1 ? (
-        <TextField
-          select
-          size="small"
-          fullWidth
-          value={siteId}
-          onChange={(e) => setSiteId(e.target.value)}
-          sx={{ "& .MuiInputBase-root": { bgcolor: "background.paper" } }}
-        >
-          {sites.map((s) => (
-            <MenuItem key={s.id} value={s.id}>
-              {s.code} — {s.name}
-            </MenuItem>
-          ))}
-        </TextField>
-      ) : (
-        <Typography sx={{ pt: 1.25 }}>
-          {sites[0] ? `${sites[0].code} — ${sites[0].name}` : "No site assigned"}
-        </Typography>
-      )}
-    </FieldRow>
+  const sitePicker = (
+    <TextField
+      select
+      size="small"
+      fullWidth
+      value={siteId}
+      onChange={(e) => setSiteId(e.target.value)}
+      disabled={sites.length === 0}
+      helperText={
+        sites.length === 0
+          ? "Your account isn't linked to a site yet. Ask your JSAN contact."
+          : "Can't be changed once the ticket is raised"
+      }
+      SelectProps={{
+        displayEmpty: true,
+        renderValue: (v) =>
+          v ? (
+            (sites.find((s) => s.id === v)?.name ?? "")
+          ) : (
+            <Typography component="span" color="text.secondary">
+              Select a site
+            </Typography>
+          ),
+      }}
+      sx={{ "& .MuiInputBase-root": { bgcolor: "background.paper" } }}
+    >
+      {sites.map((s) => (
+        <MenuItem key={s.id} value={s.id}>
+          {s.name}
+        </MenuItem>
+      ))}
+    </TextField>
   );
 
   const attachmentPicker = (
@@ -214,7 +224,7 @@ export function ReportIssuePage() {
             update={setDraft}
             groups={groups}
             reporter={reporterEmail}
-            topLeft={siteRow}
+            site={sitePicker}
             attachments={attachmentPicker}
             status={
               <TextField

@@ -92,8 +92,8 @@ interface IssueTemplateFormProps {
   reporter: string;
   /** What goes in the Status row (read-only text, or the staff picker). */
   status: ReactNode;
-  /** Extra rows at the top of the left column (e.g. Site). */
-  topLeft?: ReactNode;
+  /** The Site row's control, first in the right column; no row when omitted. */
+  site?: ReactNode;
   /** The Attachments row's content; no row when omitted. */
   attachments?: ReactNode;
   /** Routing fields (Assignee Group, Assignee, Priority) read-only. */
@@ -110,7 +110,7 @@ interface IssueTemplateFormProps {
  * The issue reporting template, shared by the client portal's Report an
  * issue page, the client's ticket page and the staff incident page:
  * Template / Subject / Description / Attachments down the left, the
- * classification sheet (Reporter, Assignee Group, Assignee, CC List,
+ * classification sheet (Site, Reporter, Assignee Group, Assignee, CC List,
  * Status, Ref Bug ID, Issue Type, Priority, Severity, Component, Sub
  * Component) down the right. Every pick-list comes from the issue catalog
  * the admin maintains; nothing here is hard-coded.
@@ -123,7 +123,7 @@ export function IssueTemplateForm({
   groups,
   reporter,
   status,
-  topLeft,
+  site,
   attachments,
   routingLocked = false,
   routingLockedHint,
@@ -221,8 +221,6 @@ export function IssueTemplateForm({
       {/* Left: what happened */}
       <Grid item xs={10} md={8}>
         <Stack spacing={2}>
-          {topLeft}
-
           {/* A template only drafts a new report. Once the ticket is raised
               no role gets it back (the issue type stays editable on its own). */}
           {mode === "create" && (
@@ -308,6 +306,12 @@ export function IssueTemplateForm({
       {/* Right: the classification sheet */}
       <Grid item xs={10} md={2}>
         <Stack spacing={1.5}>
+          {site && (
+            <FieldRow stacked label="Site">
+              {site}
+            </FieldRow>
+          )}
+
           <FieldRow stacked label="Reporter">
             <TextField size="small" fullWidth value={reporter} InputProps={{ readOnly: true }} />
           </FieldRow>
@@ -409,7 +413,9 @@ export function IssueTemplateForm({
             </Box>
           </FieldRow>
 
-          <FieldRow stacked label="Status">{status}</FieldRow>
+          <FieldRow stacked label="Status">
+            {status}
+          </FieldRow>
 
           <FieldRow stacked label="Ref Bug ID">
             <TextField
