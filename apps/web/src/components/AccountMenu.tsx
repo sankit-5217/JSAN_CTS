@@ -6,6 +6,7 @@ import ExpandMoreOutlinedIcon from "@mui/icons-material/ExpandMoreOutlined";
 import KeyOutlinedIcon from "@mui/icons-material/KeyOutlined";
 import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
 import { useNavigate } from "react-router-dom";
+import { getCurrentUserRole } from "../api/jwt";
 
 // Role identity colors — deliberately outside the severity palette
 // (severityColors in theme/theme.ts: green/orange/red/blue-maintenance) so a
@@ -133,16 +134,18 @@ export function AccountMenu({ email, roleLabel, roleColor, onLogout }: AccountMe
           <KeyOutlinedIcon fontSize="small" />
           Change password
         </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setAnchorEl(null);
-            navigate("/account/email");
-          }}
-          sx={{ gap: 1 }}
-        >
-          <EmailOutlinedIcon fontSize="small" />
-          Sending email account
-        </MenuItem>
+        {getCurrentUserRole() === "SUPER_ADMIN" && (
+          <MenuItem
+            onClick={() => {
+              setAnchorEl(null);
+              navigate("/account/email");
+            }}
+            sx={{ gap: 1 }}
+          >
+            <EmailOutlinedIcon fontSize="small" />
+            Shared sending email
+          </MenuItem>
+        )}
         <MenuItem onClick={onLogout} sx={{ color: "error.main", gap: 1 }}>
           <LogoutOutlinedIcon fontSize="small" />
           Log out

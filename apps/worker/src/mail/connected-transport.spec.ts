@@ -19,7 +19,7 @@ describe("ConnectedMailTransport", () => {
     expect(system.send).toHaveBeenCalledWith(email);
     expect(global.fetch).not.toHaveBeenCalled();
   });
-  it("uses the actor's mailbox through the worker-only API without exposing credentials in jobs", async () => {
+  it("passes the actor identity to shared delivery without exposing credentials in jobs", async () => {
     const system = { send: jest.fn() };
     global.fetch = jest.fn().mockResolvedValue({ ok: true });
     await new ConnectedMailTransport(system, "https://api.example/api/v1/", "worker-secret").send(
@@ -35,7 +35,7 @@ describe("ConnectedMailTransport", () => {
     );
     expect(system.send).not.toHaveBeenCalled();
   });
-  it("fails instead of impersonating the service sender when the actor is disconnected", async () => {
+  it("fails without falling back to a different sender when shared delivery is unavailable", async () => {
     const system = { send: jest.fn() };
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503 });
     await expect(
@@ -44,6 +44,21 @@ describe("ConnectedMailTransport", () => {
         "actor-id",
       ),
     ).rejects.toThrow("No fallback");
+    expect(system.send).not.toHaveBeenCalled();
+  });
+  it("routes account and automatic emails through the shared mailbox in production", async () => {
+    const system = { send: jest.fn() };
+    global.fetch = jest.fn().mockResolvedValue({ ok: true });
+    await new ConnectedMailTransport(
+      system,
+      "https://api.example/api/v1",
+      "key",
+      "sankit@jsanconsulting.com",
+    ).send(email);
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://api.example/api/v1/sending-mail/deliver",
+      expect.objectContaining({ body: JSON.stringify({ email }) }),
+    );
     expect(system.send).not.toHaveBeenCalled();
   });
   it("fails closed when worker configuration is missing", async () => {

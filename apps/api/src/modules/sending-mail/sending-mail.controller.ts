@@ -32,6 +32,9 @@ import { Type } from "class-transformer";
 import { timingSafeEqual } from "crypto";
 import type { Response } from "express";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
+import { RolesGuard } from "../auth/guards/roles.guard";
+import { Roles } from "../auth/decorators/roles.decorator";
+import { UserRole } from "@prisma/client";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { SendingMailService } from "./sending-mail.service";
@@ -59,7 +62,7 @@ class MailDto {
   @IsObject() headers!: Record<string, string>;
 }
 class DeliveryDto {
-  @IsUUID() userId!: string;
+  @IsOptional() @IsUUID() userId?: string;
   @IsDefined() @ValidateNested() @Type(() => MailDto) email!: MailDto;
 }
 @Injectable()
@@ -84,32 +87,36 @@ export class SendingMailController {
   constructor(private readonly service: SendingMailService) {}
 
   @Get()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Get your connected sending account (no credentials)" })
+  @ApiOperation({ summary: "Get the shared sending account (no credentials)" })
   status(@CurrentUser() user: AuthenticatedUser) {
     return this.service.status(user.id);
   }
 
   @Post("connect/:provider")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Authorize your own Gmail or Microsoft mailbox" })
+  @ApiOperation({ summary: "Authorize the shared Gmail or Microsoft mailbox once" })
   connect(@CurrentUser() user: AuthenticatedUser, @Param("provider") provider: string) {
     return this.service.connect(user.id, provider);
   }
 
   @Post("smtp")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Verify and connect your own SMTP mailbox using an app password" })
+  @ApiOperation({ summary: "Verify and connect the shared SMTP mailbox using an app password" })
   async smtp(@CurrentUser() user: AuthenticatedUser, @Body() body: SmtpDto) {
     await this.service.connectSmtp(user.id, body.provider, body.password);
     return { connected: true };
   }
 
   @Delete()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: "Remove saved mailbox credentials and pending authorizations" })
   async disconnect(@CurrentUser() user: AuthenticatedUser) {
@@ -140,7 +147,7 @@ export class SendingMailController {
 
   @Post("deliver")
   @UseGuards(MailWorkerGuard)
-  @ApiOperation({ summary: "Worker-only delivery using an actor's authorized mailbox" })
+  @ApiOperation({ summary: "Worker-only shared delivery with the actor's verified Reply-To" })
   async deliver(@Body() body: DeliveryDto) {
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(body.email.headers)) {

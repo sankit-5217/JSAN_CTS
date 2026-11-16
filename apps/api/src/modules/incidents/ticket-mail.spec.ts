@@ -116,6 +116,7 @@ describe("ticketEntityRef", () => {
         assigneeGroup: "Infra team",
         updatedBy: {
           userId: "client",
+          email: "Jane@Client.example",
           name: "Jane",
           role: "Client",
           at: "2026-10-22T11:10:00.000Z",

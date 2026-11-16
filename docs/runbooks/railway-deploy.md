@@ -6,18 +6,18 @@ there is no GitHub auto-deploy.
 
 ## Services
 
-| Service         | What                          | Public URL                                    |
-| --------------- | ----------------------------- | --------------------------------------------- |
-| `api`           | NestJS API (`apps/api`)       | https://api-production-8f7e.up.railway.app    |
-| `web`           | Built SPA (`apps/web`)        | https://jsan-opsdesk.up.railway.app           |
-| `worker`        | BullMQ worker (`apps/worker`) | — (no HTTP)                                   |
-| `Postgres`      | Railway Postgres (OpsDesk)    | private network only                          |
-| `Redis`         | Railway Redis                 | private network only                          |
-| bucket `opsdesk-attachments` | Railway Bucket (S3-compatible), attachments | signed links only |
-| `zabbix-server` | `zabbix/zabbix-server-pgsql:alpine-7.0.31` | TCP proxy `iriguchi.proxy.rlwy.net:12762` → 10051 (client proxies) |
-| `zabbix-web`    | `zabbix/zabbix-web-nginx-pgsql:alpine-7.0.31` (PHP frontend, port 8080) | https://zabbix-web-production-242b.up.railway.app |
-| `zabbix-agent`  | `zabbix/zabbix-agent2:alpine-7.0.31` (the "Zabbix server" host) | private network only |
-| `zabbix-db`     | Railway Postgres (Zabbix only — telemetry stays out of OpsDesk's DB) | private network only |
+| Service                      | What                                                                    | Public URL                                                         |
+| ---------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `api`                        | NestJS API (`apps/api`)                                                 | https://api-production-8f7e.up.railway.app                         |
+| `web`                        | Built SPA (`apps/web`)                                                  | https://jsan-opsdesk.up.railway.app                                |
+| `worker`                     | BullMQ worker (`apps/worker`)                                           | — (no HTTP)                                                        |
+| `Postgres`                   | Railway Postgres (OpsDesk)                                              | private network only                                               |
+| `Redis`                      | Railway Redis                                                           | private network only                                               |
+| bucket `opsdesk-attachments` | Railway Bucket (S3-compatible), attachments                             | signed links only                                                  |
+| `zabbix-server`              | `zabbix/zabbix-server-pgsql:alpine-7.0.31`                              | TCP proxy `iriguchi.proxy.rlwy.net:12762` → 10051 (client proxies) |
+| `zabbix-web`                 | `zabbix/zabbix-web-nginx-pgsql:alpine-7.0.31` (PHP frontend, port 8080) | https://zabbix-web-production-242b.up.railway.app                  |
+| `zabbix-agent`               | `zabbix/zabbix-agent2:alpine-7.0.31` (the "Zabbix server" host)         | private network only                                               |
+| `zabbix-db`                  | Railway Postgres (Zabbix only — telemetry stays out of OpsDesk's DB)    | private network only                                               |
 
 Each app service's build/start/pre-deploy/healthcheck settings live in
 `deploy/railway/<service>.json` and are applied with:
@@ -64,10 +64,13 @@ values use Railway references so they follow domain/credential changes:
   `WEB_APP_URL=https://${{web.RAILWAY_PUBLIC_DOMAIN}}`, `S3_ENDPOINT`, `S3_REGION`,
   `S3_BUCKET`, `S3_FORCE_PATH_STYLE=false`, and secrets `JWT_SECRET`,
   `INTEGRATION_SECRETS_KEY`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`.
-- **worker**: `NODE_ENV=production`, `REDIS_URL=${{Redis.REDIS_URL}}`, Gmail
-  SMTP (`SMTP_HOST/PORT/SECURE`, secrets `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`).
-  Outbound SMTP works because JSAN Projects is on the Pro plan (Railway blocks
-  it on Trial/Hobby).
+- **API and worker shared email**: `MAIL_SHARED_SENDER_EMAIL=sankit@jsanconsulting.com`
+  and matching secret `MAIL_WORKER_KEY`. Worker also needs `NODE_ENV=production`,
+  `REDIS_URL=${{Redis.REDIS_URL}}` and `OPSDESK_API_URL` ending in `/api/v1`.
+  API owns `MAIL_MICROSOFT_CLIENT_ID` and `MAIL_MICROSOFT_CLIENT_SECRET`.
+  A super admin must authorize the shared mailbox once. See
+  [shared sending setup](connected-sending-accounts.md). Legacy worker SMTP
+  variables are unused while shared delivery is enabled.
 - **zabbix-server / zabbix-web**: `DB_SERVER_HOST/PORT`, `POSTGRES_USER/PASSWORD/DB`
   as references to `zabbix-db`; zabbix-web also `ZBX_SERVER_HOST=zabbix-server.railway.internal`,
   `PHP_TZ=Asia/Kolkata`, `PORT=8080`. zabbix-agent: `ZBX_HOSTNAME=Zabbix server`,
@@ -135,6 +138,7 @@ are no longer read and were removed from the api service.
 
   Verified 2026-10-14: a test Warning problem reached OpsDesk as an alert in
   under a minute and the re-sync job recovered it after the trigger was deleted.
+
 - Client sites: `onboard-site.mjs` with the same env; proxies connect out to
   `iriguchi.proxy.rlwy.net:12762` (PSK). iDRAC/iLO/SNMP stay behind the
   client's proxy or site collector — never exposed to the Internet.

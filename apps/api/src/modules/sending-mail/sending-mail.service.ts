@@ -1,4 +1,11 @@
-import { BadRequestException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  ServiceUnavailableException,
+} from "@nestjs/common";
+import { UserRole } from "@prisma/client";
+import { isEmail } from "class-validator";
 import { createHash, randomBytes } from "crypto";
 import nodemailer from "nodemailer";
 import MailComposer from "nodemailer/lib/mail-composer";
@@ -23,13 +30,37 @@ export class SendingMailService {
     private readonly audit: AuditService,
   ) {}
 
+  private sharedEmail() {
+    const email = process.env.MAIL_SHARED_SENDER_EMAIL?.trim().toLowerCase();
+    if (!email || !isEmail(email))
+      throw new ServiceUnavailableException("Configure the shared sending email address");
+    return email;
+  }
+
+  private async administrator(userId: string) {
+    const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
+    if (!user.isActive || user.role !== UserRole.SUPER_ADMIN)
+      throw new ForbiddenException("Only a super admin can manage the shared mailbox");
+    return user;
+  }
+
+  private accountWhere() {
+    return {
+      email: { equals: this.sharedEmail(), mode: "insensitive" as const },
+      user: { isActive: true, role: UserRole.SUPER_ADMIN },
+    };
+  }
+
   async status(userId: string) {
-    const account = await this.db.sendingAccount.findUnique({
-      where: { userId },
+    await this.administrator(userId);
+    const account = await this.db.sendingAccount.findFirst({
+      where: this.accountWhere(),
+      orderBy: { updatedAt: "desc" },
       select: { email: true, provider: true, updatedAt: true },
     });
     return {
       account,
+      senderEmail: this.sharedEmail(),
       providers: ["google", "microsoft"].map((provider) => {
         try {
           oauthProvider(provider);
@@ -43,7 +74,8 @@ export class SendingMailService {
 
   async connect(userId: string, provider: string) {
     const config = oauthProvider(provider);
-    const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
+    const user = await this.administrator(userId);
+    const senderEmail = this.sharedEmail();
     const state = randomBytes(32).toString("base64url");
     const verifier = randomBytes(32).toString("base64url");
     await this.db.mailAuthorization.deleteMany({
@@ -69,7 +101,7 @@ export class SendingMailService {
       code_challenge: createHash("sha256").update(verifier).digest("base64url"),
       code_challenge_method: "S256",
       prompt: "consent",
-      login_hint: user.email,
+      login_hint: senderEmail,
       ...(provider === "google" ? { access_type: "offline" } : {}),
     }).toString();
     return { url: url.toString() };
@@ -117,7 +149,7 @@ export class SendingMailService {
     });
     if (pending.provider !== provider || pending.expiresAt.getTime() < Date.now() || !code)
       throw new BadRequestException("Expired or refused authorization");
-    const user = await this.db.user.findUniqueOrThrow({ where: { id: pending.userId } });
+    const user = await this.administrator(pending.userId);
     if (!user.isActive || user.sessionVersion !== pending.sessionVersion)
       throw new BadRequestException("Sign in again to connect email");
     const config = oauthProvider(provider);
@@ -150,10 +182,10 @@ export class SendingMailService {
     const email = provider === "google" ? profile.email : profile.mail || profile.userPrincipalName;
     if (
       !email ||
-      email.toLowerCase() !== user.email.toLowerCase() ||
+      email.toLowerCase() !== this.sharedEmail() ||
       (provider === "google" && !profile.email_verified)
     ) {
-      throw new BadRequestException("Connect the same email address you use to sign in to OpsDesk");
+      throw new BadRequestException("Connect the configured shared sending email address");
     }
     const requiredScope =
       provider === "google" ? "https://www.googleapis.com/auth/gmail.send" : "Mail.Send";
@@ -175,12 +207,13 @@ export class SendingMailService {
   async connectSmtp(userId: string, provider: string, password: string) {
     const config = SMTP_PROVIDERS[provider];
     if (!config) throw new BadRequestException("Unsupported SMTP provider");
-    const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
+    await this.administrator(userId);
+    const email = this.sharedEmail();
     const transport = nodemailer.createTransport({
       ...config,
       secure: config.port === 465,
       requireTLS: true,
-      auth: { user: user.email, pass: password },
+      auth: { user: email, pass: password },
       connectionTimeout: 15_000,
       socketTimeout: 20_000,
     });
@@ -191,7 +224,7 @@ export class SendingMailService {
     } finally {
       transport.close();
     }
-    await this.save(userId, provider, user.email, { password });
+    await this.save(userId, provider, email, { password });
   }
 
   private async save(
@@ -204,7 +237,11 @@ export class SendingMailService {
     const encrypted = encryptSecret(JSON.stringify(credentials), loadSecretsKey());
     await this.db.$transaction(async (tx) => {
       const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
-      if (!user.isActive || user.email.toLowerCase() !== email.toLowerCase())
+      if (
+        !user.isActive ||
+        user.role !== UserRole.SUPER_ADMIN ||
+        this.sharedEmail() !== email.toLowerCase()
+      )
         throw new BadRequestException("Account has changed; reconnect email");
       if (authorization) {
         if (user.sessionVersion !== authorization.sessionVersion)
@@ -215,6 +252,12 @@ export class SendingMailService {
         if (!pending.count)
           throw new BadRequestException("Authorization was cancelled; reconnect email");
       }
+      await tx.sendingAccount.deleteMany({
+        where: {
+          email: { equals: this.sharedEmail(), mode: "insensitive" },
+          userId: { not: userId },
+        },
+      });
       await tx.sendingAccount.upsert({
         where: { userId },
         create: { userId, provider, email, credentials: encrypted },
@@ -234,9 +277,13 @@ export class SendingMailService {
   }
 
   async disconnect(userId: string) {
+    await this.administrator(userId);
     await this.db.$transaction(async (tx) => {
-      await tx.sendingAccount.deleteMany({ where: { userId } });
-      await tx.mailAuthorization.deleteMany({ where: { userId } });
+      await tx.sendingAccount.deleteMany({
+        where: { email: { equals: this.sharedEmail(), mode: "insensitive" } },
+      });
+      // All pending authorizations now target the same shared mailbox.
+      await tx.mailAuthorization.deleteMany({});
       await this.audit.record(
         {
           actorId: userId,
@@ -249,25 +296,37 @@ export class SendingMailService {
     });
   }
 
-  async send(userId: string, email: RenderedEmail) {
-    const account = await this.db.sendingAccount.findUnique({
-      where: { userId },
+  async send(userId: string | undefined, email: RenderedEmail) {
+    const actor = userId
+      ? await this.db.user.findUniqueOrThrow({ where: { id: userId } })
+      : undefined;
+    if (actor && (!actor.isActive || !isEmail(actor.email)))
+      throw new BadRequestException(
+        "The notification actor is no longer active or has no valid email",
+      );
+    const account = await this.db.sendingAccount.findFirst({
+      where: this.accountWhere(),
+      orderBy: { updatedAt: "desc" },
       include: { user: true },
     });
     if (
       !account ||
       !account.user.isActive ||
-      account.email.toLowerCase() !== account.user.email.toLowerCase()
+      account.user.role !== UserRole.SUPER_ADMIN ||
+      account.email.toLowerCase() !== this.sharedEmail()
     ) {
       throw new ServiceUnavailableException(
-        "The person making this update must connect their sending mailbox",
+        "A super admin must connect the shared sending mailbox once",
       );
     }
     const credentials = JSON.parse(
       decryptSecret(account.credentials, loadSecretsKey()),
     ) as Credentials;
     const message = {
-      from: { name: "JSAN OpsDesk", address: account.email },
+      from: { name: "JSAN OpsDesk", address: this.sharedEmail() },
+      replyTo: actor
+        ? { name: actor.displayName || actor.email, address: actor.email }
+        : this.sharedEmail(),
       to: email.to,
       cc: email.cc,
       subject: email.subject,
@@ -306,7 +365,7 @@ export class SendingMailService {
       credentials.expiresAt = Date.now() + tokens.expires_in * 1000;
       // Compare-and-swap: a concurrent disconnect/reconnect must not be overwritten.
       const saved = await this.db.sendingAccount.updateMany({
-        where: { userId, credentials: account.credentials },
+        where: { userId: account.userId, credentials: account.credentials },
         data: { credentials: encryptSecret(JSON.stringify(credentials), loadSecretsKey()) },
       });
       if (!saved.count)

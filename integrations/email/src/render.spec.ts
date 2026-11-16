@@ -262,6 +262,27 @@ describe("incident ticket emails", () => {
   });
   const recipients = { to: [LEAD], cc: [JANE, { email: "ops@client.example" }] };
 
+  it.each(["INCIDENT_CREATED", "INCIDENT_COMMENT_ADDED"] as const)(
+    "shows the triggering person's email in both %s templates",
+    (kind) => {
+      const entity = ticket();
+      entity.ticket!.updatedBy = {
+        name: "Jane <Client>",
+        email: "jane@client.example",
+        role: "Client",
+        at: "2026-11-16T08:00:00Z",
+      };
+      const event =
+        kind === "INCIDENT_CREATED"
+          ? { kind, entity, reporter: JANE, description: "Issue" }
+          : { kind, entity, author: JANE, body: "Comment" };
+      const mail = renderNotification(event, recipients);
+      expect(mail.text).toContain("Jane <Client> <jane@client.example> (Client)");
+      expect(mail.html).toContain("Jane &lt;Client&gt; &lt;jane@client.example&gt; (Client)");
+      expect(mail.html).not.toContain("Jane <Client>");
+    },
+  );
+
   it("builds the subject as KEY[Issue type][Priority,Severity] Subject", () => {
     expect(ticketSubject(ticket())).toBe("INC-00002[Bug][P3,S3] Uploads are slow");
   });

@@ -101,7 +101,8 @@ function ticketLines(event: NotificationEvent): string[] | undefined {
 function ticketActorLine(event: NotificationEvent): string {
   const by = event.entity.ticket?.updatedBy;
   if (!by) return "";
-  const who = by.role ? `${by.name} (${by.role})` : by.name;
+  const name = by.email ? `${by.name} <${by.email}>` : by.name;
+  const who = by.role ? `${name} (${by.role})` : name;
   return `${who} ${TICKET_VERB[event.kind] ?? "updated this ticket"} on ${formatUtc(by.at)}.`;
 }
 

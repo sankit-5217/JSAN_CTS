@@ -36,6 +36,8 @@ export interface EntityRef {
 
 /** Who changed a ticket and when ("Rahul Sharma (Engineer) ... on <time>"). */
 export interface TicketActor {
+  /** Address of the person who triggered the event, shown in the template. */
+  email?: string;
   /** Stable identity for authorized per-user delivery; never accepted from the browser. */
   userId?: string;
   name: string;

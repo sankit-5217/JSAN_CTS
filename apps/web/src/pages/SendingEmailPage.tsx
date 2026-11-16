@@ -7,15 +7,14 @@ import {
   Card,
   CardContent,
   CircularProgress,
-  MenuItem,
   Stack,
-  TextField,
   Typography,
 } from "@mui/material";
 import { apiDelete, apiGet, apiPost, getStoredToken, ApiError } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
 
 interface Status {
+  senderEmail: string;
   account: { email: string; provider: string; updatedAt: string } | null;
   providers: { provider: string; configured: boolean }[];
 }
@@ -30,17 +29,16 @@ export function SendingEmailPage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [provider, setProvider] = useState("yahoo");
-  const [password, setPassword] = useState("");
   const [query] = useSearchParams();
   const token = getStoredToken();
+  const role = getCurrentUserRole();
   const failure = (err: unknown) => {
     const message =
       err instanceof ApiError ? (err.body as { message?: unknown } | null)?.message : undefined;
     setError(
       typeof message === "string"
         ? message
-        : "Could not update your email connection. Please try again.",
+        : "Could not update the shared email connection. Please try again.",
     );
   };
   const load = useCallback(async () => {
@@ -51,9 +49,11 @@ export function SendingEmailPage() {
     }
   }, []);
   useEffect(() => {
-    if (token) void load();
-  }, [load, token]);
+    if (token && role === "SUPER_ADMIN") void load();
+  }, [load, token, role]);
   if (!token) return <Navigate to="/login" replace />;
+  if (role !== "SUPER_ADMIN")
+    return <Navigate to={role === "CLIENT_MANAGER_VIEWER" ? "/client/home" : "/"} replace />;
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     setError("");
@@ -76,21 +76,22 @@ export function SendingEmailPage() {
       <Card sx={{ mt: 2 }}>
         <CardContent>
           <Typography variant="h5" gutterBottom>
-            Sending email account
+            Shared sending email
           </Typography>
           <Typography sx={{ mb: 2 }}>
-            Connect the same email address you use for OpsDesk. When you raise a ticket or add a
-            comment, notifications will be sent as JSAN OpsDesk using your email address.
+            Authorize the shared mailbox once. Notifications for all clients and team members are
+            sent as JSAN OpsDesk. Ticket and comment emails show the person who made the update, and
+            replies go to that person. Users do not need to connect their own email.
           </Typography>
           {query.get("result") === "connected" && (
             <Alert severity="success" sx={{ mb: 2 }}>
-              Your mailbox is connected.
+              The shared mailbox is connected for all users.
             </Alert>
           )}
           {query.get("result") === "failed" && (
             <Alert severity="error" sx={{ mb: 2 }}>
-              Email authorization failed. Choose your OpsDesk email address and grant permission to
-              send email, then try again.
+              Email authorization failed. Sign in to the configured shared mailbox and grant
+              permission to send email, then try again.
             </Alert>
           )}
           {error && (
@@ -101,6 +102,7 @@ export function SendingEmailPage() {
           {!status && !error && <CircularProgress aria-label="Loading email account" />}
           {status && (
             <Stack spacing={2}>
+              <Typography>From: JSAN OpsDesk &lt;{status.senderEmail}&gt;</Typography>
               {status.account ? (
                 <Alert severity="success">
                   Connected: {status.account.email} (
@@ -108,8 +110,8 @@ export function SendingEmailPage() {
                 </Alert>
               ) : (
                 <Alert severity="info">
-                  No mailbox connected. Your ticket updates will still be saved, but personal email
-                  notifications cannot be delivered until you connect.
+                  The shared mailbox needs one-time authorization. Ticket updates are saved, but
+                  emails cannot be delivered until a super admin connects this mailbox.
                 </Alert>
               )}
               {status.providers.map((p) => (
@@ -135,49 +137,6 @@ export function SendingEmailPage() {
                   )}
                 </Box>
               ))}
-              <Typography variant="subtitle1">Other supported mailboxes</Typography>
-              <Typography variant="body2">
-                Use an app password created in your email provider's security settings. It is
-                encrypted and never displayed again. Your email address is taken from your OpsDesk
-                account.
-              </Typography>
-              <TextField
-                select
-                label="Email provider"
-                value={provider}
-                disabled={busy}
-                onChange={(e) => setProvider(e.target.value)}
-              >
-                {["yahoo", "icloud", "zoho"].map((p) => (
-                  <MenuItem key={p} value={p}>
-                    {labels[p]}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                label="App password"
-                type="password"
-                autoComplete="new-password"
-                value={password}
-                disabled={busy}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              <Button
-                variant="contained"
-                disabled={busy || !password.trim()}
-                onClick={() =>
-                  void run(async () => {
-                    try {
-                      await apiPost("/sending-mail/smtp", { provider, password });
-                      await load();
-                    } finally {
-                      setPassword("");
-                    }
-                  })
-                }
-              >
-                Verify and connect
-              </Button>
               {status.account && (
                 <Button
                   color="error"
@@ -189,13 +148,12 @@ export function SendingEmailPage() {
                     })
                   }
                 >
-                  Disconnect mailbox
+                  Disconnect shared mailbox
                 </Button>
               )}
               <Typography variant="caption">
-                Automatic system notifications use the OpsDesk service mailbox. Disconnecting
-                removes the credentials saved in OpsDesk; you can also revoke access in your
-                provider's account settings.
+                Disconnecting stops shared email delivery for everyone. It removes the credentials
+                saved in OpsDesk; you can also revoke access in the mailbox provider's settings.
               </Typography>
             </Stack>
           )}
