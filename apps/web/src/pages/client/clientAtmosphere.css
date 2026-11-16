@@ -1,0 +1,261 @@
+﻿.client-portal {
+  color-scheme: dark;
+  isolation: isolate;
+  background: radial-gradient(ellipse at 85% 0%, #102851 0%, transparent 45%), #050911;
+  color: #e9f3ff;
+}
+.client-portal::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(#3c79c00a 1px, transparent 1px),
+    linear-gradient(90deg, #3c79c00a 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+.client-atmosphere {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 180px;
+  margin: 0 0 24px;
+  padding: 28px 36px;
+  border: 1px solid #69b5ff38;
+  border-radius: 20px;
+  background:
+    radial-gradient(ellipse at 90% 50%, #16458066, transparent 60%),
+    linear-gradient(110deg, #0b1629, #071020);
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 #b6dfff12,
+    0 20px 50px #0003;
+}
+.client-atmosphere-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 70%;
+}
+.client-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #9ac8ff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.client-eyebrow > span:first-child {
+  width: 6px;
+  height: 6px;
+  background: #79d2ff;
+  border-radius: 50%;
+  box-shadow: 0 0 12px #45acff;
+}
+.client-eyebrow-divider {
+  opacity: 0.4;
+}
+.client-atmosphere h1 {
+  margin: 12px 0 8px;
+  font-size: clamp(21px, 2.6vw, 34px);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+}
+.client-atmosphere p {
+  margin: 0;
+  font-size: 13px;
+  color: #a6bad3;
+  line-height: 1.6;
+}
+.client-motion-control {
+  margin-top: 14px;
+  padding: 6px 10px;
+  border: 1px solid #69b5ff38;
+  border-radius: 6px;
+  background: #0b1c33;
+  color: #b5d6ff;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.client-motion-control:hover {
+  background: #19375c;
+}
+.client-motion-control:focus-visible {
+  outline: 2px solid #a1d8ff;
+  outline-offset: 4px;
+}
+.client-scene {
+  width: 220px;
+  position: relative;
+  flex: 0 0 220px;
+  height: 150px;
+  perspective: 700px;
+  pointer-events: none;
+}
+.client-cube {
+  position: absolute;
+  left: 78px;
+  top: 39px;
+  width: 66px;
+  height: 66px;
+  transform-style: preserve-3d;
+  transform: rotateX(-22deg) rotateY(35deg);
+  animation: client-cube-spin 22s linear infinite;
+}
+.client-cube-face {
+  position: absolute;
+  inset: 0;
+  border: 1px solid #8dd3ffb0;
+  background: linear-gradient(135deg, #4da1ff55, #0c367a99);
+  box-shadow: inset 0 0 18px #54aeff33;
+}
+.client-cube-face::after {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border: 1px solid #a3dfff66;
+}
+.client-cube-front {
+  transform: translateZ(33px);
+}
+.client-cube-back {
+  transform: rotateY(180deg) translateZ(33px);
+}
+.client-cube-left {
+  transform: rotateY(-90deg) translateZ(33px);
+}
+.client-cube-right {
+  transform: rotateY(90deg) translateZ(33px);
+}
+.client-cube-top {
+  transform: rotateX(90deg) translateZ(33px);
+}
+.client-cube-bottom {
+  transform: rotateX(-90deg) translateZ(33px);
+}
+.client-orbit {
+  position: absolute;
+  left: 13px;
+  top: 18px;
+  width: 194px;
+  height: 115px;
+  border: 1px solid #5eaaff66;
+  border-radius: 50%;
+  transform: rotate(-25deg);
+}
+.client-orbit-two {
+  transform: rotate(40deg);
+  border-color: #5eaaff33;
+}
+.client-scene-shadow {
+  position: absolute;
+  left: 60px;
+  bottom: 0;
+  width: 100px;
+  height: 12px;
+  background: #328aff55;
+  border-radius: 50%;
+  filter: blur(10px);
+}
+.client-scene-node {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b3e8ff;
+  box-shadow: 0 0 16px #319cff;
+  animation: client-node-float 5s ease-in-out infinite alternate;
+}
+.client-scene-node-one {
+  left: 24px;
+  top: 80px;
+}
+.client-scene-node-two {
+  right: 30px;
+  top: 25px;
+  animation-delay: -2s;
+}
+.client-atmosphere[data-motion="paused"] .client-cube,
+.client-atmosphere[data-motion="paused"] .client-scene-node {
+  animation-play-state: paused;
+}
+@keyframes client-cube-spin {
+  from {
+    transform: rotateX(-22deg) rotateY(35deg);
+  }
+  to {
+    transform: rotateX(-22deg) rotateY(395deg);
+  }
+}
+@keyframes client-node-float {
+  from {
+    transform: translateY(-5px);
+  }
+  to {
+    transform: translateY(5px);
+  }
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .client-portal main .MuiCard-root {
+    transition:
+      transform 220ms ease,
+      box-shadow 220ms ease,
+      border-color 220ms ease;
+  }
+  .client-portal main .MuiCard-root:hover {
+    transform: translateY(-3px);
+    border-color: #69b5ff66;
+    box-shadow:
+      0 16px 38px #0005,
+      0 0 24px #2382ff0c;
+  }
+  .client-portal .MuiButton-root {
+    transition:
+      background-color 180ms ease,
+      box-shadow 180ms ease;
+  }
+}
+@media (max-width: 600px) {
+  .client-atmosphere {
+    padding: 22px;
+    min-height: 175px;
+    margin-bottom: 18px;
+  }
+  .client-atmosphere-copy {
+    max-width: 100%;
+    padding-right: 15px;
+  }
+  .client-scene {
+    position: absolute;
+    right: -75px;
+    bottom: -25px;
+    opacity: 0.18;
+    transform: scale(0.8);
+  }
+  .client-atmosphere h1 {
+    max-width: 260px;
+  }
+  .client-atmosphere p {
+    max-width: 260px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .client-cube,
+  .client-scene-node {
+    animation: none;
+  }
+}
+@media print {
+  .client-portal {
+    background: white;
+    color: black;
+  }
+  .client-atmosphere {
+    display: none;
+  }
+}

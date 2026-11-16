@@ -1,11 +1,12 @@
 import { Navigate, Outlet, Link, useLocation } from "react-router-dom";
 import { AppBar, Box, Button, Stack, Toolbar, Typography } from "@mui/material";
-import { alpha } from "@mui/material/styles";
-import { AccountMenu, roleMeta } from "../../components/AccountMenu";
+import { alpha, ThemeProvider } from "@mui/material/styles";
+import { AccountMenu } from "../../components/AccountMenu";
 import { NotificationBell } from "../../components/NotificationBell";
 import { getStoredToken, signOut } from "../../api/client";
 import { decodeJwtPayload, getCurrentUserRole, passwordChangeRequired } from "../../api/jwt";
-import { theme } from "../../theme/theme";
+import { clientTheme as theme } from "./clientTheme";
+import { ClientAtmosphere } from "./ClientAtmosphere";
 
 function BrandMark() {
   return (
@@ -13,7 +14,15 @@ function BrandMark() {
       component="img"
       src="/jsan-logo.png"
       alt="JSAN"
-      sx={{ height: 24, width: 70, display: "block" }}
+      sx={{
+        height: 32,
+        width: 78,
+        objectFit: "contain",
+        p: 0.5,
+        borderRadius: 1,
+        bgcolor: "#f4f8ff",
+        display: "block",
+      }}
     />
   );
 }
@@ -57,84 +66,97 @@ export function ClientLayout() {
     location.pathname.startsWith("/client/tickets/");
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column", bgcolor: "#f5f7fa" }}>
-      <AppBar
-        position="static"
-        color="inherit"
-        elevation={0}
-        sx={{ bgcolor: "#fff", borderBottom: 1, borderColor: "divider" }}
-      >
-        <Toolbar sx={{ gap: 3, flexWrap: "wrap", py: 1.5, minHeight: "76px !important" }}>
-          <Stack spacing={0.75}>
-            <BrandMark />
-            <Typography
-              sx={{
-                color: "text.secondary",
-                fontSize: 10,
-                fontWeight: 600,
-                letterSpacing: "0.07em",
-              }}
-            >
-              JSAN &middot; SUPPORT PORTAL
-            </Typography>
-          </Stack>
-
-          <Stack direction="row" spacing={0.5}>
-            {NAV_ITEMS.map((item) => {
-              const active = location.pathname.startsWith(item.to);
-              return (
-                <Button
-                  key={item.to}
-                  component={Link}
-                  to={item.to}
-                  sx={{
-                    textTransform: "none",
-                    fontWeight: active ? 700 : 500,
-                    color: active ? theme.palette.primary.main : "text.secondary",
-                    bgcolor: active ? alpha(theme.palette.primary.main, 0.08) : "transparent",
-                    borderRadius: 2,
-                  }}
-                >
-                  {item.label}
-                </Button>
-              );
-            })}
-          </Stack>
-
-          <Box sx={{ flex: 1 }} />
-
-          {user && (
-            <NotificationBell
-              linkFor={(n) =>
-                n.entityType === "INCIDENT" ? `/client/tickets/${n.entityId}` : null
-              }
-            />
-          )}
-          {user && (
-            <AccountMenu
-              email={user.email}
-              roleLabel="Client"
-              roleColor={roleMeta("CLIENT_MANAGER_VIEWER").color}
-              onLogout={signOut}
-            />
-          )}
-        </Toolbar>
-      </AppBar>
-
+    <ThemeProvider theme={theme}>
       <Box
-        component="main"
-        sx={{
-          width: "100%",
-          maxWidth: isFullScreenPage ? "none" : 880,
-          mx: "auto",
-          flex: isFullScreenPage ? 1 : undefined,
-          p: isFullScreenPage ? { xs: 1.5, sm: 3 } : { xs: 2, sm: 4 },
-          display: isFullScreenPage ? "flex" : undefined,
-          flexDirection: isFullScreenPage ? "column" : undefined,
-        }}
+        className="client-portal"
+        sx={{ minHeight: "100vh", display: "flex", flexDirection: "column", color: "text.primary" }}
       >
-        <Outlet />
+        <AppBar
+          position="static"
+          color="inherit"
+          elevation={0}
+          sx={{ bgcolor: "rgba(5, 9, 17, 0.92)", borderBottom: 1, borderColor: "divider" }}
+        >
+          <Toolbar sx={{ gap: 3, flexWrap: "wrap", py: 1.5, minHeight: "76px !important" }}>
+            <Stack spacing={0.75}>
+              <BrandMark />
+              <Typography
+                sx={{
+                  color: "text.secondary",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: "0.07em",
+                }}
+              >
+                JSAN &middot; SUPPORT PORTAL
+              </Typography>
+            </Stack>
+
+            <Stack
+              component="nav"
+              aria-label="Client navigation"
+              direction="row"
+              spacing={0.5}
+              sx={{ order: { xs: 3, sm: 0 }, width: { xs: "100%", sm: "auto" }, overflowX: "auto" }}
+            >
+              {NAV_ITEMS.map((item) => {
+                const active = location.pathname.startsWith(item.to);
+                return (
+                  <Button
+                    key={item.to}
+                    component={Link}
+                    to={item.to}
+                    aria-current={active ? "page" : undefined}
+                    sx={{
+                      textTransform: "none",
+                      fontWeight: active ? 700 : 500,
+                      color: active ? theme.palette.primary.main : "text.secondary",
+                      bgcolor: active ? alpha(theme.palette.primary.main, 0.08) : "transparent",
+                      borderRadius: 2,
+                    }}
+                  >
+                    {item.label}
+                  </Button>
+                );
+              })}
+            </Stack>
+
+            <Box sx={{ flex: 1 }} />
+
+            {user && (
+              <NotificationBell
+                linkFor={(n) =>
+                  n.entityType === "INCIDENT" ? `/client/tickets/${n.entityId}` : null
+                }
+              />
+            )}
+            {user && (
+              <AccountMenu
+                email={user.email}
+                roleLabel="Client"
+                roleColor="#9ac8ff"
+                onLogout={signOut}
+              />
+            )}
+          </Toolbar>
+        </AppBar>
+
+        <Box
+          component="main"
+          sx={{
+            width: "100%",
+            maxWidth: isFullScreenPage ? "none" : 880,
+            mx: "auto",
+            flex: isFullScreenPage ? 1 : undefined,
+            p: isFullScreenPage ? { xs: 1.5, sm: 3 } : { xs: 2, sm: 4 },
+            display: isFullScreenPage ? "flex" : undefined,
+            flexDirection: isFullScreenPage ? "column" : undefined,
+          }}
+        >
+          <ClientAtmosphere pathname={location.pathname} />
+          <Outlet />
+        </Box>
       </Box>
-    </Box>
+    </ThemeProvider>
   );
 }
