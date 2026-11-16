@@ -6,7 +6,7 @@ import nodemailer from "nodemailer";
  * this contract; `createMailTransportFromEnv` picks SMTP when configured.
  */
 export interface MailTransport {
-  send(email: RenderedEmail): Promise<void>;
+  send(email: RenderedEmail, senderUserId?: string): Promise<void>;
 }
 
 /**

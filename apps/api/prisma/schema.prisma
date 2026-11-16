@@ -186,6 +186,8 @@ model User {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
+  sendingAccount      SendingAccount?
+  mailAuthorizations  MailAuthorization[]
   incidentsOwned      Incident[]           @relation("IncidentOwner")
   incidentsReported   Incident[]           @relation("IncidentReportedBy")
   worklogs            Worklog[]
@@ -1318,4 +1320,30 @@ model Attachment {
   @@index([entityType, entityId])
   @@index([commentId])
   @@map("attachments")
+}
+
+/// Credentials never appear in notification jobs or public API responses.
+model SendingAccount {
+  userId      String   @id @map("user_id")
+  provider    String
+  email       String
+  credentials String
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sending_accounts")
+}
+
+model MailAuthorization {
+  usedAt         DateTime? @map("used_at")
+  stateHash      String    @id @map("state_hash")
+  userId         String    @map("user_id")
+  sessionVersion Int       @map("session_version")
+  provider       String
+  verifier       String
+  expiresAt      DateTime  @map("expires_at")
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("mail_authorizations")
 }

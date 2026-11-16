@@ -36,6 +36,8 @@ export interface EntityRef {
 
 /** Who changed a ticket and when ("Rahul Sharma (Engineer) ... on <time>"). */
 export interface TicketActor {
+  /** Stable identity for authorized per-user delivery; never accepted from the browser. */
+  userId?: string;
   name: string;
   /** Plain-language role, e.g. "Client", "Service desk", "Engineer". */
   role?: string;

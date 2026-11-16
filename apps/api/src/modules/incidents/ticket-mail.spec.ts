@@ -114,7 +114,12 @@ describe("ticketEntityRef", () => {
         status: "In Progress",
         assignee: "Rahul",
         assigneeGroup: "Infra team",
-        updatedBy: { name: "Jane", role: "Client", at: "2026-10-22T11:10:00.000Z" },
+        updatedBy: {
+          userId: "client",
+          name: "Jane",
+          role: "Client",
+          at: "2026-10-22T11:10:00.000Z",
+        },
       },
     });
   });

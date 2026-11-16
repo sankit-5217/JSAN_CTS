@@ -35,6 +35,30 @@ describe("processNotificationJob", () => {
     expect(sent[0].headers["X-OpsDesk-Event"]).toBe("SLA_BREACHED");
   });
 
+  it("passes the ticket update actor's stable identity to delivery", async () => {
+    const transport = { send: jest.fn().mockResolvedValue(undefined) };
+    await processNotificationJob(
+      {
+        event: {
+          kind: "INCIDENT_COMMENT_ADDED",
+          entity: {
+            key: "INC-1042",
+            title: "Issue",
+            ticket: { updatedBy: { userId: "actor-id", name: "Jane", at: "2026-11-16T08:00:00Z" } },
+          },
+          author: { email: "jane@example.com" },
+          body: "Update",
+        },
+        recipients: { to: [{ email: "recipient@example.com" }] },
+      },
+      transport,
+    );
+    expect(transport.send).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: expect.stringContaining("INC-1042") }),
+      "actor-id",
+    );
+  });
+
   it("passes render options through (portal link)", async () => {
     const { sent, transport } = collectingTransport();
     await processNotificationJob(

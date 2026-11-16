@@ -1,3 +1,4 @@
+import { SendingMailModule } from "./modules/sending-mail/sending-mail.module";
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ConfigModule, ConfigService } from "@nestjs/config";
@@ -47,6 +48,7 @@ import { AuditModule } from "./modules/audit/audit.module";
     HealthModule,
     // --- Dev A: Platform & Ticketing Core ---
     AuthModule,
+    SendingMailModule,
     SitesModule,
     CmdbModule,
     IncidentsModule,

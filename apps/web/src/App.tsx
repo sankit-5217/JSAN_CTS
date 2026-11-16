@@ -1,3 +1,4 @@
+import { SendingEmailPage } from "./pages/SendingEmailPage";
 import { useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route, Routes, Link, useLocation } from "react-router-dom";
 import {
@@ -443,6 +444,7 @@ function AuthenticatedLayout() {
 export function App() {
   return (
     <Routes>
+      <Route path="/account/email" element={<SendingEmailPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/auth/change-password" element={<ChangePasswordPage />} />
       <Route path="/auth/set-password" element={<SetPasswordPage />} />

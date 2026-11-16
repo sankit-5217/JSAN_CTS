@@ -105,6 +105,7 @@ export async function ticketEntityRef(
       updatedBy: actorName
         ? {
             name: actorName,
+            userId: actor ? (by?.userId ?? undefined) : undefined,
             role: actor?.role ? ROLE_LABEL[actor.role] : undefined,
             at: (by?.at ?? new Date()).toISOString(),
           }
