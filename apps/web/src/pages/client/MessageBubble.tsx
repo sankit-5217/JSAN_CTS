@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Box, Button, Chip, Stack, Typography } from "@mui/material";
+import { Box, Chip, IconButton, Stack, Tooltip, Typography } from "@mui/material";
 import AttachFileOutlinedIcon from "@mui/icons-material/AttachFileOutlined";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
@@ -145,7 +145,7 @@ export function ConversationScroll({ count, children }: { count: number; childre
 }
 
 /**
- * Files on a ticket, each with View (opens in the browser) and Download
+ * Files on a ticket, each with View (previews on the page) and Download
  * (saves it). Used inside messages and under the report's Description.
  */
 export function MessageFiles({
@@ -157,7 +157,7 @@ export function MessageFiles({
   mine?: boolean;
   onOpen: (attachmentId: string, disposition: AttachmentDisposition) => void;
 }) {
-  const buttonSx = mine ? { color: "inherit", borderColor: "currentColor" } : {};
+  const buttonSx = mine ? { color: "inherit" } : {};
   return (
     <Stack spacing={0.75} sx={{ mt: 1 }}>
       {files.map((a) => (
@@ -173,24 +173,26 @@ export function MessageFiles({
           <Typography variant="body2" sx={{ flex: 1, minWidth: 120, overflowWrap: "anywhere" }}>
             {attachmentName(a)} ({(a.sizeBytes / 1024).toFixed(1)} KB)
           </Typography>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<VisibilityOutlinedIcon fontSize="small" />}
-            onClick={() => onOpen(a.id, "inline")}
-            sx={{ textTransform: "none", ...buttonSx }}
-          >
-            View
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<FileDownloadOutlinedIcon fontSize="small" />}
-            onClick={() => onOpen(a.id, "attachment")}
-            sx={{ textTransform: "none", ...buttonSx }}
-          >
-            Download
-          </Button>
+          <Tooltip title="View">
+            <IconButton
+              size="small"
+              aria-label={`View ${attachmentName(a)}`}
+              onClick={() => onOpen(a.id, "inline")}
+              sx={buttonSx}
+            >
+              <VisibilityOutlinedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Download">
+            <IconButton
+              size="small"
+              aria-label={`Download ${attachmentName(a)}`}
+              onClick={() => onOpen(a.id, "attachment")}
+              sx={buttonSx}
+            >
+              <FileDownloadOutlinedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
         </Stack>
       ))}
     </Stack>

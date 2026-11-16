@@ -1,3 +1,4 @@
+import { useAttachmentPreview } from "./AttachmentPreview";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router-dom";
 import {
@@ -38,7 +39,6 @@ import {
 import { FieldRow, IssueTemplateForm, type TemplateGroup } from "./IssueTemplateForm";
 import { templateStatusText } from "./issueStatus";
 import {
-  openAttachment,
   sendMessage,
   type AttachmentDisposition,
   type ConversationMessage,
@@ -202,16 +202,7 @@ export function TicketDetailPage() {
     }
   };
 
-  // View opens a file in the browser, Download saves it.
-  const openFile = async (attachmentId: string, disposition: AttachmentDisposition) => {
-    if (!id) return;
-    setActionError(null);
-    try {
-      await openAttachment(id, attachmentId, disposition);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
-    }
-  };
+  const { openFile, previewDialog } = useAttachmentPreview(id, attachments, setActionError);
 
   const focusReply = () => {
     replyRef.current?.focus();
@@ -346,6 +337,7 @@ export function TicketDetailPage() {
 
   return (
     <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
+      {previewDialog}
       <Link component={RouterLink} to="/client/tickets" sx={{ fontSize: 13 }}>
         ← My tickets
       </Link>

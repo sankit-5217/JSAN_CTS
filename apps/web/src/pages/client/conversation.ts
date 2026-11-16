@@ -43,22 +43,17 @@ export function attachmentName(a: Pick<TicketAttachment, "objectKey">): string {
 /** "inline" = View in the browser, "attachment" = Download. */
 export type AttachmentDisposition = "inline" | "attachment";
 
-/**
- * Fetches a short-lived signed link for a ticket file and either opens it
- * in a new tab (View) or saves it under its original name (Download). The
- * link carries the disposition, so the browser does the rest.
- */
+/** Returns a signed preview URL for View, or starts a Download on the current page. */
 export async function openAttachment(
   incidentId: string,
   attachmentId: string,
   disposition: AttachmentDisposition,
-): Promise<void> {
+): Promise<string | void> {
   const { url } = await apiGet<{ url: string }>(
     `/incidents/${incidentId}/attachments/${attachmentId}/download?disposition=${disposition}`,
   );
   if (disposition === "inline") {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return;
+    return url;
   }
   // An attachment response downloads without leaving the page.
   const link = document.createElement("a");

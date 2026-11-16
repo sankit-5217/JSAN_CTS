@@ -1,3 +1,4 @@
+import { useAttachmentPreview } from "./client/AttachmentPreview";
 import { useCallback, useEffect, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import {
@@ -50,9 +51,7 @@ import {
 import { FieldRow, IssueTemplateForm, type TemplateGroup } from "./client/IssueTemplateForm";
 import { templateStatusText, type TemplateStatusOption } from "./client/issueStatus";
 import {
-  openAttachment,
   sendMessage,
-  type AttachmentDisposition,
   type ConversationMessage,
   type TicketAttachment,
 } from "./client/conversation";
@@ -1229,16 +1228,7 @@ export function IncidentDetailPage() {
   };
 
   // --- Files -------------------------------------------------------------
-  // View opens a file in the browser, Download saves it.
-  const openFile = async (attachmentId: string, disposition: AttachmentDisposition) => {
-    if (!id) return;
-    setActionError(null);
-    try {
-      await openAttachment(id, attachmentId, disposition);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
-    }
-  };
+  const { openFile, previewDialog } = useAttachmentPreview(id, attachments, setActionError);
   const reportFiles = attachments.filter((a) => !a.commentId);
 
   if (error) {
@@ -1368,6 +1358,7 @@ export function IncidentDetailPage() {
 
   return (
     <Box>
+      {previewDialog}
       <CustomerStatusBanner incident={incident} progress={customerProgress} />
       {possibleDuplicates.length > 0 && (
         <Alert severity="warning" sx={{ mb: 2 }}>
