@@ -64,13 +64,16 @@ values use Railway references so they follow domain/credential changes:
   `WEB_APP_URL=https://${{web.RAILWAY_PUBLIC_DOMAIN}}`, `S3_ENDPOINT`, `S3_REGION`,
   `S3_BUCKET`, `S3_FORCE_PATH_STYLE=false`, and secrets `JWT_SECRET`,
   `INTEGRATION_SECRETS_KEY`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`.
-- **API and worker shared email**: `MAIL_SHARED_SENDER_EMAIL=sankit@jsanconsulting.com`
-  and matching secret `MAIL_WORKER_KEY`. Worker also needs `NODE_ENV=production`,
-  `REDIS_URL=${{Redis.REDIS_URL}}` and `OPSDESK_API_URL` ending in `/api/v1`.
-  API owns `MAIL_MICROSOFT_CLIENT_ID` and `MAIL_MICROSOFT_CLIENT_SECRET`.
-  A super admin must authorize the shared mailbox once. See
-  [shared sending setup](connected-sending-accounts.md). Legacy worker SMTP
-  variables are unused while shared delivery is enabled.
+- **Personal and system email**: set a matching secret `MAIL_WORKER_KEY` on API
+  and worker. Worker also needs `NODE_ENV=production`,
+  `REDIS_URL=${{Redis.REDIS_URL}}`, `OPSDESK_API_URL` ending in `/api/v1`, and
+  SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`)
+  for system-generated mail. Use a service address for `MAIL_FROM`. API owns
+  `MAIL_GOOGLE_CLIENT_ID` / `MAIL_GOOGLE_CLIENT_SECRET` and/or
+  `MAIL_MICROSOFT_CLIENT_ID` / `MAIL_MICROSOFT_CLIENT_SECRET`, plus
+  `INTEGRATION_SECRETS_KEY`. Each user connects their own registered mailbox in
+  Account → Sending email; see [personal sending mailboxes](connected-sending-accounts.md).
+  Remove the old `MAIL_SHARED_SENDER_EMAIL` variable.
 - **zabbix-server / zabbix-web**: `DB_SERVER_HOST/PORT`, `POSTGRES_USER/PASSWORD/DB`
   as references to `zabbix-db`; zabbix-web also `ZBX_SERVER_HOST=zabbix-server.railway.internal`,
   `PHP_TZ=Asia/Kolkata`, `PORT=8080`. zabbix-agent: `ZBX_HOSTNAME=Zabbix server`,

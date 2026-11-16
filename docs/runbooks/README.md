@@ -313,7 +313,10 @@ on the **worker**: `SMTP_HOST`, `SMTP_PORT` (587 STARTTLS or 465 with
 `MAIL_FROM`. The API needs `REDIS_URL` to queue emails. Without SMTP the
 worker prints emails to its log; without Redis the admin screen says so and
 shows the link to copy and send by hand. Verify: send yourself a reset link
-from the login page.
+from the login page. For ticket and record notifications authored by a user,
+each user must connect their own registered mailbox; see
+[personal sending mailboxes](connected-sending-accounts.md). The worker SMTP
+sender is reserved for account and automated system emails.
 
 **Refused sign-in**: "Invalid email or password" is the same answer for a
 wrong password and an unknown email (on purpose). "Too many failed attempts"

@@ -196,7 +196,7 @@ export class RisksService {
       return u;
     });
 
-    await this.notifyOwnerOfStatusChange(updated, from, to);
+    await this.notifyOwnerOfStatusChange(updated, from, to, actor.actorId);
     return this.decorate(updated);
   }
 
@@ -206,6 +206,7 @@ export class RisksService {
     risk: { id: string; ownerId: string | null; description: string; mitigation: string | null },
     from: RiskStatus,
     to: RiskStatus,
+    senderUserId: string,
   ): Promise<void> {
     try {
       if (!risk.ownerId) {
@@ -228,6 +229,7 @@ export class RisksService {
             ...(risk.mitigation ? { note: risk.mitigation } : {}),
           },
           recipients: { to: [{ name: owner.displayName, email: owner.email }] },
+          senderUserId,
         },
         `RISK_STATUS_CHANGED:${risk.id}:${to}`,
       );

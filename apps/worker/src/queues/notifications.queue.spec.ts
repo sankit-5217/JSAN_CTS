@@ -59,6 +59,25 @@ describe("processNotificationJob", () => {
     );
   });
 
+  it("uses the explicit actor for non-ticket user-triggered mail", async () => {
+    const transport = { send: jest.fn().mockResolvedValue(undefined) };
+    await processNotificationJob(
+      {
+        event: {
+          kind: "CHANGE_APPROVED",
+          entity: { key: "CHG-8", title: "swap PSU" },
+          approver: { email: "lead@corp.example" },
+          windowStart: "2026-09-10T22:00:00.000Z",
+          windowEnd: "2026-09-10T23:00:00.000Z",
+        },
+        recipients: { to: [{ email: "eng@corp.example" }] },
+        senderUserId: "approver-id",
+      },
+      transport,
+    );
+    expect(transport.send).toHaveBeenCalledWith(expect.anything(), "approver-id");
+  });
+
   it("passes render options through (portal link)", async () => {
     const { sent, transport } = collectingTransport();
     await processNotificationJob(

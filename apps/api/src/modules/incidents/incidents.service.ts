@@ -1127,7 +1127,11 @@ export class IncidentsService {
       }
       const entity = await ticketEntityRef(this.prisma, incident, by);
       await this.notifications.enqueue(
-        { event: { ...event, entity } as NotificationEvent, recipients },
+        {
+          event: { ...event, entity } as NotificationEvent,
+          recipients,
+          ...(by.userId ? { senderUserId: by.userId } : {}),
+        },
         opts.jobId,
       );
     } catch (err) {

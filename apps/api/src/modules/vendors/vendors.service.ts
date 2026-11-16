@@ -215,7 +215,7 @@ export class VendorsService {
       return created;
     });
 
-    await this.notifyLinkedIncidentOwner(vendorCase, dto.note);
+    await this.notifyLinkedIncidentOwner(vendorCase, dto.note, actor.actorId);
     return note;
   }
 
@@ -224,6 +224,7 @@ export class VendorsService {
   private async notifyLinkedIncidentOwner(
     vendorCase: { id: string; vendorCaseNo: string; linkedIncidentId: string | null },
     note: string,
+    senderUserId: string,
   ): Promise<void> {
     try {
       if (!vendorCase.linkedIncidentId) {
@@ -252,6 +253,7 @@ export class VendorsService {
           note,
         },
         recipients: { to: [{ name: owner.displayName, email: owner.email }] },
+        senderUserId,
       });
     } catch (err) {
       this.logger.warn(

@@ -21,26 +21,21 @@ vi.mock("react-router-dom", () => ({
   useSearchParams: () => [new URLSearchParams()],
 }));
 
-describe("shared sender setup access", () => {
+describe("personal sender setup access", () => {
   beforeEach(() => {
     auth.role = "SUPER_ADMIN";
     auth.token = "session";
   });
-  it.each(["CLIENT_MANAGER_VIEWER", "SERVICE_DESK_NOC", "SITE_ENGINEER"])(
-    "does not ask %s to connect a sending account",
+  it.each(["CLIENT_MANAGER_VIEWER", "SITE_ENGINEER", "SERVICE_DESK_NOC", "SUPER_ADMIN"])(
+    "lets a %s connect their own registered email",
     (role) => {
       auth.role = role;
       const html = renderToStaticMarkup(<SendingEmailPage />);
-      expect(html).toContain("data-redirect=");
-      expect(html).not.toContain("Authorize the shared mailbox");
+      expect(html).toContain("Your sending email");
+      expect(html).toContain("Each user connects their own mailbox.");
+      expect(html).not.toContain("data-redirect=");
     },
   );
-  it("offers one shared authorization to the super admin", () => {
-    const html = renderToStaticMarkup(<SendingEmailPage />);
-    expect(html).toContain("Shared sending email");
-    expect(html).toContain("Users do not need to connect their own email.");
-    expect(html).not.toContain("data-redirect=");
-  });
   it("requires sign-in before mailbox setup", () => {
     auth.token = "";
     expect(renderToStaticMarkup(<SendingEmailPage />)).toContain('data-redirect="/login"');

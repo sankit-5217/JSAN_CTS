@@ -10,6 +10,7 @@ export interface NotificationJob {
   event: NotificationEvent;
   recipients: { to: Party[]; cc?: Party[] };
   options?: RenderOptions;
+  senderUserId?: string;
 }
 
 /**
