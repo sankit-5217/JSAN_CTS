@@ -127,7 +127,7 @@ export function ReportIssuePage() {
       helperText={
         sites.length === 0
           ? "Your account isn't linked to a site yet. Ask your JSAN contact."
-          : "Can't be changed once the ticket is raised"
+          : "Fixed after submission"
       }
       SelectProps={{
         displayEmpty: true,
@@ -191,12 +191,11 @@ export function ReportIssuePage() {
 
   return (
     <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
-      <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
+      <Typography component="h1" variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
         Report an issue
       </Typography>
-      <Typography color="text.secondary" sx={{ mb: 3 }}>
-        Pick a template to start from a draft, fill in what you can, and attach any logs,
-        screenshots or videos. The service desk picks it up from there.
+      <Typography color="text.secondary" sx={{ mb: 1.5 }}>
+        Describe the issue, choose its details and attach any supporting files.
       </Typography>
 
       <Card
@@ -210,7 +209,7 @@ export function ReportIssuePage() {
           borderColor: "divider",
         }}
       >
-        <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+        <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
@@ -218,6 +217,7 @@ export function ReportIssuePage() {
           )}
 
           <IssueTemplateForm
+            compact
             mode="create"
             catalog={catalog}
             draft={draft}
@@ -227,13 +227,7 @@ export function ReportIssuePage() {
             site={sitePicker}
             attachments={attachmentPicker}
             status={
-              <TextField
-                size="small"
-                fullWidth
-                value="New"
-                InputProps={{ readOnly: true }}
-                helperText="Set by the service desk as work progresses"
-              />
+              <TextField size="small" fullWidth value="New" InputProps={{ readOnly: true }} />
             }
           />
 
@@ -241,11 +235,11 @@ export function ReportIssuePage() {
             direction={{ xs: "column", sm: "row" }}
             spacing={2}
             alignItems={{ sm: "center" }}
-            sx={{ mt: 3 }}
+            sx={{ mt: 1.5, pt: 1.5, borderTop: 1, borderColor: "divider" }}
           >
             <Button
               variant="contained"
-              size="large"
+              size="medium"
               disabled={!canSubmit}
               onClick={handleSubmit}
               sx={{ textTransform: "none", fontWeight: 600, px: 4 }}

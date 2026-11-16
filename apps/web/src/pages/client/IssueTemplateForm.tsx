@@ -44,7 +44,7 @@ export function FieldRow({
 }) {
   if (stacked) {
     return (
-      <Stack spacing={0.5}>
+      <Stack spacing={0.5} sx={{ minWidth: 0 }}>
         <Typography sx={{ fontWeight: 700, fontSize: 13 }}>{label}</Typography>
         <Box sx={{ minWidth: 0 }}>{children}</Box>
       </Stack>
@@ -82,6 +82,8 @@ function withCurrent<T extends { value: string; label: string }>(
 }
 
 interface IssueTemplateFormProps {
+  /** Balanced columns and a field grid for the client's new-report workspace. */
+  compact?: boolean;
   catalog: IssueCatalog;
   draft: ReportDraft;
   update: DraftUpdate;
@@ -119,6 +121,7 @@ interface IssueTemplateFormProps {
  * the admin maintains; nothing here is hard-coded.
  */
 export function IssueTemplateForm({
+  compact = false,
   catalog,
   draft,
   update,
@@ -220,11 +223,10 @@ export function IssueTemplateForm({
   const templateOptions = catalog.templates.map((t) => ({ value: t.id, label: t.name }));
 
   return (
-    // Ten columns so the split lands on 80 / 20.
-    <Grid container spacing={3} columns={10}>
+    <Grid container spacing={compact ? 2 : 3} columns={compact ? 12 : 10}>
       {/* Left: what happened */}
-      <Grid item xs={10} md={8}>
-        <Stack spacing={2}>
+      <Grid item xs={compact ? 12 : 10} md={compact ? 5 : 8}>
+        <Stack spacing={compact ? 1.5 : 2}>
           {/* A template only drafts a new report. Once the ticket is raised
               no role gets it back (the issue type stays editable on its own). */}
           {mode === "create" && (
@@ -292,7 +294,8 @@ export function IssueTemplateForm({
               <TextField
                 fullWidth
                 multiline
-                minRows={14}
+                minRows={compact ? 5 : 14}
+                maxRows={compact ? 5 : undefined}
                 placeholder="Which rack or device, what you can see (lights, alarms, error messages), when it started, what you've already tried"
                 value={draft.description}
                 onChange={(e) => set("description", e.target.value)}
@@ -310,8 +313,25 @@ export function IssueTemplateForm({
       </Grid>
 
       {/* Right: the classification sheet */}
-      <Grid item xs={10} md={2}>
-        <Stack spacing={1.5}>
+      <Grid item xs={compact ? 12 : 10} md={compact ? 7 : 2}>
+        <Stack
+          spacing={compact ? 0 : 1.5}
+          sx={
+            compact
+              ? {
+                  display: "grid",
+                  gridTemplateColumns: {
+                    xs: "minmax(0, 1fr)",
+                    sm: "repeat(2, minmax(0, 1fr))",
+                    lg: "repeat(3, minmax(0, 1fr))",
+                  },
+                  gap: 1.25,
+                  alignItems: "start",
+                  "& .MuiFormHelperText-root": { mx: 0, mt: 0.25, lineHeight: 1.3 },
+                }
+              : undefined
+          }
+        >
           {site && (
             <FieldRow stacked label="Site">
               {site}

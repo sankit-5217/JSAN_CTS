@@ -37,7 +37,7 @@ export function ClientAtmosphere({ pathname }: { pathname: string }) {
         : SECTIONS.home;
   return (
     <section
-      className="client-atmosphere"
+      className={`client-atmosphere${pathname === "/client/report" ? " client-atmosphere-compact" : ""}`}
       data-motion={paused || reduced ? "paused" : "running"}
       aria-label="Client workspace"
     >
@@ -45,8 +45,12 @@ export function ClientAtmosphere({ pathname }: { pathname: string }) {
         <div className="client-eyebrow">
           <span /> CLIENT PORTAL <span className="client-eyebrow-divider">/</span> {section.label}
         </div>
-        <h1>{section.title}</h1>
-        <p>{section.detail}</p>
+        {pathname !== "/client/report" && (
+          <>
+            <h1>{section.title}</h1>
+            <p>{section.detail}</p>
+          </>
+        )}
         {!reduced && (
           <button
             className="client-motion-control"

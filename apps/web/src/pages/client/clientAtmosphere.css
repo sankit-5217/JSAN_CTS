@@ -259,3 +259,35 @@
     display: none;
   }
 }
+
+/* Keep the report's working fields above the fold instead of a large hero. */
+.client-atmosphere.client-atmosphere-compact {
+  min-height: 56px;
+  flex-shrink: 0;
+  padding: 12px 20px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+}
+.client-atmosphere-compact .client-atmosphere-copy {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  max-width: calc(100% - 80px);
+}
+.client-atmosphere-compact .client-motion-control {
+  margin-top: 0;
+}
+.client-atmosphere-compact .client-scene {
+  position: absolute;
+  right: -45px;
+  top: -48px;
+  transform: scale(0.45);
+  opacity: 0.65;
+}
+@media (max-width: 600px) {
+  .client-atmosphere-compact .client-atmosphere-copy {
+    flex-wrap: wrap;
+    gap: 8px;
+    max-width: 100%;
+  }
+}

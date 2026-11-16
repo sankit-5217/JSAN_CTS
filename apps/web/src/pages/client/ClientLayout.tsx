@@ -148,7 +148,12 @@ export function ClientLayout() {
             maxWidth: isFullScreenPage ? "none" : 880,
             mx: "auto",
             flex: isFullScreenPage ? 1 : undefined,
-            p: isFullScreenPage ? { xs: 1.5, sm: 3 } : { xs: 2, sm: 4 },
+            p:
+              location.pathname === "/client/report"
+                ? { xs: 1.5, sm: 2 }
+                : isFullScreenPage
+                  ? { xs: 1.5, sm: 3 }
+                  : { xs: 2, sm: 4 },
             display: isFullScreenPage ? "flex" : undefined,
             flexDirection: isFullScreenPage ? "column" : undefined,
           }}
