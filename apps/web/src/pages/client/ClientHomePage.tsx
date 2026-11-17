@@ -1,3 +1,4 @@
+import { SlaBadge } from "./SlaBadge";
 import { useEffect, useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import {
@@ -6,7 +7,6 @@ import {
   Button,
   Card,
   CardContent,
-  Chip,
   Grid2 as Grid,
   Link,
   Stack,
@@ -18,7 +18,7 @@ import ChatOutlinedIcon from "@mui/icons-material/ChatOutlined";
 import TaskAltOutlinedIcon from "@mui/icons-material/TaskAltOutlined";
 import { apiGet, getStoredToken } from "../../api/client";
 import { decodeJwtPayload } from "../../api/jwt";
-import { SLA_COLOR, SLA_LABEL, useClientPortal, type SlaClockState } from "./clientPortal";
+import { SLA_LABEL, useClientPortal, type SlaClockState } from "./clientPortal";
 import { isFinished, needsYou } from "./clientTicket";
 import { TicketRow, type ClientIncident } from "./MyTicketsPage";
 import { SitePanel } from "./SitePanel";
@@ -145,13 +145,7 @@ export function ClientHomePage() {
             Service targets on your open tickets:
           </Typography>
           {slaSummary.map(([state, n]) => (
-            <Chip
-              key={state}
-              size="small"
-              variant="outlined"
-              color={SLA_COLOR[state]}
-              label={`${n} ${SLA_LABEL[state].toLowerCase()}`}
-            />
+            <SlaBadge key={state} state={state} label={`${n} ${SLA_LABEL[state].toLowerCase()}`} />
           ))}
         </Stack>
       )}

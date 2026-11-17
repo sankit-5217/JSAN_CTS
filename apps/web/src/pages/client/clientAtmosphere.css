@@ -262,9 +262,9 @@
 
 /* Keep the report's working fields above the fold instead of a large hero. */
 .client-atmosphere.client-atmosphere-compact {
-  min-height: 56px;
+  min-height: 48px;
   flex-shrink: 0;
-  padding: 12px 20px;
+  padding: 8px 16px;
   margin-bottom: 12px;
   border-radius: 12px;
 }
@@ -290,4 +290,11 @@
     gap: 8px;
     max-width: 100%;
   }
+}
+
+.client-atmosphere-compact h1.client-eyebrow {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
 }

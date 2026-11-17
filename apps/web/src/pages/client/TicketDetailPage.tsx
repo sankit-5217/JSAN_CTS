@@ -1,3 +1,4 @@
+import { SlaBadge } from "./SlaBadge";
 import { useAttachmentPreview } from "./AttachmentPreview";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router-dom";
@@ -58,14 +59,7 @@ import {
   STATUS_LABEL,
   type TicketProgress,
 } from "./clientTicket";
-import {
-  describeActivity,
-  describeClock,
-  SLA_COLOR,
-  SLA_LABEL,
-  useClientPortal,
-  type SlaStatus,
-} from "./clientPortal";
+import { describeActivity, describeClock, useClientPortal, type SlaStatus } from "./clientPortal";
 import { SiteContacts } from "./SitePanel";
 import { formatDateTime } from "../../time/clock";
 
@@ -543,6 +537,8 @@ function TicketReportEditor({
           </Alert>
         )}
         <IssueTemplateForm
+          groupedDetails
+          ticketNumber={incident.incidentNo}
           mode="edit"
           catalog={catalog}
           draft={draft}
@@ -644,11 +640,7 @@ function SlaPanel({ sla }: { sla: SlaStatus }) {
             <Typography variant="body2" sx={{ fontWeight: 700 }}>
               {row.label} target
             </Typography>
-            <Chip
-              size="small"
-              color={SLA_COLOR[row.clock.state]}
-              label={SLA_LABEL[row.clock.state]}
-            />
+            <SlaBadge state={row.clock.state} />
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
             {describeClock(row.kind, row.clock)}

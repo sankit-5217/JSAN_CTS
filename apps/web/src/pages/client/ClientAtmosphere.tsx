@@ -26,6 +26,7 @@ const SECTIONS = {
 };
 
 export function ClientAtmosphere({ pathname }: { pathname: string }) {
+  const Eyebrow = pathname === "/client/report" ? "h1" : "div";
   const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
   const [paused, setPaused] = useState(false);
   const section = pathname.startsWith("/client/tickets/")
@@ -42,9 +43,9 @@ export function ClientAtmosphere({ pathname }: { pathname: string }) {
       aria-label="Client workspace"
     >
       <div className="client-atmosphere-copy">
-        <div className="client-eyebrow">
+        <Eyebrow className="client-eyebrow">
           <span /> CLIENT PORTAL <span className="client-eyebrow-divider">/</span> {section.label}
-        </div>
+        </Eyebrow>
         {pathname !== "/client/report" && (
           <>
             <h1>{section.title}</h1>

@@ -77,7 +77,14 @@ export function ClientLayout() {
           elevation={0}
           sx={{ bgcolor: "rgba(5, 9, 17, 0.92)", borderBottom: 1, borderColor: "divider" }}
         >
-          <Toolbar sx={{ gap: 3, flexWrap: "wrap", py: 1.5, minHeight: "76px !important" }}>
+          <Toolbar
+            sx={{
+              gap: 3,
+              flexWrap: "wrap",
+              py: location.pathname === "/client/report" ? 1 : 1.5,
+              minHeight: "76px !important",
+            }}
+          >
             <Stack spacing={0.75}>
               <BrandMark />
               <Typography
@@ -150,7 +157,7 @@ export function ClientLayout() {
             flex: isFullScreenPage ? 1 : undefined,
             p:
               location.pathname === "/client/report"
-                ? { xs: 1.5, sm: 2 }
+                ? { xs: 1.5, sm: 1.5 }
                 : isFullScreenPage
                   ? { xs: 1.5, sm: 3 }
                   : { xs: 2, sm: 4 },

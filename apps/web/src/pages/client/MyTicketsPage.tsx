@@ -1,3 +1,4 @@
+import { SlaBadge } from "./SlaBadge";
 import { useEffect, useMemo, useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import {
@@ -23,13 +24,7 @@ import {
   STATUS_COLOR,
   STATUS_LABEL,
 } from "./clientTicket";
-import {
-  describeActivity,
-  SLA_COLOR,
-  SLA_LABEL,
-  useClientPortal,
-  type PortalTicket,
-} from "./clientPortal";
+import { describeActivity, SLA_LABEL, useClientPortal, type PortalTicket } from "./clientPortal";
 import { useAnsweredResolutions } from "./useAnsweredResolutions";
 
 export interface ClientIncident {
@@ -227,14 +222,7 @@ export function TicketRow({
               </Typography>
             )}
           </Box>
-          {sla && (
-            <Chip
-              size="small"
-              variant="outlined"
-              color={SLA_COLOR[sla.overall]}
-              label={`SLA: ${SLA_LABEL[sla.overall]}`}
-            />
-          )}
+          {sla && <SlaBadge state={sla.overall} label={`SLA: ${SLA_LABEL[sla.overall]}`} />}
           <Chip
             size="small"
             label={PRIORITY_LABEL[inc.priority]}

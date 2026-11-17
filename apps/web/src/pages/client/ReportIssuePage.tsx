@@ -191,13 +191,6 @@ export function ReportIssuePage() {
 
   return (
     <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
-      <Typography component="h1" variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
-        Report an issue
-      </Typography>
-      <Typography color="text.secondary" sx={{ mb: 1.5 }}>
-        Describe the issue, choose its details and attach any supporting files.
-      </Typography>
-
       <Card
         elevation={0}
         sx={{
@@ -218,6 +211,7 @@ export function ReportIssuePage() {
 
           <IssueTemplateForm
             compact
+            groupedDetails
             mode="create"
             catalog={catalog}
             draft={draft}

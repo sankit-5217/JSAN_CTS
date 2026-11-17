@@ -84,6 +84,8 @@ function withCurrent<T extends { value: string; label: string }>(
 interface IssueTemplateFormProps {
   /** Balanced columns and a field grid for the client's new-report workspace. */
   compact?: boolean;
+  groupedDetails?: boolean;
+  ticketNumber?: string;
   catalog: IssueCatalog;
   draft: ReportDraft;
   update: DraftUpdate;
@@ -122,6 +124,8 @@ interface IssueTemplateFormProps {
  */
 export function IssueTemplateForm({
   compact = false,
+  groupedDetails = false,
+  ticketNumber,
   catalog,
   draft,
   update,
@@ -225,7 +229,7 @@ export function IssueTemplateForm({
   return (
     <Grid container spacing={compact ? 2 : 3} columns={compact ? 12 : 10}>
       {/* Left: what happened */}
-      <Grid item xs={compact ? 12 : 10} md={compact ? 5 : 8}>
+      <Grid item xs={compact ? 12 : 10} md={compact ? 5 : groupedDetails ? 7 : 8}>
         <Stack spacing={compact ? 1.5 : 2}>
           {/* A template only drafts a new report. Once the ticket is raised
               no role gets it back (the issue type stays editable on its own). */}
@@ -313,266 +317,321 @@ export function IssueTemplateForm({
       </Grid>
 
       {/* Right: the classification sheet */}
-      <Grid item xs={compact ? 12 : 10} md={compact ? 7 : 2}>
-        <Stack
-          spacing={compact ? 0 : 1.5}
+      <Grid item xs={compact ? 12 : 10} md={compact ? 7 : groupedDetails ? 3 : 2}>
+        {groupedDetails && (
+          <Box
+            component="section"
+            aria-label="Status"
+            sx={{
+              p: compact ? 0.5 : 1.5,
+              mb: 1,
+              border: "1px solid",
+              borderColor: "divider",
+              borderRadius: 2,
+              bgcolor: "background.default",
+              display: compact ? "flex" : "block",
+              alignItems: "center",
+              gap: 2,
+            }}
+          >
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: compact ? 0 : 1 }}>
+              Status
+            </Typography>
+            <Box sx={{ flex: 1, minWidth: 0 }}>{status}</Box>
+          </Box>
+        )}
+        <Box
+          component={groupedDetails ? "section" : "div"}
+          aria-label={groupedDetails ? "Ticket details" : undefined}
           sx={
-            compact
+            groupedDetails
               ? {
-                  display: "grid",
-                  gridTemplateColumns: {
-                    xs: "minmax(0, 1fr)",
-                    sm: "repeat(2, minmax(0, 1fr))",
-                    lg: "repeat(3, minmax(0, 1fr))",
-                  },
-                  gap: 1.25,
-                  alignItems: "start",
-                  "& .MuiFormHelperText-root": { mx: 0, mt: 0.25, lineHeight: 1.3 },
+                  p: compact ? 0.5 : 1.5,
+                  border: "1px solid",
+                  borderColor: "divider",
+                  borderRadius: 2,
+                  bgcolor: "background.default",
                 }
               : undefined
           }
         >
-          {site && (
-            <FieldRow stacked label="Site">
-              {site}
-            </FieldRow>
+          {groupedDetails && (
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: compact ? 0.5 : 1 }}>
+              Ticket details
+            </Typography>
           )}
+          {groupedDetails && ticketNumber && (
+            <Stack direction="row" spacing={2} sx={{ mb: 1.5 }}>
+              <Typography color="text.secondary" variant="body2">
+                Ticket ID
+              </Typography>
+              <Typography variant="body2" sx={{ fontWeight: 650, overflowWrap: "anywhere" }}>
+                {ticketNumber}
+              </Typography>
+            </Stack>
+          )}
+          <Stack
+            spacing={compact ? 0 : 1.5}
+            sx={
+              compact
+                ? {
+                    display: "grid",
+                    gridTemplateColumns: {
+                      xs: "minmax(0, 1fr)",
+                      sm: "repeat(2, minmax(0, 1fr))",
+                      lg: "repeat(3, minmax(0, 1fr))",
+                    },
+                    gap: 1,
+                    alignItems: "start",
+                    "& .MuiFormHelperText-root": { mx: 0, mt: 0.25, lineHeight: 1.3, fontSize: 11 },
+                  }
+                : undefined
+            }
+          >
+            {site && (
+              <FieldRow stacked label="Site">
+                {site}
+              </FieldRow>
+            )}
 
-          <FieldRow stacked label="Reporter">
-            <TextField size="small" fullWidth value={reporter} InputProps={{ readOnly: true }} />
-          </FieldRow>
+            <FieldRow stacked label="Reporter">
+              <TextField size="small" fullWidth value={reporter} InputProps={{ readOnly: true }} />
+            </FieldRow>
 
-          <FieldRow stacked label="Assignee Group">
-            <TextField
-              select
-              size="small"
-              fullWidth
-              value={draft.ownerGroupId}
-              onChange={(e) =>
-                update((d) => ({ ...d, ownerGroupId: e.target.value, ownerUserId: "" }))
-              }
-              disabled={locked || routingLocked}
-              helperText={routingLocked ? routingLockedHint : undefined}
-              sx={selectSx}
-            >
-              {mode === "create" && (
+            <FieldRow stacked label="Assignee Group">
+              <TextField
+                select
+                size="small"
+                fullWidth
+                value={draft.ownerGroupId}
+                onChange={(e) =>
+                  update((d) => ({ ...d, ownerGroupId: e.target.value, ownerUserId: "" }))
+                }
+                disabled={locked || routingLocked}
+                helperText={routingLocked ? routingLockedHint : undefined}
+                sx={selectSx}
+              >
+                {mode === "create" && (
+                  <MenuItem value="">
+                    <em>Let the service desk decide</em>
+                  </MenuItem>
+                )}
+                {groupOptions.map((g) => (
+                  <MenuItem key={g.id} value={g.id}>
+                    {g.name}
+                    {g.isDefaultAssignee ? " (default)" : ""}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </FieldRow>
+
+            <FieldRow stacked label="Assignee">
+              <TextField
+                select
+                size="small"
+                fullWidth
+                value={draft.ownerUserId}
+                onChange={(e) => set("ownerUserId", e.target.value)}
+                disabled={locked || routingLocked || !draft.ownerGroupId}
+                helperText={
+                  !draft.ownerGroupId
+                    ? "Pick an assignee group first"
+                    : members.length === 0
+                      ? `${selectedGroup?.name ?? "This group"} will assign someone`
+                      : "Optional — the team usually sets this"
+                }
+                sx={selectSx}
+              >
                 <MenuItem value="">
-                  <em>Let the service desk decide</em>
+                  <em>Unassigned</em>
                 </MenuItem>
-              )}
-              {groupOptions.map((g) => (
-                <MenuItem key={g.id} value={g.id}>
-                  {g.name}
-                  {g.isDefaultAssignee ? " (default)" : ""}
-                </MenuItem>
-              ))}
-            </TextField>
-          </FieldRow>
+                {assigneeOptions.map((m) => (
+                  <MenuItem key={m.id} value={m.id}>
+                    {m.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </FieldRow>
 
-          <FieldRow stacked label="Assignee">
-            <TextField
-              select
-              size="small"
-              fullWidth
-              value={draft.ownerUserId}
-              onChange={(e) => set("ownerUserId", e.target.value)}
-              disabled={locked || routingLocked || !draft.ownerGroupId}
-              helperText={
-                !draft.ownerGroupId
-                  ? "Pick an assignee group first"
-                  : members.length === 0
-                    ? `${selectedGroup?.name ?? "This group"} will assign someone`
-                    : "Optional — the team usually sets this"
-              }
-              sx={selectSx}
-            >
-              <MenuItem value="">
-                <em>Unassigned</em>
-              </MenuItem>
-              {assigneeOptions.map((m) => (
-                <MenuItem key={m.id} value={m.id}>
-                  {m.label}
-                </MenuItem>
-              ))}
-            </TextField>
-          </FieldRow>
+            <FieldRow stacked label="CC List">
+              <Box>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="email, email…  then Enter"
+                  value={ccInput}
+                  disabled={locked}
+                  onChange={(e) => setCcInput(e.target.value)}
+                  onBlur={() => ccInput.trim() && addCc()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === ",") {
+                      e.preventDefault();
+                      addCc();
+                    }
+                  }}
+                  error={Boolean(ccWarning)}
+                  helperText={ccWarning ?? "People to copy on updates"}
+                />
+                {draft.ccEmails.length > 0 && (
+                  <Stack direction="row" spacing={0.5} sx={{ mt: 0.5 }} flexWrap="wrap" useFlexGap>
+                    {draft.ccEmails.map((email) => (
+                      <Chip
+                        key={email}
+                        size="small"
+                        label={email}
+                        onDelete={
+                          locked
+                            ? undefined
+                            : () =>
+                                update((d) => ({
+                                  ...d,
+                                  ccEmails: d.ccEmails.filter((e) => e !== email),
+                                }))
+                        }
+                      />
+                    ))}
+                  </Stack>
+                )}
+              </Box>
+            </FieldRow>
 
-          <FieldRow stacked label="CC List">
-            <Box>
+            {!groupedDetails && (
+              <FieldRow stacked label="Status">
+                {status}
+              </FieldRow>
+            )}
+
+            <FieldRow stacked label="Ref Bug ID">
               <TextField
                 size="small"
                 fullWidth
-                placeholder="email, email…  then Enter"
-                value={ccInput}
+                placeholder="<Bug Number>  e.g. INC-000123"
+                value={draft.refIncidentNo}
+                onChange={(e) => set("refIncidentNo", e.target.value)}
                 disabled={locked}
-                onChange={(e) => setCcInput(e.target.value)}
-                onBlur={() => ccInput.trim() && addCc()}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === ",") {
-                    e.preventDefault();
-                    addCc();
-                  }
-                }}
-                error={Boolean(ccWarning)}
-                helperText={ccWarning ?? "People to copy on updates"}
+                helperText="If this duplicates or is blocked by another ticket"
               />
-              {draft.ccEmails.length > 0 && (
-                <Stack direction="row" spacing={0.5} sx={{ mt: 0.5 }} flexWrap="wrap" useFlexGap>
-                  {draft.ccEmails.map((email) => (
-                    <Chip
-                      key={email}
-                      size="small"
-                      label={email}
-                      onDelete={
-                        locked
-                          ? undefined
-                          : () =>
-                              update((d) => ({
-                                ...d,
-                                ccEmails: d.ccEmails.filter((e) => e !== email),
-                              }))
-                      }
-                    />
-                  ))}
-                </Stack>
-              )}
-            </Box>
-          </FieldRow>
+            </FieldRow>
 
-          <FieldRow stacked label="Status">
-            {status}
-          </FieldRow>
+            <FieldRow stacked label="Issue Type">
+              <TextField
+                select
+                size="small"
+                fullWidth
+                value={draft.issueType}
+                onChange={(e) => pickIssueType(e.target.value)}
+                disabled={locked}
+                sx={selectSx}
+              >
+                {withCurrent(catalog.issueTypes, draft.issueType).map((o) => (
+                  <MenuItem key={o.value} value={o.value}>
+                    {o.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </FieldRow>
 
-          <FieldRow stacked label="Ref Bug ID">
-            <TextField
-              size="small"
-              fullWidth
-              placeholder="<Bug Number>  e.g. INC-000123"
-              value={draft.refIncidentNo}
-              onChange={(e) => set("refIncidentNo", e.target.value)}
-              disabled={locked}
-              helperText="If this duplicates or is blocked by another ticket"
-            />
-          </FieldRow>
+            <FieldRow stacked label="Priority:">
+              <TextField
+                select
+                size="small"
+                fullWidth
+                value={draft.priority}
+                onChange={(e) => set("priority", e.target.value as ReportDraft["priority"])}
+                disabled={locked || routingLocked}
+                helperText={
+                  routingLocked
+                    ? routingLockedHint
+                    : (priorityHelper ?? "The service desk may adjust this after triage")
+                }
+                sx={selectSx}
+              >
+                {mode === "create" && (
+                  <MenuItem value="">
+                    <em>Not sure</em>
+                  </MenuItem>
+                )}
+                {catalog.priorities.map((o) => (
+                  <MenuItem key={o.id} value={o.value}>
+                    {o.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </FieldRow>
 
-          <FieldRow stacked label="Issue Type">
-            <TextField
-              select
-              size="small"
-              fullWidth
-              value={draft.issueType}
-              onChange={(e) => pickIssueType(e.target.value)}
-              disabled={locked}
-              sx={selectSx}
-            >
-              {withCurrent(catalog.issueTypes, draft.issueType).map((o) => (
-                <MenuItem key={o.value} value={o.value}>
-                  {o.label}
-                </MenuItem>
-              ))}
-            </TextField>
-          </FieldRow>
-
-          <FieldRow stacked label="Priority:">
-            <TextField
-              select
-              size="small"
-              fullWidth
-              value={draft.priority}
-              onChange={(e) => set("priority", e.target.value as ReportDraft["priority"])}
-              disabled={locked || routingLocked}
-              helperText={
-                routingLocked
-                  ? routingLockedHint
-                  : (priorityHelper ?? "The service desk may adjust this after triage")
-              }
-              sx={selectSx}
-            >
-              {mode === "create" && (
+            <FieldRow stacked label="Severity:">
+              <TextField
+                select
+                size="small"
+                fullWidth
+                value={draft.severity}
+                onChange={(e) => set("severity", e.target.value)}
+                disabled={locked}
+                sx={selectSx}
+              >
                 <MenuItem value="">
                   <em>Not sure</em>
                 </MenuItem>
-              )}
-              {catalog.priorities.map((o) => (
-                <MenuItem key={o.id} value={o.value}>
-                  {o.label}
-                </MenuItem>
-              ))}
-            </TextField>
-          </FieldRow>
+                {withCurrent(catalog.severities, draft.severity).map((o) => (
+                  <MenuItem key={o.value} value={o.value}>
+                    {o.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </FieldRow>
 
-          <FieldRow stacked label="Severity:">
-            <TextField
-              select
-              size="small"
-              fullWidth
-              value={draft.severity}
-              onChange={(e) => set("severity", e.target.value)}
-              disabled={locked}
-              sx={selectSx}
-            >
-              <MenuItem value="">
-                <em>Not sure</em>
-              </MenuItem>
-              {withCurrent(catalog.severities, draft.severity).map((o) => (
-                <MenuItem key={o.value} value={o.value}>
-                  {o.label}
+            <FieldRow stacked label="Component">
+              <TextField
+                select
+                size="small"
+                fullWidth
+                value={draft.component}
+                onChange={(e) =>
+                  update((d) => ({ ...d, component: e.target.value, subComponent: "" }))
+                }
+                disabled={locked}
+                sx={selectSx}
+              >
+                <MenuItem value="">
+                  <em>Not sure</em>
                 </MenuItem>
-              ))}
-            </TextField>
-          </FieldRow>
+                {withCurrent(catalog.components, draft.component).map((o) => (
+                  <MenuItem key={o.value} value={o.value}>
+                    {o.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </FieldRow>
 
-          <FieldRow stacked label="Component">
-            <TextField
-              select
-              size="small"
-              fullWidth
-              value={draft.component}
-              onChange={(e) =>
-                update((d) => ({ ...d, component: e.target.value, subComponent: "" }))
-              }
-              disabled={locked}
-              sx={selectSx}
-            >
-              <MenuItem value="">
-                <em>Not sure</em>
-              </MenuItem>
-              {withCurrent(catalog.components, draft.component).map((o) => (
-                <MenuItem key={o.value} value={o.value}>
-                  {o.label}
+            <FieldRow stacked label="Sub Component">
+              <TextField
+                select
+                size="small"
+                fullWidth
+                value={draft.subComponent}
+                onChange={(e) => set("subComponent", e.target.value)}
+                disabled={locked || !draft.component}
+                helperText={
+                  !draft.component
+                    ? "Pick a component first"
+                    : subComponents.length === 0
+                      ? "No sub components for this component"
+                      : undefined
+                }
+                sx={selectSx}
+              >
+                <MenuItem value="">
+                  <em>Not sure</em>
                 </MenuItem>
-              ))}
-            </TextField>
-          </FieldRow>
-
-          <FieldRow stacked label="Sub Component">
-            <TextField
-              select
-              size="small"
-              fullWidth
-              value={draft.subComponent}
-              onChange={(e) => set("subComponent", e.target.value)}
-              disabled={locked || !draft.component}
-              helperText={
-                !draft.component
-                  ? "Pick a component first"
-                  : subComponents.length === 0
-                    ? "No sub components for this component"
-                    : undefined
-              }
-              sx={selectSx}
-            >
-              <MenuItem value="">
-                <em>Not sure</em>
-              </MenuItem>
-              {withCurrent(subComponents, draft.subComponent).map((o) => (
-                <MenuItem key={o.value} value={o.value}>
-                  {o.label}
-                </MenuItem>
-              ))}
-            </TextField>
-          </FieldRow>
-        </Stack>
+                {withCurrent(subComponents, draft.subComponent).map((o) => (
+                  <MenuItem key={o.value} value={o.value}>
+                    {o.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </FieldRow>
+          </Stack>
+        </Box>
       </Grid>
     </Grid>
   );
