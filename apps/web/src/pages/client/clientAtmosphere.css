@@ -261,41 +261,61 @@
   }
 }
 
-/* Keep the report's working fields above the fold instead of a large hero. */
+/* Report and ticket workspaces: a medium hero — title, detail and a visible
+   scene — sized to sit above the working fields without dominating them. */
 .client-atmosphere.client-atmosphere-compact {
-  min-height: 48px;
+  min-height: 160px;
   flex-shrink: 0;
-  padding: 8px 16px;
-  margin-bottom: 12px;
-  border-radius: 12px;
+  padding: 20px 30px;
+  margin-bottom: 20px;
+  border-radius: 16px;
 }
 .client-atmosphere-compact .client-atmosphere-copy {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  max-width: calc(100% - 80px);
+  max-width: 62%;
+}
+.client-atmosphere-compact h1 {
+  margin: 10px 0 6px;
+  font-size: clamp(18px, 2vw, 26px);
+}
+.client-atmosphere-compact p {
+  font-size: 12.5px;
 }
 .client-atmosphere-compact .client-motion-control {
-  margin-top: 0;
+  margin-top: 10px;
 }
 .client-atmosphere-compact .client-scene {
-  position: absolute;
-  right: -45px;
-  top: -48px;
-  transform: scale(0.45);
-  opacity: 0.7;
+  position: relative;
+  right: auto;
+  top: auto;
+  flex: 0 0 220px;
+  width: 220px;
+  height: 150px;
+  transform: scale(0.8);
+  transform-origin: right center;
+  opacity: 1;
 }
 @media (max-width: 600px) {
-  .client-atmosphere-compact .client-atmosphere-copy {
-    flex-wrap: wrap;
-    gap: 8px;
-    max-width: 100%;
+  .client-atmosphere.client-atmosphere-compact {
+    min-height: 150px;
+    padding: 20px 22px;
+    margin-bottom: 16px;
   }
-}
-
-.client-atmosphere-compact h1.client-eyebrow {
-  margin: 0;
-  font-size: 13px;
-  letter-spacing: 0.06em;
-  line-height: 1.3;
+  .client-atmosphere-compact .client-atmosphere-copy {
+    max-width: 100%;
+    padding-right: 15px;
+  }
+  .client-atmosphere-compact h1 {
+    max-width: 260px;
+  }
+  .client-atmosphere-compact p {
+    max-width: 260px;
+  }
+  .client-atmosphere-compact .client-scene {
+    position: absolute;
+    right: -70px;
+    bottom: -30px;
+    flex: none;
+    transform: scale(0.7);
+    opacity: 0.2;
+  }
 }
