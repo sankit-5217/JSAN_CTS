@@ -80,8 +80,8 @@ export function MessageBubble({
 
 /**
  * One message on the client's conversation, recorded like the report's
- * Description (same grey box): the sender's email and the time over the
- * box, whoever sent it.
+ * Description (same grey box): the sender's email and the time sit inside
+ * the box, over the words, so who/when/what read as one unit.
  */
 export function MessageRecord({
   message,
@@ -93,24 +93,31 @@ export function MessageRecord({
   onOpen: (attachmentId: string, disposition: AttachmentDisposition) => void;
 }) {
   return (
-    <Box>
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-        <Box
-          component="span"
-          sx={{ fontWeight: 700, color: mine ? "primary.main" : "text.primary" }}
+    <Box sx={RECORD_BOX_SX}>
+      <Stack
+        direction="row"
+        spacing={0.75}
+        alignItems="center"
+        flexWrap="wrap"
+        useFlexGap
+        sx={{ mb: 0.5 }}
+      >
+        <Typography
+          variant="caption"
+          sx={{ fontWeight: 700, color: mine ? "primary.main" : "text.primary", overflowWrap: "anywhere" }}
         >
           {senderLabel(message.author)}
-        </Box>{" "}
-        · {formatDateTime(message.createdAt)}
-      </Typography>
-      <Box sx={{ ...RECORD_BOX_SX, mt: 0.5 }}>
-        <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-          {message.body}
         </Typography>
-        {message.attachments.length > 0 && (
-          <MessageFiles files={message.attachments} onOpen={onOpen} />
-        )}
-      </Box>
+        <Typography variant="caption" color="text.secondary">
+          · {formatDateTime(message.createdAt)}
+        </Typography>
+      </Stack>
+      <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+        {message.body}
+      </Typography>
+      {message.attachments.length > 0 && (
+        <MessageFiles files={message.attachments} onOpen={onOpen} />
+      )}
     </Box>
   );
 }

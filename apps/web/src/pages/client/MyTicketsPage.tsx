@@ -19,19 +19,28 @@ import { apiGet } from "../../api/client";
 import {
   isFinished,
   needsYou,
-  PRIORITY_LABEL,
   relativeTime,
   STATUS_COLOR,
   STATUS_LABEL,
 } from "./clientTicket";
 import { describeActivity, SLA_LABEL, useClientPortal, type PortalTicket } from "./clientPortal";
 import { useAnsweredResolutions } from "./useAnsweredResolutions";
+import {
+  ISSUE_TYPE_ORDER,
+  ISSUE_TYPE_TONE,
+  issueTypeLabel,
+  IssueTypeChip,
+  PriorityChip,
+  SeverityChip,
+} from "./ticketVisuals";
 
 export interface ClientIncident {
   id: string;
   incidentNo: string;
   status: IncidentStatus;
   priority: Priority;
+  issueType: string | null;
+  severity: string | null;
   shortDescription: string;
   createdAt: string;
   updatedAt: string;
@@ -62,6 +71,14 @@ export function MyTicketsPage() {
   const [error, setError] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
   const filter = (FILTERS.find((f) => f.value === params.get("show"))?.value ?? "open") as Filter;
+  const typeFilter = params.get("type") ?? "";
+
+  const setType = (t: string) => {
+    const next = new URLSearchParams(params);
+    if (typeFilter === t) next.delete("type");
+    else next.set("type", t);
+    setParams(next, { replace: true });
+  };
 
   useEffect(() => {
     apiGet<Paginated<ClientIncident>>("/incidents?limit=200")
@@ -82,16 +99,25 @@ export function MyTicketsPage() {
     return c;
   }, [incidents, answered]);
 
+  const typeCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const inc of incidents ?? []) {
+      const key = inc.issueType ?? "";
+      c[key] = (c[key] ?? 0) + 1;
+    }
+    return c;
+  }, [incidents]);
+
   const shown = useMemo(() => {
     const match = FILTERS.find((f) => f.value === filter)!.match;
     return (incidents ?? [])
-      .filter((i) => match(i, answered))
+      .filter((i) => match(i, answered) && (!typeFilter || i.issueType === typeFilter))
       .sort(
         (a, b) =>
           Number(needsYou(b, answered)) - Number(needsYou(a, answered)) ||
           b.updatedAt.localeCompare(a.updatedAt),
       );
-  }, [incidents, filter, answered]);
+  }, [incidents, filter, answered, typeFilter]);
 
   return (
     <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
@@ -122,11 +148,58 @@ export function MyTicketsPage() {
         </Button>
       </Stack>
 
+      {incidents && (
+        <Stack
+          direction="row"
+          spacing={1}
+          flexWrap="wrap"
+          useFlexGap
+          sx={{ mb: 2 }}
+          aria-label="Filter by issue type"
+        >
+          {ISSUE_TYPE_ORDER.map((t) => {
+            const tone = ISSUE_TYPE_TONE[t];
+            const active = typeFilter === t;
+            return (
+              <Chip
+                key={t}
+                clickable
+                onClick={() => setType(t)}
+                label={`${issueTypeLabel(t)} ${typeCounts[t] ?? 0}`}
+                sx={{
+                  color: tone.text,
+                  backgroundColor: active ? tone.border : tone.bg,
+                  border: "1px solid",
+                  borderColor: active ? tone.text : tone.border,
+                  borderRadius: 2,
+                  fontWeight: 700,
+                  "& .MuiChip-label": { px: 1.25 },
+                }}
+              />
+            );
+          })}
+          {typeFilter && (
+            <Chip
+              clickable
+              variant="outlined"
+              onClick={() => setType(typeFilter)}
+              label="Clear filter"
+              sx={{ borderRadius: 2, textTransform: "none" }}
+            />
+          )}
+        </Stack>
+      )}
+
       <ToggleButtonGroup
         exclusive
         size="small"
         value={filter}
-        onChange={(_, v: Filter | null) => v && setParams({ show: v }, { replace: true })}
+        onChange={(_, v: Filter | null) => {
+          if (!v) return;
+          const next = new URLSearchParams(params);
+          next.set("show", v);
+          setParams(next, { replace: true });
+        }}
         sx={{ mb: 2, flexWrap: "wrap" }}
       >
         {FILTERS.map((f) => (
@@ -223,12 +296,9 @@ export function TicketRow({
             )}
           </Box>
           {sla && <SlaBadge state={sla.overall} label={`SLA: ${SLA_LABEL[sla.overall]}`} />}
-          <Chip
-            size="small"
-            label={PRIORITY_LABEL[inc.priority]}
-            variant="outlined"
-            sx={{ display: { xs: "none", sm: "inline-flex" } }}
-          />
+          <IssueTypeChip value={inc.issueType} />
+          <PriorityChip priority={inc.priority} />
+          <SeverityChip value={inc.severity} />
           <Chip size="small" color={STATUS_COLOR[inc.status]} label={STATUS_LABEL[inc.status]} />
         </CardContent>
       </CardActionArea>

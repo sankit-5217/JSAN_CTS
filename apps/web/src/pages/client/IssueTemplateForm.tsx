@@ -295,9 +295,7 @@ export function IssueTemplateForm({
                   variant="body2"
                   sx={{
                     ...RECORD_BOX_SX,
-                    minHeight: compact ? 48 : 72,
-                    maxHeight: compact ? 90 : undefined,
-                    overflowY: compact ? "auto" : undefined,
+                    minHeight: compact ? 64 : 72,
                     color: draft.description ? "text.primary" : "text.secondary",
                   }}
                 >
@@ -336,17 +334,10 @@ export function IssueTemplateForm({
       <Box sx={{ minWidth: 0 }}>
         <Box>
           <Stack
-            spacing={compact ? 0 : 1.5}
+            spacing={1.5}
             sx={
               compact
                 ? {
-                    display: "grid",
-                    gridTemplateColumns: {
-                      xs: "minmax(0, 1fr)",
-                      sm: "repeat(2, minmax(0, 1fr))",
-                    },
-                    gap: 1,
-                    alignItems: "start",
                     "& .MuiFormHelperText-root": {
                       mx: 0,
                       mt: 0.25,

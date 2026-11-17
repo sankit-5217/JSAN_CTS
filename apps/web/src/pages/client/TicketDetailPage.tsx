@@ -61,6 +61,7 @@ import {
 } from "./clientTicket";
 import { describeActivity, describeClock, useClientPortal, type SlaStatus } from "./clientPortal";
 import { SiteContacts } from "./SitePanel";
+import { IssueTypeChip, PriorityChip, SeverityChip } from "./ticketVisuals";
 import { formatDateTime } from "../../time/clock";
 
 interface Incident extends TicketFields {
@@ -381,7 +382,12 @@ export function TicketDetailPage() {
                   color={STATUS_COLOR[incident.status]}
                   label={templateStatusText(incident.status, incident.refIncidentNo)}
                 />
-                <Chip size="small" variant="outlined" label={PRIORITY_LABEL[incident.priority]} />
+                <IssueTypeChip value={incident.issueType} />
+                <PriorityChip
+                  priority={incident.priority}
+                  label={`${incident.priority} · ${PRIORITY_LABEL[incident.priority]}`}
+                />
+                <SeverityChip value={incident.severity} />
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                 {incident.incidentNo} · reported {formatDateTime(incident.createdAt)}
