@@ -539,6 +539,7 @@ function TicketReportEditor({
         <IssueTemplateForm
           groupedDetails
           ticketNumber={incident.incidentNo}
+          summaryStatus={templateStatusText(incident.status, incident.refIncidentNo)}
           mode="edit"
           catalog={catalog}
           draft={draft}
