@@ -247,13 +247,14 @@ export function TicketDetailPage() {
             }}
             multiline
             minRows={2}
+            maxRows={3}
             fullWidth
           />
           <Stack
             direction="row"
             spacing={1}
             alignItems="center"
-            sx={{ mt: 1.5 }}
+            sx={{ mt: 0.75 }}
             flexWrap="wrap"
             useFlexGap
           >
@@ -299,7 +300,7 @@ export function TicketDetailPage() {
         </Box>
       </FieldRow>
       <FieldRow label="Conversation">
-        <ConversationScroll count={thread.length}>
+        <ConversationScroll count={thread.length} compact>
           {thread.length === 0 && (
             <Typography color="text.secondary">
               No updates yet. The service desk will post here once they've taken a look.
@@ -326,6 +327,19 @@ export function TicketDetailPage() {
           )}
         </ConversationScroll>
       </FieldRow>
+      {site && (
+        <Box component="details" sx={{ ml: { sm: "124px" }, fontSize: 12 }}>
+          <Box component="summary" sx={{ cursor: "pointer", color: "primary.main" }}>
+            Site contacts
+          </Box>
+          <Box sx={{ pt: 1 }}>
+            <SiteContacts contacts={site.contacts} />
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            Quote {incident.incidentNo} when you call or email.
+          </Typography>
+        </Box>
+      )}
     </>
   );
 
@@ -351,65 +365,74 @@ export function TicketDetailPage() {
         </Alert>
       )}
 
-      <Card
-        elevation={0}
-        sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", my: 2 }}
-      >
-        <CardContent sx={{ p: { xs: 2.5, sm: 3.5 } }}>
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="h6" sx={{ fontWeight: 700, mr: 1 }}>
-              {incident.shortDescription}
-            </Typography>
-            <Chip
-              size="small"
-              color={STATUS_COLOR[incident.status]}
-              label={templateStatusText(incident.status, incident.refIncidentNo)}
-            />
-            <Chip size="small" variant="outlined" label={PRIORITY_LABEL[incident.priority]} />
-          </Stack>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            {incident.incidentNo} · reported {formatDateTime(incident.createdAt)}
-          </Typography>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 2 }}>
-            <EngineeringOutlinedIcon fontSize="small" color="action" />
-            <Typography variant="body2">
-              {handler.engineer
-                ? `Handled by ${handler.engineer}${handler.team ? ` (${handler.team})` : ""}`
-                : handler.team
-                  ? `With the ${handler.team} team`
-                  : "Waiting for the service desk to assign it"}
-            </Typography>
-          </Stack>
-          {activity && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, ml: 3.5 }}>
-              {activity}
-            </Typography>
-          )}
-
-          {incident.status !== "CANCELLED" && portal?.sla && <SlaPanel sla={portal.sla} />}
-
-          {incident.status !== "CANCELLED" && (
-            <Stepper
-              activeStep={journeyStep(progress.milestones)}
-              alternativeLabel
-              sx={{ mt: 3, "& .MuiStepLabel-label": { fontSize: 12 } }}
-            >
-              {JOURNEY.map((step, i) => (
-                <Step
-                  key={step.label}
-                  completed={i < journeyStep(progress.milestones) || incident.status === "CLOSED"}
-                >
-                  <StepLabel>{step.label}</StepLabel>
-                </Step>
-              ))}
-            </Stepper>
-          )}
-        </CardContent>
-      </Card>
-
       {catalog ? (
         <TicketReportEditor
           incident={incident}
+          overview={
+            <Box sx={{ mb: 0.5 }}>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography variant="subtitle1" sx={{ fontWeight: 700, mr: 1 }}>
+                  {incident.shortDescription}
+                </Typography>
+                <Chip
+                  size="small"
+                  color={STATUS_COLOR[incident.status]}
+                  label={templateStatusText(incident.status, incident.refIncidentNo)}
+                />
+                <Chip size="small" variant="outlined" label={PRIORITY_LABEL[incident.priority]} />
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                {incident.incidentNo} · reported {formatDateTime(incident.createdAt)}
+              </Typography>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
+                <EngineeringOutlinedIcon fontSize="small" color="action" />
+                <Typography variant="body2">
+                  {handler.engineer
+                    ? `Handled by ${handler.engineer}${handler.team ? ` (${handler.team})` : ""}`
+                    : handler.team
+                      ? `With the ${handler.team} team`
+                      : "Waiting for the service desk to assign it"}
+                </Typography>
+              </Stack>
+              {activity && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, ml: 3.5 }}>
+                  {activity}
+                </Typography>
+              )}
+
+              {incident.status !== "CANCELLED" && portal?.sla && <SlaPanel sla={portal.sla} />}
+
+              {incident.status !== "CANCELLED" && (
+                <Stepper
+                  activeStep={journeyStep(progress.milestones)}
+                  sx={{
+                    mt: 1,
+                    "& .MuiStepLabel-label": { fontSize: 11 },
+                    "& .MuiStepIcon-root": { fontSize: 18 },
+                    "& .MuiStep-root": { px: 0.5 },
+                  }}
+                >
+                  {JOURNEY.map((step, i) => (
+                    <Step
+                      key={step.label}
+                      completed={
+                        i < journeyStep(progress.milestones) || incident.status === "CLOSED"
+                      }
+                    >
+                      <StepLabel>{step.label}</StepLabel>
+                    </Step>
+                  ))}
+                </Stepper>
+              )}
+              <NextStepPanel
+                incident={incident}
+                progress={progress}
+                latestDeskMessage={latestDeskMessage}
+                onReply={focusReply}
+                onFeedbackSent={refetch}
+              />
+            </Box>
+          }
           catalog={catalog}
           groups={groups}
           reporter={token ? (decodeJwtPayload(token)?.email ?? "") : ""}
@@ -427,27 +450,6 @@ export function TicketDetailPage() {
         </Typography>
       )}
 
-      <NextStepPanel
-        incident={incident}
-        progress={progress}
-        latestDeskMessage={latestDeskMessage}
-        onReply={focusReply}
-        onFeedbackSent={refetch}
-      />
-
-      {site && (
-        <Card
-          elevation={0}
-          sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mt: 3 }}
-        >
-          <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-            <SiteContacts contacts={site.contacts} />
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
-              Quote {incident.incidentNo} when you call or email.
-            </Typography>
-          </CardContent>
-        </Card>
-      )}
       {loadError && (
         <Typography variant="caption" color="error" sx={{ display: "block", mt: 2 }}>
           Couldn't refresh: {loadError}
@@ -473,6 +475,7 @@ function TicketReportEditor({
   onOpenFile,
   onSaved,
   belowDescription,
+  overview,
 }: {
   incident: Incident;
   catalog: IssueCatalog;
@@ -485,6 +488,7 @@ function TicketReportEditor({
   onSaved: () => Promise<void>;
   /** The message box and conversation, under the Description. */
   belowDescription: ReactNode;
+  overview: ReactNode;
 }) {
   const [draft, setDraft] = useState<ReportDraft>(() => draftFromTicket(incident, catalog));
   const [dirty, setDirty] = useState(false);
@@ -525,21 +529,17 @@ function TicketReportEditor({
   return (
     <Card
       elevation={0}
-      sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mb: 3 }}
+      sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mt: 1 }}
     >
-      <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
-          Your report
-        </Typography>
+      <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
             {error}
           </Alert>
         )}
         <IssueTemplateForm
-          groupedDetails
-          ticketNumber={incident.incidentNo}
-          summaryStatus={templateStatusText(incident.status, incident.refIncidentNo)}
+          compact
+          overview={overview}
           mode="edit"
           catalog={catalog}
           draft={draft}
@@ -580,7 +580,7 @@ function TicketReportEditor({
             direction={{ xs: "column", sm: "row" }}
             spacing={1.5}
             alignItems={{ sm: "center" }}
-            sx={{ mt: 2.5 }}
+            sx={{ mt: 1.5 }}
           >
             <Button
               variant="contained"
@@ -626,8 +626,8 @@ function SlaPanel({ sla }: { sla: SlaStatus }) {
   return (
     <Box
       sx={{
-        mt: 2,
-        p: 1.5,
+        mt: 0.75,
+        p: 0.75,
         borderRadius: 2,
         bgcolor: "action.hover",
         display: "grid",
@@ -638,12 +638,12 @@ function SlaPanel({ sla }: { sla: SlaStatus }) {
       {rows.map((row) => (
         <Box key={row.kind}>
           <Stack direction="row" spacing={1} alignItems="center">
-            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+            <Typography variant="caption" sx={{ fontWeight: 700 }}>
               {row.label} target
             </Typography>
             <SlaBadge state={row.clock.state} />
           </Stack>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25 }}>
             {describeClock(row.kind, row.clock)}
           </Typography>
         </Box>

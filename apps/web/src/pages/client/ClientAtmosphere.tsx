@@ -26,7 +26,8 @@ const SECTIONS = {
 };
 
 export function ClientAtmosphere({ pathname }: { pathname: string }) {
-  const Eyebrow = pathname === "/client/report" ? "h1" : "div";
+  const compact = pathname === "/client/report" || pathname.startsWith("/client/tickets");
+  const Eyebrow = compact ? "h1" : "div";
   const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
   const [paused, setPaused] = useState(false);
   const section = pathname.startsWith("/client/tickets/")
@@ -38,7 +39,7 @@ export function ClientAtmosphere({ pathname }: { pathname: string }) {
         : SECTIONS.home;
   return (
     <section
-      className={`client-atmosphere${pathname === "/client/report" ? " client-atmosphere-compact" : ""}`}
+      className={`client-atmosphere${compact ? " client-atmosphere-compact" : ""}`}
       data-motion={paused || reduced ? "paused" : "running"}
       aria-label="Client workspace"
     >
@@ -46,7 +47,7 @@ export function ClientAtmosphere({ pathname }: { pathname: string }) {
         <Eyebrow className="client-eyebrow">
           <span /> CLIENT PORTAL <span className="client-eyebrow-divider">/</span> {section.label}
         </Eyebrow>
-        {pathname !== "/client/report" && (
+        {!compact && (
           <>
             <h1>{section.title}</h1>
             <p>{section.detail}</p>

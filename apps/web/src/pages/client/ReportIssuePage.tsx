@@ -211,7 +211,6 @@ export function ReportIssuePage() {
 
           <IssueTemplateForm
             compact
-            groupedDetails
             mode="create"
             catalog={catalog}
             draft={draft}

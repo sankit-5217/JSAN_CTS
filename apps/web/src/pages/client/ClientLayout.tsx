@@ -59,6 +59,8 @@ export function ClientLayout() {
 
   const token = getStoredToken();
   const user = token ? decodeJwtPayload(token) : null;
+  const compactWorkspace =
+    location.pathname === "/client/report" || location.pathname.startsWith("/client/tickets");
   const isFullScreenPage =
     location.pathname === "/client/home" ||
     location.pathname === "/client/report" ||
@@ -81,7 +83,7 @@ export function ClientLayout() {
             sx={{
               gap: 3,
               flexWrap: "wrap",
-              py: location.pathname === "/client/report" ? 1 : 1.5,
+              py: compactWorkspace ? 1 : 1.5,
               minHeight: "76px !important",
             }}
           >
@@ -155,12 +157,11 @@ export function ClientLayout() {
             maxWidth: isFullScreenPage ? "none" : 880,
             mx: "auto",
             flex: isFullScreenPage ? 1 : undefined,
-            p:
-              location.pathname === "/client/report"
-                ? { xs: 1.5, sm: 1.5 }
-                : isFullScreenPage
-                  ? { xs: 1.5, sm: 3 }
-                  : { xs: 2, sm: 4 },
+            p: compactWorkspace
+              ? { xs: 1.5, sm: 1.5 }
+              : isFullScreenPage
+                ? { xs: 1.5, sm: 3 }
+                : { xs: 2, sm: 4 },
             display: isFullScreenPage ? "flex" : undefined,
             flexDirection: isFullScreenPage ? "column" : undefined,
           }}

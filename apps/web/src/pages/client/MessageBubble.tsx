@@ -121,7 +121,15 @@ export function MessageRecord({
  * it scrolls inside itself and opens on the newest entry (and follows new
  * ones as they arrive).
  */
-export function ConversationScroll({ count, children }: { count: number; children: ReactNode }) {
+export function ConversationScroll({
+  count,
+  children,
+  compact = false,
+}: {
+  count: number;
+  children: ReactNode;
+  compact?: boolean;
+}) {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = ref.current;
@@ -131,7 +139,7 @@ export function ConversationScroll({ count, children }: { count: number; childre
     <Box
       ref={ref}
       sx={{
-        maxHeight: "40vh",
+        maxHeight: compact ? "clamp(64px, 12vh, 120px)" : "40vh",
         overflowY: "auto",
         border: "1px solid",
         borderColor: "divider",
