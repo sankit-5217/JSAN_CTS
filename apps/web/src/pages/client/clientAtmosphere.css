@@ -1,8 +1,8 @@
 ﻿.client-portal {
-  color-scheme: dark;
+  color-scheme: light;
   isolation: isolate;
-  background: radial-gradient(ellipse at 85% 0%, #102851 0%, transparent 45%), #050911;
-  color: #e9f3ff;
+  background: radial-gradient(ellipse at 85% 0%, #d7e7fb 0%, transparent 46%), #eef3f9;
+  color: #12263f;
 }
 .client-portal::before {
   content: "";
@@ -11,8 +11,8 @@
   z-index: -1;
   pointer-events: none;
   background-image:
-    linear-gradient(#3c79c00a 1px, transparent 1px),
-    linear-gradient(90deg, #3c79c00a 1px, transparent 1px);
+    linear-gradient(rgba(21, 101, 192, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(21, 101, 192, 0.05) 1px, transparent 1px);
   background-size: 56px 56px;
 }
 .client-atmosphere {
@@ -23,15 +23,15 @@
   min-height: 180px;
   margin: 0 0 24px;
   padding: 28px 36px;
-  border: 1px solid #69b5ff38;
+  border: 1px solid rgba(21, 101, 192, 0.22);
   border-radius: 20px;
   background:
-    radial-gradient(ellipse at 90% 50%, #16458066, transparent 60%),
-    linear-gradient(110deg, #0b1629, #071020);
+    radial-gradient(ellipse at 90% 50%, rgba(21, 101, 192, 0.12), transparent 60%),
+    linear-gradient(110deg, #ffffff, #e7f0fc);
   overflow: hidden;
   box-shadow:
-    inset 0 1px 0 #b6dfff12,
-    0 20px 50px #0003;
+    inset 0 1px 0 #ffffff,
+    0 18px 40px rgba(18, 61, 99, 0.1);
 }
 .client-atmosphere-copy {
   position: relative;
@@ -42,7 +42,7 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  color: #9ac8ff;
+  color: #1565c0;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -51,9 +51,9 @@
 .client-eyebrow > span:first-child {
   width: 6px;
   height: 6px;
-  background: #79d2ff;
+  background: #1e88e5;
   border-radius: 50%;
-  box-shadow: 0 0 12px #45acff;
+  box-shadow: 0 0 10px rgba(30, 136, 229, 0.65);
 }
 .client-eyebrow-divider {
   opacity: 0.4;
@@ -64,29 +64,30 @@
   font-weight: 650;
   letter-spacing: -0.035em;
   line-height: 1.2;
+  color: #12263f;
 }
 .client-atmosphere p {
   margin: 0;
   font-size: 13px;
-  color: #a6bad3;
+  color: #5b6b80;
   line-height: 1.6;
 }
 .client-motion-control {
   margin-top: 14px;
   padding: 6px 10px;
-  border: 1px solid #69b5ff38;
+  border: 1px solid rgba(21, 101, 192, 0.28);
   border-radius: 6px;
-  background: #0b1c33;
-  color: #b5d6ff;
+  background: #ffffff;
+  color: #1565c0;
   font: inherit;
   font-size: 10px;
   cursor: pointer;
 }
 .client-motion-control:hover {
-  background: #19375c;
+  background: #e8f0fb;
 }
 .client-motion-control:focus-visible {
-  outline: 2px solid #a1d8ff;
+  outline: 2px solid #1565c0;
   outline-offset: 4px;
 }
 .client-scene {
@@ -110,15 +111,15 @@
 .client-cube-face {
   position: absolute;
   inset: 0;
-  border: 1px solid #8dd3ffb0;
-  background: linear-gradient(135deg, #4da1ff55, #0c367a99);
-  box-shadow: inset 0 0 18px #54aeff33;
+  border: 1.5px solid rgba(21, 101, 192, 0.6);
+  background: linear-gradient(135deg, rgba(30, 136, 229, 0.3), rgba(13, 71, 161, 0.16));
+  box-shadow: inset 0 0 18px rgba(30, 136, 229, 0.2);
 }
 .client-cube-face::after {
   content: "";
   position: absolute;
   inset: 12px;
-  border: 1px solid #a3dfff66;
+  border: 1px solid rgba(21, 101, 192, 0.4);
 }
 .client-cube-front {
   transform: translateZ(33px);
@@ -144,13 +145,13 @@
   top: 18px;
   width: 194px;
   height: 115px;
-  border: 1px solid #5eaaff66;
+  border: 1.5px solid rgba(21, 101, 192, 0.42);
   border-radius: 50%;
   transform: rotate(-25deg);
 }
 .client-orbit-two {
   transform: rotate(40deg);
-  border-color: #5eaaff33;
+  border-color: rgba(21, 101, 192, 0.24);
 }
 .client-scene-shadow {
   position: absolute;
@@ -158,7 +159,7 @@
   bottom: 0;
   width: 100px;
   height: 12px;
-  background: #328aff55;
+  background: rgba(21, 101, 192, 0.3);
   border-radius: 50%;
   filter: blur(10px);
 }
@@ -167,8 +168,8 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #b3e8ff;
-  box-shadow: 0 0 16px #319cff;
+  background: #1e88e5;
+  box-shadow: 0 0 14px rgba(30, 136, 229, 0.75);
   animation: client-node-float 5s ease-in-out infinite alternate;
 }
 .client-scene-node-one {
@@ -209,10 +210,10 @@
   }
   .client-portal main .MuiCard-root:hover {
     transform: translateY(-3px);
-    border-color: #69b5ff66;
+    border-color: rgba(21, 101, 192, 0.45);
     box-shadow:
-      0 16px 38px #0005,
-      0 0 24px #2382ff0c;
+      0 16px 34px rgba(18, 61, 99, 0.14),
+      0 0 20px rgba(21, 101, 192, 0.06);
   }
   .client-portal .MuiButton-root {
     transition:
@@ -234,7 +235,7 @@
     position: absolute;
     right: -75px;
     bottom: -25px;
-    opacity: 0.18;
+    opacity: 0.22;
     transform: scale(0.8);
   }
   .client-atmosphere h1 {
@@ -282,7 +283,7 @@
   right: -45px;
   top: -48px;
   transform: scale(0.45);
-  opacity: 0.65;
+  opacity: 0.7;
 }
 @media (max-width: 600px) {
   .client-atmosphere-compact .client-atmosphere-copy {

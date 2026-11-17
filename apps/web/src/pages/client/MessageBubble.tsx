@@ -116,34 +116,39 @@ export function MessageRecord({
 }
 
 /**
- * A ticket's conversation, kept to a fixed height under the report's
- * Description so the message box and the template fields stay on screen:
- * it scrolls inside itself and opens on the newest entry (and follows new
- * ones as they arrive).
+ * A ticket's conversation, scrolling inside itself so the message box and
+ * the template fields stay on screen. By default it opens on the newest
+ * entry at the bottom (staff view). The client workspace passes `tall` for
+ * a larger panel and `newestFirst` to keep the latest update at the top.
  */
 export function ConversationScroll({
   count,
   children,
   compact = false,
+  tall = false,
+  newestFirst = false,
 }: {
   count: number;
   children: ReactNode;
   compact?: boolean;
+  tall?: boolean;
+  newestFirst?: boolean;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = ref.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [count]);
+    if (el) el.scrollTop = newestFirst ? 0 : el.scrollHeight;
+  }, [count, newestFirst]);
   return (
     <Box
       ref={ref}
       sx={{
-        maxHeight: compact ? "clamp(64px, 12vh, 120px)" : "40vh",
+        maxHeight: tall ? "clamp(300px, 52vh, 620px)" : compact ? "clamp(64px, 12vh, 120px)" : "40vh",
         overflowY: "auto",
         border: "1px solid",
         borderColor: "divider",
-        borderRadius: 1,
+        borderRadius: 2,
+        bgcolor: "background.paper",
         p: 1.5,
       }}
     >

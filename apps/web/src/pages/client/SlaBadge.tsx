@@ -5,14 +5,14 @@ import type { SlaClockState } from "./clientPortal";
 import { SLA_LABEL } from "./clientPortal";
 
 const tones: Record<SlaClockState, { text: string; border: string; background: string }> = {
-  BREACHED: { text: "#ffbdca", border: "#f27795", background: "#321c30" },
-  AT_RISK: { text: "#ffdb9d", border: "#ba8d45", background: "#302719" },
-  ON_TRACK: { text: "#9de8cd", border: "#468d7d", background: "#122e2e" },
-  MET: { text: "#9de8cd", border: "#468d7d", background: "#122e2e" },
-  PAUSED: { text: "#bdcfff", border: "#647eae", background: "#1b2742" },
+  BREACHED: { text: "#b3261e", border: "#f0b4ae", background: "#fdecea" },
+  AT_RISK: { text: "#8a5a00", border: "#eecf9a", background: "#fdf3e0" },
+  ON_TRACK: { text: "#1b6e3c", border: "#b7dfc4", background: "#e9f6ee" },
+  MET: { text: "#1b6e3c", border: "#b7dfc4", background: "#e9f6ee" },
+  PAUSED: { text: "#33507e", border: "#c3d2ec", background: "#eef3fb" },
 };
 
-/** Readable SLA states on the client's dark surfaces; labels retain the meaning. */
+/** Readable SLA states on the client's light surfaces; labels retain the meaning. */
 export function SlaBadge({ state, label }: { state: SlaClockState; label?: string }) {
   const tone = tones[state];
   return (
@@ -29,9 +29,7 @@ export function SlaBadge({ state, label }: { state: SlaClockState; label?: strin
         fontWeight: 650,
         height: 26,
         boxShadow:
-          state === "BREACHED"
-            ? "inset 0 1px 0 #ffffff0d, 0 0 14px #f2779514"
-            : "inset 0 1px 0 #ffffff0d",
+          state === "BREACHED" ? "0 0 0 1px rgba(179,38,30,0.05)" : "none",
         "& .MuiChip-icon": { color: "inherit", fontSize: 16 },
         "& .MuiChip-label": { px: 1 },
       }}

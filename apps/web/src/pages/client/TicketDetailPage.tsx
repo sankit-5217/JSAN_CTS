@@ -168,6 +168,8 @@ export function TicketDetailPage() {
     () => buildConversation(comments, progress),
     [comments, progress],
   );
+  // The client reads newest first: the latest update sits at the top.
+  const displayThread = useMemo<ThreadItem[]>(() => [...thread].reverse(), [thread]);
 
   const latestDeskMessage = useMemo(
     () => [...comments].reverse().find((c) => c.authorId !== myUserId) ?? null,
@@ -300,13 +302,13 @@ export function TicketDetailPage() {
         </Box>
       </FieldRow>
       <FieldRow label="Conversation">
-        <ConversationScroll count={thread.length} compact>
+        <ConversationScroll count={thread.length} tall newestFirst>
           {thread.length === 0 && (
             <Typography color="text.secondary">
               No updates yet. The service desk will post here once they've taken a look.
             </Typography>
           )}
-          {thread.map((item) =>
+          {displayThread.map((item) =>
             item.type === "status" ? (
               <Divider
                 key={`s-${item.at}-${item.status}`}
