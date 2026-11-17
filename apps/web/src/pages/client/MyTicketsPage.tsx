@@ -3,17 +3,22 @@ import { useEffect, useMemo, useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import {
   Alert,
+  Badge,
   Box,
   Button,
   Card,
   CardActionArea,
   CardContent,
   Chip,
+  IconButton,
   Stack,
   ToggleButton,
   ToggleButtonGroup,
+  Tooltip,
   Typography,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
+import FilterListRoundedIcon from "@mui/icons-material/FilterListRounded";
 import type { IncidentStatus, Priority } from "@cts-dc-opsdesk/shared-types";
 import { apiGet } from "../../api/client";
 import {
@@ -70,6 +75,7 @@ export function MyTicketsPage() {
   const [incidents, setIncidents] = useState<ClientIncident[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
+  const [showFilters, setShowFilters] = useState(true);
   const filter = (FILTERS.find((f) => f.value === params.get("show"))?.value ?? "open") as Filter;
   const typeFilter = params.get("type") ?? "";
 
@@ -138,17 +144,41 @@ export function MyTicketsPage() {
             Everything you've reported, and where it stands.
           </Typography>
         </Box>
-        <Button
-          component={RouterLink}
-          to="/client/report"
-          variant="contained"
-          sx={{ textTransform: "none", fontWeight: 600 }}
-        >
-          Report an issue
-        </Button>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Tooltip title={showFilters ? "Hide issue-type filters" : "Show issue-type filters"}>
+            <IconButton
+              aria-label="Toggle issue-type filters"
+              aria-expanded={showFilters}
+              onClick={() => setShowFilters((v) => !v)}
+              sx={{
+                width: 40,
+                height: 40,
+                borderRadius: 2,
+                border: "1px solid",
+                borderColor: typeFilter ? "primary.main" : "divider",
+                color: typeFilter ? "primary.main" : "text.secondary",
+                bgcolor: (t) =>
+                  typeFilter ? alpha(t.palette.primary.main, 0.08) : "background.paper",
+                "&:hover": { bgcolor: (t) => alpha(t.palette.primary.main, 0.12) },
+              }}
+            >
+              <Badge variant="dot" color="primary" invisible={!typeFilter}>
+                <FilterListRoundedIcon />
+              </Badge>
+            </IconButton>
+          </Tooltip>
+          <Button
+            component={RouterLink}
+            to="/client/report"
+            variant="contained"
+            sx={{ textTransform: "none", fontWeight: 600 }}
+          >
+            Report an issue
+          </Button>
+        </Stack>
       </Stack>
 
-      {incidents && (
+      {incidents && showFilters && (
         <Stack
           direction="row"
           spacing={1}
