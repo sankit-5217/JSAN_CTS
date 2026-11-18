@@ -124,9 +124,9 @@ export function MessageRecord({
 
 /**
  * A ticket's conversation, scrolling inside itself so the message box and
- * the template fields stay on screen. By default it opens on the newest
- * entry at the bottom (staff view). The client workspace passes `tall` for
- * a larger panel and `newestFirst` to keep the latest update at the top.
+ * the template fields stay on screen. Both portals pass `newestFirst` so
+ * the latest update sits at the top; the client workspace also passes
+ * `tall` for a larger panel.
  */
 export function ConversationScroll({
   count,

@@ -60,7 +60,6 @@ const pulse = keyframes`
 `;
 
 const WORKLOG_ACTIVITY_TYPES = ["REMOTE_WORK", "ONSITE", "TRAVEL", "VENDOR_CALL"];
-const IMPACT_URGENCY_VALUES = ["HIGH", "MEDIUM", "LOW"];
 
 // Mirrors IncidentsService's INCIDENT_ROUTING_ROLES — UI-only gate so a Site
 // Engineer sees disabled controls instead of a 403 after filling the form.
@@ -195,12 +194,6 @@ interface Worklog {
 }
 
 type Attachment = TicketAttachment;
-
-interface CiOption {
-  id: string;
-  ciCode: string;
-  name: string;
-}
 
 interface EngineerOption {
   id: string;
@@ -741,25 +734,14 @@ export function IncidentDetailPage() {
   // Seeded from the incident once per incident id, not on every refetch, so
   // a mid-edit refetch (e.g. someone else posts a comment) doesn't clobber
   // what's being typed.
-  // The issue template (the same form the client reported on) plus the
-  // staff-only fields around it.
   const [draft, setDraft] = useState<ReportDraft | null>(null);
-  const [editCategory, setEditCategory] = useState("");
-  const [editImpact, setEditImpact] = useState("");
-  const [editUrgency, setEditUrgency] = useState("");
   const [editPriorityChangeReason, setEditPriorityChangeReason] = useState("");
   const [editOwnerUser, setEditOwnerUser] = useState<EngineerOption | null>(null);
   const [editOwnerGroup, setEditOwnerGroup] = useState<GroupOption | null>(null);
-  const [ciQuery, setCiQuery] = useState("");
-  const [ciOptions, setCiOptions] = useState<CiOption[]>([]);
-  const [selectedCi, setSelectedCi] = useState<CiOption | null>(null);
 
   useEffect(() => {
     if (!incident) return;
     setDraft(draftFromTicket(incident as Parameters<typeof draftFromTicket>[0], catalog));
-    setEditCategory(incident.category);
-    setEditImpact(incident.impact);
-    setEditUrgency(incident.urgency);
     setEditPriorityChangeReason("");
     // The incident only carries owner/CI ids, not readable names — resolve
     // each to show a name instead of a raw UUID. Not `refetch`'s problem to
@@ -777,32 +759,9 @@ export function IncidentDetailPage() {
         ? (supportGroups.find((g) => g.id === incident.ownerGroupId) ?? null)
         : null,
     );
-    if (incident.ciId) {
-      apiGet<CiOption>(`/cis/${incident.ciId}`)
-        .then(setSelectedCi)
-        .catch(() => setSelectedCi(null));
-    } else {
-      setSelectedCi(null);
-    }
-    setCiQuery("");
     // Only re-seed when a different incident loads, not on every refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incident?.id, supportGroups, catalog]);
-
-  useEffect(() => {
-    if (!incident) {
-      setCiOptions([]);
-      return;
-    }
-    // No `q` filter at all when the field's empty — the backend already
-    // treats that as "no filter" (cmdb.service.ts's findAll), so this
-    // lists the site's whole CMDB inventory by default rather than
-    // requiring the engineer to already know a code before anything shows.
-    const qParam = ciQuery ? `&q=${encodeURIComponent(ciQuery)}` : "";
-    apiGet<{ items: CiOption[] }>(`/cis?siteId=${incident.siteId}${qParam}`)
-      .then((res) => setCiOptions(res.items))
-      .catch(() => undefined);
-  }, [ciQuery, incident]);
 
   const priorityChanged =
     incident !== null && draft !== null && draft.priority !== incident.priority;
@@ -813,9 +772,6 @@ export function IncidentDetailPage() {
     try {
       await apiPatch(`/incidents/${id}`, {
         shortDescription: draft.subject.trim(),
-        category: editCategory,
-        impact: editImpact,
-        urgency: editUrgency,
         // Description is frozen once raised (the backend refuses a change).
         issueType: draft.issueType || undefined,
         severity: draft.severity || undefined,
@@ -832,7 +788,6 @@ export function IncidentDetailPage() {
         // actually being changed, same as priorityChangeReason itself.
         priority: priorityChanged ? draft.priority : undefined,
         priorityChangeReason: priorityChanged ? editPriorityChangeReason : undefined,
-        ciId: selectedCi?.id,
         ownerUserId: draft.ownerUserId || undefined,
         ownerGroupId: draft.ownerGroupId || undefined,
       });
@@ -1045,10 +1000,16 @@ export function IncidentDetailPage() {
         </Box>
       </FieldRow>
       <FieldRow label="Conversation">
-        <ConversationScroll count={comments.length + (customerProgress?.reportEdits?.length ?? 0)}>
-          {/* Messages plus the reporter's report edits, in time order
-              (status changes have their own timeline below). */}
-          {buildConversation(comments, customerProgress, { statuses: false }).map((item) =>
+        <ConversationScroll
+          count={comments.length + (customerProgress?.reportEdits?.length ?? 0)}
+          newestFirst
+        >
+          {/* Messages plus the reporter's report edits, newest first — the
+              latest reply sits at the top (status changes have their own
+              timeline below). */}
+          {buildConversation(comments, customerProgress, { statuses: false })
+            .reverse()
+            .map((item) =>
             item.type === "edit" ? (
               <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
             ) : item.type === "comment" ? (
@@ -1179,8 +1140,8 @@ export function IncidentDetailPage() {
             {!canRoute && (
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 Reassigning ownership and overriding priority are a Service Desk/NOC or
-                elevated-role call — you can still update the classification, CC list, Ref Bug ID,
-                category, impact/urgency and affected CI.
+                elevated-role call — you can still update the classification, CC list and
+                Ref Bug ID.
               </Typography>
             )}
             {draft && catalog ? (
@@ -1227,55 +1188,11 @@ export function IncidentDetailPage() {
               <Typography color="text.secondary">Loading the template…</Typography>
             )}
 
-            <Typography variant="subtitle2" sx={{ mt: 3, mb: 1.5 }}>
-              Staff details
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  label="Category"
-                  size="small"
-                  fullWidth
-                  value={editCategory}
-                  onChange={(e) => setEditCategory(e.target.value)}
-                />
-              </Grid>
-              <Grid item xs={6} sm={4}>
-                <TextField
-                  select
-                  label="Impact"
-                  size="small"
-                  fullWidth
-                  value={editImpact}
-                  onChange={(e) => setEditImpact(e.target.value)}
-                >
-                  {IMPACT_URGENCY_VALUES.map((v) => (
-                    <MenuItem key={v} value={v}>
-                      {v}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Grid>
-              <Grid item xs={6} sm={4}>
-                <TextField
-                  select
-                  label="Urgency"
-                  size="small"
-                  fullWidth
-                  value={editUrgency}
-                  onChange={(e) => setEditUrgency(e.target.value)}
-                >
-                  {IMPACT_URGENCY_VALUES.map((v) => (
-                    <MenuItem key={v} value={v}>
-                      {v}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Grid>
-              {priorityChanged && (
-                <Grid item xs={12}>
+            {draft && (
+              <Stack spacing={1.5} sx={{ mt: 2 }}>
+                {priorityChanged && (
                   <TextField
-                    label={`Reason for priority change (${incident.priority} → ${draft?.priority})`}
+                    label={`Reason for priority change (${incident.priority} → ${draft.priority})`}
                     size="small"
                     fullWidth
                     required
@@ -1283,58 +1200,26 @@ export function IncidentDetailPage() {
                     value={editPriorityChangeReason}
                     onChange={(e) => setEditPriorityChangeReason(e.target.value)}
                   />
-                </Grid>
-              )}
-              <Grid item xs={12}>
-                <Autocomplete
-                  options={ciOptions}
-                  getOptionLabel={(o) => `${o.ciCode} — ${o.name}`}
-                  isOptionEqualToValue={(o, v) => o.id === v.id}
-                  value={selectedCi}
-                  onChange={(_, value) => setSelectedCi(value)}
-                  inputValue={ciQuery}
-                  onInputChange={(_, value) => setCiQuery(value)}
-                  openOnFocus
-                  noOptionsText="No CIs found at this site"
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Affected CI (search by code or name, or click to browse)"
-                      size="small"
-                      helperText="Which server/rack/PDU this ticket is actually about — links it into the CMDB for alert correlation and history."
-                    />
-                  )}
-                />
-              </Grid>
-              {incident.tool && (
-                <Grid item xs={12}>
-                  <Typography variant="caption" color="text.secondary">
-                    Tool (field retired from the template): {incident.tool}
-                  </Typography>
-                </Grid>
-              )}
-              <Grid item xs={12}>
+                )}
                 <Stack direction="row" spacing={2} alignItems="center">
                   <Button
                     variant="contained"
                     disabled={
-                      !draft ||
                       editProblems(draft).length > 0 ||
-                      !editCategory ||
                       (priorityChanged && !editPriorityChangeReason)
                     }
                     onClick={submitEdit}
                   >
                     Save changes
                   </Button>
-                  {draft && editProblems(draft)[0] && (
+                  {editProblems(draft)[0] && (
                     <Typography variant="body2" color="text.secondary">
                       {editProblems(draft)[0]}
                     </Typography>
                   )}
                 </Stack>
-              </Grid>
-            </Grid>
+              </Stack>
+            )}
           </Paper>
         </Grid>
       </Grid>
