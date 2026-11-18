@@ -4,7 +4,6 @@ import { Link as RouterLink, useParams } from "react-router-dom";
 import {
   Alert,
   Autocomplete,
-  Avatar,
   Box,
   Button,
   Card,
@@ -14,12 +13,7 @@ import {
   Divider,
   FormControlLabel,
   Grid,
-  IconButton,
-  LinearProgress,
   Link,
-  List,
-  ListItem,
-  ListItemAvatar,
   MenuItem,
   Paper,
   Stack,
@@ -31,12 +25,7 @@ import {
 } from "@mui/material";
 import { alpha, keyframes } from "@mui/material/styles";
 import AssignmentIndOutlinedIcon from "@mui/icons-material/AssignmentIndOutlined";
-import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
-import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
 import HourglassTopOutlinedIcon from "@mui/icons-material/HourglassTopOutlined";
-import PersonOffOutlinedIcon from "@mui/icons-material/PersonOffOutlined";
-import PersonSearchOutlinedIcon from "@mui/icons-material/PersonSearchOutlined";
-import RefreshIcon from "@mui/icons-material/Refresh";
 import TimerOutlinedIcon from "@mui/icons-material/TimerOutlined";
 import { apiGet, apiPatch, apiPost, getStoredToken } from "../api/client";
 import { decodeJwtPayload, getCurrentUserRole } from "../api/jwt";
@@ -367,274 +356,6 @@ function GroupPicker({
       noOptionsText="No support groups yet"
       renderInput={(params) => <TextField {...params} label={label} size="small" />}
     />
-  );
-}
-
-interface RoutingCandidate {
-  userId: string;
-  displayName: string;
-  email: string;
-  shiftLabel: string;
-  isOnCall: boolean;
-  openIncidentCount: number;
-  /** Open incidents weighted by priority; what the ranking sorts on. */
-  workloadScore: number;
-  isCurrentOwner: boolean;
-  inTeam: boolean;
-}
-
-interface RoutingSuggestions {
-  requiredSkills: { id: string; name: string }[];
-  candidates: RoutingCandidate[];
-  reason:
-    | "INCIDENT_NOT_OPEN"
-    | "NO_SKILL_REQUIREMENTS"
-    | "NO_ENGINEERS_ON_SHIFT"
-    | "NO_QUALIFIED_ENGINEER"
-    | null;
-  uncoveredSkills: { id: string; name: string }[];
-  team: { id: string; name: string } | null;
-  teamFallback: boolean;
-}
-
-function routingEmptyMessage(s: RoutingSuggestions, category: string): string {
-  switch (s.reason) {
-    case "INCIDENT_NOT_OPEN":
-      return "This incident is no longer open, so no routing suggestions are shown.";
-    case "NO_SKILL_REQUIREMENTS":
-      return `No skills are configured as required for category "${category}" — assign manually or to a group.`;
-    case "NO_ENGINEERS_ON_SHIFT":
-      return "Nobody with access to this site is on shift right now — assign manually or to a group queue.";
-    case "NO_QUALIFIED_ENGINEER":
-      return `Nobody on shift here has every required skill${
-        s.uncoveredSkills.length
-          ? ` (missing: ${s.uncoveredSkills.map((k) => k.name).join(", ")})`
-          : ""
-      } — assign manually or to a group queue.`;
-    default:
-      return "No suggestions.";
-  }
-}
-
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
-}
-
-/**
- * Skill-based routing suggestions (GET /incidents/:id/routing-suggestions),
- * rendered as its own side card next to Edit incident. "Assign" is a
- * one-click PATCH /incidents/:id with just ownerUserId — the same audited
- * reassign path Save changes uses, so the backend re-checks routing roles
- * and site scope regardless. Re-fetched when the category/status/owner
- * changes, not on every live-poll tick.
- */
-function RoutingSuggestionsCard({
-  incident,
-  onAssigned,
-}: {
-  incident: Incident;
-  onAssigned: (engineer: EngineerOption) => void;
-}) {
-  const [suggestions, setSuggestions] = useState<RoutingSuggestions | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [assigningId, setAssigningId] = useState<string | null>(null);
-  const [assignError, setAssignError] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    setLoadError(null);
-    apiGet<RoutingSuggestions>(`/incidents/${incident.id}/routing-suggestions`)
-      .then(setSuggestions)
-      .catch((err: Error) => setLoadError(err.message))
-      .finally(() => setLoading(false));
-  }, [incident.id]);
-
-  useEffect(load, [load, incident.category, incident.status, incident.ownerUserId]);
-
-  const assign = async (c: RoutingCandidate) => {
-    setAssigningId(c.userId);
-    setAssignError(null);
-    try {
-      await apiPatch(`/incidents/${incident.id}`, { ownerUserId: c.userId });
-      onAssigned({ id: c.userId, displayName: c.displayName, email: c.email });
-    } catch (err) {
-      setAssignError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setAssigningId(null);
-    }
-  };
-
-  // Workload bars are relative to the busiest candidate shown, so they
-  // compare engineers against each other rather than an arbitrary cap.
-  const maxLoad = Math.max(1, ...(suggestions?.candidates.map((c) => c.workloadScore) ?? []));
-
-  return (
-    <Paper sx={{ p: 2, height: "100%", display: "flex", flexDirection: "column" }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Stack direction="row" spacing={1} alignItems="center">
-          <PersonSearchOutlinedIcon color="primary" />
-          <Typography variant="h6">Suggested engineers</Typography>
-        </Stack>
-        <Tooltip title="Refresh suggestions">
-          <span>
-            <IconButton size="small" onClick={load} disabled={loading} aria-label="Refresh">
-              <RefreshIcon fontSize="small" />
-            </IconButton>
-          </span>
-        </Tooltip>
-      </Stack>
-      <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
-        On shift at this site now and holding every required skill, least busy first. Busy counts
-        each open ticket by its priority{incident.priority === "P1" && "; on-call included for P1"}.
-      </Typography>
-      {suggestions && suggestions.requiredSkills.length > 0 && (
-        <Stack
-          direction="row"
-          spacing={0.5}
-          alignItems="center"
-          flexWrap="wrap"
-          useFlexGap
-          sx={{ mb: 1 }}
-        >
-          <Typography variant="body2" color="text.secondary">
-            Needs
-          </Typography>
-          {suggestions.requiredSkills.map((k) => (
-            <Chip key={k.id} size="small" variant="outlined" color="primary" label={k.name} />
-          ))}
-        </Stack>
-      )}
-      {suggestions?.team && (
-        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mb: 1 }}>
-          <Typography variant="body2" color="text.secondary">
-            Team
-          </Typography>
-          <Chip size="small" icon={<GroupsOutlinedIcon />} label={suggestions.team.name} />
-        </Stack>
-      )}
-      {suggestions?.teamFallback && suggestions.team && (
-        <Alert severity="info" sx={{ mb: 1, py: 0 }}>
-          Nobody from {suggestions.team.name} is on shift with the right skills, so these are
-          qualified engineers from other teams.
-        </Alert>
-      )}
-      <Divider sx={{ mb: 1 }} />
-      {loading && <LinearProgress sx={{ mb: 1 }} />}
-      {assignError && (
-        <Alert severity="error" sx={{ mb: 1 }} onClose={() => setAssignError(null)}>
-          {assignError}
-        </Alert>
-      )}
-      {loadError ? (
-        <Alert severity="error">Could not load suggestions: {loadError}</Alert>
-      ) : !suggestions ? (
-        <Typography variant="body2" color="text.secondary">
-          Loading...
-        </Typography>
-      ) : suggestions.candidates.length === 0 ? (
-        <Box sx={{ textAlign: "center", py: 3, px: 1 }}>
-          <PersonOffOutlinedIcon color="disabled" sx={{ fontSize: 40 }} />
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            {routingEmptyMessage(suggestions, incident.category)}
-          </Typography>
-          {suggestions.uncoveredSkills.length > 0 && (
-            <Stack direction="row" spacing={0.5} justifyContent="center" sx={{ mt: 1 }}>
-              {suggestions.uncoveredSkills.map((k) => (
-                <Chip key={k.id} size="small" color="warning" label={`No ${k.name}`} />
-              ))}
-            </Stack>
-          )}
-        </Box>
-      ) : (
-        <List disablePadding sx={{ overflowY: "auto" }}>
-          {suggestions.candidates.map((c, index) => (
-            <ListItem
-              key={c.userId}
-              disableGutters
-              divider={index < suggestions.candidates.length - 1}
-              sx={{ alignItems: "flex-start", py: 1.25 }}
-            >
-              <ListItemAvatar sx={{ minWidth: 48 }}>
-                <Avatar
-                  sx={{
-                    width: 36,
-                    height: 36,
-                    fontSize: 13,
-                    bgcolor: c.isCurrentOwner ? severityColors.healthy : "primary.main",
-                  }}
-                >
-                  {initials(c.displayName)}
-                </Avatar>
-              </ListItemAvatar>
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
-                  <Typography variant="body2" fontWeight={600} noWrap>
-                    {c.displayName}
-                  </Typography>
-                  {index === 0 && !c.isCurrentOwner && (
-                    <Chip size="small" color="success" variant="outlined" label="Best match" />
-                  )}
-                  {suggestions.team && !c.inTeam && (
-                    <Chip size="small" variant="outlined" label="Outside team" />
-                  )}
-                </Stack>
-                <Box sx={{ mt: 0.5 }}>
-                  <Chip
-                    size="small"
-                    variant={c.isOnCall ? "filled" : "outlined"}
-                    color={c.isOnCall ? "warning" : "default"}
-                    label={c.isOnCall ? `On-call · ${c.shiftLabel}` : c.shiftLabel}
-                  />
-                </Box>
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.75 }}>
-                  <LinearProgress
-                    variant="determinate"
-                    value={(c.workloadScore / maxLoad) * 100}
-                    color={c.workloadScore === 0 ? "success" : "primary"}
-                    sx={{ flex: 1, height: 6, borderRadius: 3 }}
-                    aria-label={`${c.openIncidentCount} open incidents, load ${c.workloadScore}`}
-                  />
-                  <Tooltip title="Load = open tickets weighted by priority (site routing weights)">
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ whiteSpace: "nowrap" }}
-                    >
-                      {c.openIncidentCount} open · load {c.workloadScore}
-                    </Typography>
-                  </Tooltip>
-                </Stack>
-              </Box>
-              <Box sx={{ ml: 1, alignSelf: "center" }}>
-                {c.isCurrentOwner ? (
-                  <Chip
-                    size="small"
-                    color="success"
-                    icon={<CheckCircleOutlineIcon />}
-                    label="Owner"
-                  />
-                ) : (
-                  <Button
-                    size="small"
-                    variant={index === 0 ? "contained" : "outlined"}
-                    disabled={assigningId !== null}
-                    onClick={() => assign(c)}
-                  >
-                    {assigningId === c.userId ? "Assigning…" : "Assign"}
-                  </Button>
-                )}
-              </Box>
-            </ListItem>
-          ))}
-        </List>
-      )}
-    </Paper>
   );
 }
 
@@ -1450,7 +1171,7 @@ export function IncidentDetailPage() {
       />
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={canRoute ? 8 : 12}>
+        <Grid item xs={12}>
           <Paper sx={{ p: 2, height: "100%" }}>
             <Typography variant="h6" gutterBottom>
               Issue template
@@ -1464,6 +1185,7 @@ export function IncidentDetailPage() {
             )}
             {draft && catalog ? (
               <IssueTemplateForm
+                compact
                 mode="edit"
                 catalog={catalog}
                 draft={draft}
@@ -1615,20 +1337,6 @@ export function IncidentDetailPage() {
             </Grid>
           </Paper>
         </Grid>
-        {canRoute && (
-          <Grid item xs={12} md={4}>
-            <RoutingSuggestionsCard
-              incident={incident}
-              onAssigned={(engineer) => {
-                // Keep the template's Assignee in step with the new owner,
-                // so a later Save changes doesn't revert it.
-                setEditOwnerUser(engineer);
-                setDraft((d) => (d ? { ...d, ownerUserId: engineer.id } : d));
-                refetch();
-              }}
-            />
-          </Grid>
-        )}
       </Grid>
 
       <Grid container spacing={3}>
