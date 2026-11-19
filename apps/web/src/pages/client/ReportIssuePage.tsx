@@ -127,7 +127,7 @@ export function ReportIssuePage() {
       helperText={
         sites.length === 0
           ? "Your account isn't linked to a site yet. Ask your JSAN contact."
-          : "Fixed after submission"
+          : undefined
       }
       SelectProps={{
         displayEmpty: true,

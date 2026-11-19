@@ -37,10 +37,12 @@ export function FieldRow({
   label,
   children,
   stacked = false,
+  sheet = false,
 }: {
   label: string;
   children: ReactNode;
   stacked?: boolean;
+  sheet?: boolean;
 }) {
   if (stacked) {
     return (
@@ -51,11 +53,31 @@ export function FieldRow({
     );
   }
   return (
-    <Stack direction="row" alignItems="flex-start" spacing={1.5}>
-      <Typography sx={{ width: 112, flexShrink: 0, fontWeight: 700, fontSize: 13, pt: 1 }}>
+    <Stack
+      direction="row"
+      alignItems={sheet ? "stretch" : "flex-start"}
+      spacing={sheet ? 0 : 1.5}
+      className={sheet ? "sheet-row" : undefined}
+    >
+      <Typography
+        className={sheet ? "sheet-label" : undefined}
+        sx={{
+          width: 112,
+          flexShrink: 0,
+          fontWeight: 700,
+          fontSize: 13,
+          pt: sheet ? 0.75 : 1,
+          px: sheet ? 1 : 0,
+        }}
+      >
         {label}
       </Typography>
-      <Box sx={{ flex: 1, minWidth: 0 }}>{children}</Box>
+      <Box
+        className={sheet ? "sheet-control" : undefined}
+        sx={{ flex: 1, minWidth: 0, px: sheet ? 0.75 : 0, py: sheet ? 0.25 : 0 }}
+      >
+        {children}
+      </Box>
     </Stack>
   );
 }
@@ -238,6 +260,20 @@ export function IssueTemplateForm({
           ? {
               "& .MuiInputBase-inputSizeSmall": { py: 0.6 },
               "& .MuiFormHelperText-root": { mx: 0, mt: 0.25, lineHeight: 1.25, fontSize: 11 },
+              "& .sheet-row": {
+                border: "1px solid",
+                borderColor: "divider",
+                bgcolor: "background.paper",
+              },
+              "& .sheet-label": {
+                bgcolor: "action.hover",
+                borderRight: "1px solid",
+                borderColor: "divider",
+              },
+              "& .sheet-control": {
+                "& .MuiOutlinedInput-notchedOutline": { border: "none" },
+                "& .MuiSelect-select": { bgcolor: "#e9eef4", borderRadius: 4 },
+              },
             }
           : {}),
       }}
@@ -248,7 +284,7 @@ export function IssueTemplateForm({
           {/* A template only drafts a new report. Once the ticket is raised
               no role gets it back (the issue type stays editable on its own). */}
           {mode === "create" && (
-            <FieldRow label="Template">
+            <FieldRow sheet={compact} label="Template">
               <TextField
                 select
                 size="small"
@@ -259,7 +295,9 @@ export function IssueTemplateForm({
                 helperText={
                   catalog.templates.length === 0
                     ? "No templates configured yet — pick an issue type on the right"
-                    : "Fills a draft subject, description and defaults"
+                    : compact
+                      ? undefined
+                      : "Fills a draft subject, description and defaults"
                 }
                 sx={selectSx}
               >
@@ -275,7 +313,7 @@ export function IssueTemplateForm({
             </FieldRow>
           )}
 
-          <FieldRow label="Subject">
+          <FieldRow sheet={compact} label="Subject">
             <TextField
               size="small"
               fullWidth
@@ -288,7 +326,7 @@ export function IssueTemplateForm({
             />
           </FieldRow>
 
-          <FieldRow label="Description:">
+          <FieldRow sheet={compact} label="Description:">
             {mode === "edit" ? (
               <Box>
                 <Typography
@@ -324,25 +362,23 @@ export function IssueTemplateForm({
             )}
           </FieldRow>
 
-          {attachments && <FieldRow label="Attachments">{attachments}</FieldRow>}
+          {attachments && (
+            <FieldRow sheet={compact} label="Attachments">
+              {attachments}
+            </FieldRow>
+          )}
 
           {belowDescription}
         </Stack>
       </Box>
 
-      {/* Right: the classification sheet. Two columns on wide screens so the
-          whole sheet fits above the fold without shrinking any type. */}
+      {/* Right: the classification sheet, one column of label/control rows
+          exactly like the reporting sheet this form mirrors. */}
       <Box sx={{ minWidth: 0 }}>
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: {
-              xs: "minmax(0, 1fr)",
-              lg: compact ? "repeat(2, minmax(0, 1fr))" : "minmax(0, 1fr)",
-            },
-            gap: 0.75,
-            alignItems: "start",
-            ...(compact
+        <Stack
+          spacing={compact ? 0.5 : 1.5}
+          sx={
+            compact
               ? {
                   "& .MuiFormHelperText-root": {
                     mx: 0,
@@ -351,20 +387,20 @@ export function IssueTemplateForm({
                     fontSize: 11,
                   },
                 }
-              : {}),
-          }}
+              : undefined
+          }
         >
           {site && (
-            <FieldRow stacked label="Site">
+            <FieldRow stacked={!compact} sheet={compact} label="Site">
               {site}
             </FieldRow>
           )}
 
-          <FieldRow stacked label="Reporter">
+          <FieldRow stacked={!compact} sheet={compact} label="Reporter">
             <TextField size="small" fullWidth value={reporter} InputProps={{ readOnly: true }} />
           </FieldRow>
 
-          <FieldRow stacked label="Assignee Group">
+          <FieldRow stacked={!compact} sheet={compact} label="Assignee Group">
             <TextField
               select
               size="small"
@@ -391,7 +427,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow stacked label="Assignee">
+          <FieldRow stacked={!compact} sheet={compact} label="Assignee">
             <TextField
               select
               size="small"
@@ -404,7 +440,9 @@ export function IssueTemplateForm({
                   ? "Pick an assignee group first"
                   : members.length === 0
                     ? `${selectedGroup?.name ?? "This group"} will assign someone`
-                    : "Optional — the team usually sets this"
+                    : compact
+                      ? undefined
+                      : "Optional — the team usually sets this"
               }
               sx={selectSx}
             >
@@ -419,7 +457,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow stacked label="CC List">
+          <FieldRow stacked={!compact} sheet={compact} label="CC List">
             <Box>
               <TextField
                 size="small"
@@ -436,7 +474,7 @@ export function IssueTemplateForm({
                   }
                 }}
                 error={Boolean(ccWarning)}
-                helperText={ccWarning ?? "People to copy on updates"}
+                helperText={ccWarning ?? (compact ? undefined : "People to copy on updates")}
               />
               {draft.ccEmails.length > 0 && (
                 <Stack direction="row" spacing={0.5} sx={{ mt: 0.5 }} flexWrap="wrap" useFlexGap>
@@ -461,11 +499,11 @@ export function IssueTemplateForm({
             </Box>
           </FieldRow>
 
-          <FieldRow stacked label="Status">
+          <FieldRow stacked={!compact} sheet={compact} label="Status">
             {status}
           </FieldRow>
 
-          <FieldRow stacked label="Ref Bug ID">
+          <FieldRow stacked={!compact} sheet={compact} label="Ref Bug ID">
             <TextField
               size="small"
               fullWidth
@@ -473,11 +511,13 @@ export function IssueTemplateForm({
               value={draft.refIncidentNo}
               onChange={(e) => set("refIncidentNo", e.target.value)}
               disabled={locked}
-              helperText="If this duplicates or is blocked by another ticket"
+              helperText={
+                compact ? undefined : "If this duplicates or is blocked by another ticket"
+              }
             />
           </FieldRow>
 
-          <FieldRow stacked label="Issue Type">
+          <FieldRow stacked={!compact} sheet={compact} label="Issue Type">
             <TextField
               select
               size="small"
@@ -495,7 +535,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow stacked label="Priority:">
+          <FieldRow stacked={!compact} sheet={compact} label="Priority:">
             <TextField
               select
               size="small"
@@ -506,7 +546,9 @@ export function IssueTemplateForm({
               helperText={
                 routingLocked
                   ? routingLockedHint
-                  : (priorityHelper ?? "The service desk may adjust this after triage")
+                  : compact && !priorityHelper
+                    ? undefined
+                    : (priorityHelper ?? "The service desk may adjust this after triage")
               }
               sx={selectSx}
             >
@@ -523,7 +565,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow stacked label="Severity:">
+          <FieldRow stacked={!compact} sheet={compact} label="Severity:">
             <TextField
               select
               size="small"
@@ -544,7 +586,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow stacked label="Component">
+          <FieldRow stacked={!compact} sheet={compact} label="Component">
             <TextField
               select
               size="small"
@@ -567,7 +609,7 @@ export function IssueTemplateForm({
             </TextField>
           </FieldRow>
 
-          <FieldRow stacked label="Sub Component">
+          <FieldRow stacked={!compact} sheet={compact} label="Sub Component">
             <TextField
               select
               size="small"
@@ -594,7 +636,7 @@ export function IssueTemplateForm({
               ))}
             </TextField>
           </FieldRow>
-        </Box>
+        </Stack>
       </Box>
     </Box>
   );
