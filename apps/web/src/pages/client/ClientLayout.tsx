@@ -76,7 +76,7 @@ export function ClientLayout() {
     location.pathname.startsWith("/client/tickets/");
 
   const nav = (
-    <Stack component="nav" aria-label="Client navigation" spacing={0.5} sx={{ px: 1.5 }}>
+    <Stack component="nav" aria-label="Client navigation" spacing={0.25} sx={{ px: 1.5 }}>
       {NAV_ITEMS.map((item) => {
         const active = location.pathname.startsWith(item.to);
         return (
@@ -113,12 +113,7 @@ export function ClientLayout() {
       <NotificationBell
         linkFor={(n) => (n.entityType === "INCIDENT" ? `/client/tickets/${n.entityId}` : null)}
       />
-      <AccountMenu
-        email={user.email}
-        roleLabel="Client"
-        roleColor="#1565c0"
-        onLogout={signOut}
-      />
+      <AccountMenu email={user.email} roleLabel="Client" roleColor="#1565c0" onLogout={signOut} />
     </Stack>
   );
 
@@ -217,7 +212,13 @@ export function ClientLayout() {
             <Box sx={{ flex: 1 }} />
             {user && (
               <Typography
-                sx={{ px: 2.5, pt: 2, fontSize: 11, color: "text.secondary", overflowWrap: "anywhere" }}
+                sx={{
+                  px: 2.5,
+                  pt: 2,
+                  fontSize: 11,
+                  color: "text.secondary",
+                  overflowWrap: "anywhere",
+                }}
               >
                 Signed in as {user.email}
               </Typography>
@@ -233,7 +234,7 @@ export function ClientLayout() {
               maxWidth: isFullScreenPage ? "none" : 1000,
               mx: "auto",
               p: compactWorkspace
-                ? { xs: 1.5, sm: 2 }
+                ? { xs: 1.5, sm: 1.5 }
                 : isFullScreenPage
                   ? { xs: 1.5, sm: 3 }
                   : { xs: 2, sm: 4 },
@@ -245,7 +246,7 @@ export function ClientLayout() {
               direction="row"
               justifyContent="flex-end"
               alignItems="center"
-              sx={{ display: { xs: "none", md: "flex" }, mb: 1.5 }}
+              sx={{ display: { xs: "none", md: "flex" }, mb: 1 }}
             >
               {account}
             </Stack>

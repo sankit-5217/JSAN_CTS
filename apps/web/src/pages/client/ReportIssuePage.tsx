@@ -202,7 +202,7 @@ export function ReportIssuePage() {
           borderColor: "divider",
         }}
       >
-        <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
+        <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
@@ -228,7 +228,7 @@ export function ReportIssuePage() {
             direction={{ xs: "column", sm: "row" }}
             spacing={2}
             alignItems={{ sm: "center" }}
-            sx={{ mt: 1.5, pt: 1.5, borderTop: 1, borderColor: "divider" }}
+            sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: "divider" }}
           >
             <Button
               variant="contained"
