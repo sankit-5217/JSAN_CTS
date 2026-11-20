@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useCallback, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -21,6 +21,7 @@ import VisibilityOffOutlinedIcon from "@mui/icons-material/VisibilityOffOutlined
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import { ApiError, apiPost, storeToken } from "../api/client";
 import { landingPathFor } from "../api/jwt";
+import { SendingEmailSetup } from "./SendingEmailSetup";
 import { theme } from "../theme/theme";
 
 interface TokenResponse {
@@ -52,6 +53,10 @@ export function SignInCard() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
+  const [signedInToken, setSignedInToken] = useState<string | null>(null);
+  const continueToOpsDesk = useCallback(() => {
+    if (signedInToken) navigate(landingPathFor(signedInToken), { replace: true });
+  }, [navigate, signedInToken]);
 
   const signIn = async (e: FormEvent) => {
     e.preventDefault();
@@ -64,7 +69,12 @@ export function SignInCard() {
         password,
       });
       storeToken(accessToken);
-      navigate(mustChangePassword ? "/auth/change-password" : landingPathFor(accessToken));
+      setPassword("");
+      if (mustChangePassword || landingPathFor(accessToken) === "/auth/change-password") {
+        navigate("/auth/change-password", { replace: true });
+      } else {
+        setSignedInToken(accessToken);
+      }
     } catch (err) {
       setError(serverMessage(err));
       setPassword("");
@@ -72,6 +82,14 @@ export function SignInCard() {
       setLoading(false);
     }
   };
+
+  if (signedInToken)
+    return (
+      // No `next` here: the API returns each user to their own home by role
+      // (client portal for clients, ops console for everyone else), so
+      // connecting a mailbox never strands them on a separate page.
+      <SendingEmailSetup onContinue={continueToOpsDesk} />
+    );
 
   return (
     <>
@@ -90,7 +108,8 @@ export function SignInCard() {
         Sign in to JSAN OpsDesk
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-        Use the email and password from your OpsDesk administrator.
+        Use the email and password from your OpsDesk administrator. After signing in, you can
+        connect your matching mailbox here for ticket emails.
       </Typography>
 
       <>

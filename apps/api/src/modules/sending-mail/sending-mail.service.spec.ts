@@ -4,6 +4,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { decryptSecret, encryptSecret, loadSecretsKey } from "../../common/crypto/secret-cipher";
 import type { ExecutionContext } from "@nestjs/common";
+import type { Response } from "express";
 
 describe("sending accounts", () => {
   const originalEnv = process.env;
@@ -420,5 +421,97 @@ describe("sending accounts", () => {
     process.env.MAIL_WORKER_KEY = "x".repeat(32);
     expect(() => guard.canActivate(ctx("bad"))).toThrow();
     expect(guard.canActivate(ctx("x".repeat(32)))).toBe(true);
+  });
+
+  it("offers app-password providers to every user, not only OAuth ones", async () => {
+    const { service } = fixture();
+    const status = await service.status("user");
+    expect(status.smtpProviders.map((p) => p.provider)).toEqual(["yahoo", "icloud", "zoho"]);
+  });
+
+  const statePath = (url: string) => {
+    const state = new URL(url).searchParams.get("state")!;
+    return Buffer.from(state.split(".")[1], "base64url").toString("utf8");
+  };
+
+  it.each([
+    ["CLIENT_MANAGER_VIEWER", "/client/home"],
+    ["SERVICE_DESK_NOC", "/"],
+    ["SITE_ENGINEER", "/"],
+    ["SUPER_ADMIN", "/"],
+  ])("sends a %s back to their own home after connecting", async (role, expected) => {
+    const { db, service } = fixture();
+    db.user.findUniqueOrThrow.mockResolvedValue({
+      id: "user",
+      email: "user@example.com",
+      displayName: "User",
+      isActive: true,
+      sessionVersion: 3,
+      role,
+    });
+    const { url } = await service.connect("user", "google");
+    expect(statePath(url)).toBe(expected);
+  });
+
+  it("ignores a return path that is not one of ours", async () => {
+    const { service } = fixture();
+    const { url } = await service.connect("user", "google", "https://evil.example/steal");
+    expect(statePath(url)).toBe("/");
+  });
+
+  it("returns the user to the page they started the connection from", async () => {
+    const { db, service } = fixture();
+    const { url } = await service.connect("user", "google", "/account/email");
+    const state = new URL(url).searchParams.get("state")!;
+    db.mailAuthorization.findUnique.mockResolvedValue(
+      db.mailAuthorization.create.mock.calls[0][0].data,
+    );
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          access_token: "access",
+          refresh_token: "refresh",
+          expires_in: 3600,
+          scope: "openid email https://www.googleapis.com/auth/gmail.send",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ email: "user@example.com", email_verified: true }),
+      });
+    await expect(service.callback("google", state, "code")).resolves.toBe("/account/email");
+  });
+
+  it("redirects a finished connection to the user's own home, with no extra page", async () => {
+    const callback = jest.fn().mockResolvedValue("/client/home");
+    const controller = new SendingMailController({ callback } as unknown as SendingMailService);
+    const response = { setHeader: jest.fn(), redirect: jest.fn() };
+    await controller.callback(
+      "google",
+      "nonce.path",
+      "code",
+      response as unknown as Response,
+    );
+    expect(response.redirect).toHaveBeenCalledWith(
+      expect.stringContaining("/client/home?result=connected"),
+    );
+    expect(response.redirect).not.toHaveBeenCalledWith(expect.stringContaining("/account/email"));
+  });
+
+  it("brings a failed connection back to the same place, so it can be retried", async () => {
+    const callback = jest.fn().mockRejectedValue(new Error("refused"));
+    const controller = new SendingMailController({ callback } as unknown as SendingMailService);
+    const response = { setHeader: jest.fn(), redirect: jest.fn() };
+    await controller.callback(
+      "google",
+      "nonce.path",
+      undefined,
+      response as unknown as Response,
+    );
+    expect(response.redirect).toHaveBeenCalledWith(
+      expect.stringContaining("result=failed"),
+    );
   });
 });

@@ -18,6 +18,7 @@ import ChatOutlinedIcon from "@mui/icons-material/ChatOutlined";
 import TaskAltOutlinedIcon from "@mui/icons-material/TaskAltOutlined";
 import { apiGet, getStoredToken } from "../../api/client";
 import { decodeJwtPayload } from "../../api/jwt";
+import { SendingEmailResult, SendingEmailStatus } from "../../components/SendingEmailStatus";
 import { SLA_LABEL, useClientPortal, type SlaClockState } from "./clientPortal";
 import { isFinished, needsYou } from "./clientTicket";
 import { TicketRow, type ClientIncident } from "./MyTicketsPage";
@@ -104,6 +105,8 @@ export function ClientHomePage() {
 
   return (
     <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
+      <SendingEmailResult />
+      <SendingEmailStatus />
       <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
         {greetingName ? `Hello, ${greetingName}` : "Welcome"}
       </Typography>

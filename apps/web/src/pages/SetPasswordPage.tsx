@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useCallback, useState, type FormEvent } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -12,6 +12,7 @@ import {
   Typography,
 } from "@mui/material";
 import { ApiError, apiPost, storeToken } from "../api/client";
+import { SendingEmailSetup } from "../components/SendingEmailSetup";
 import { landingPathFor } from "../api/jwt";
 
 interface TokenInfo {
@@ -38,6 +39,10 @@ function tokenFrom(text: string): string {
  */
 export function SetPasswordPage() {
   const navigate = useNavigate();
+  const [signedInToken, setSignedInToken] = useState<string | null>(null);
+  const continueToOpsDesk = useCallback(() => {
+    if (signedInToken) navigate(landingPathFor(signedInToken), { replace: true });
+  }, [navigate, signedInToken]);
   const token = useRef<string | null>(null);
   const [info, setInfo] = useState<TokenInfo | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -96,7 +101,7 @@ export function SetPasswordPage() {
         password,
       });
       storeToken(accessToken);
-      navigate(landingPathFor(accessToken), { replace: true });
+      setSignedInToken(accessToken);
     } catch (err) {
       const message =
         err instanceof ApiError ? (err.body as { message?: unknown } | null)?.message : undefined;
@@ -105,6 +110,18 @@ export function SetPasswordPage() {
       setSaving(false);
     }
   };
+
+  if (signedInToken) {
+    return (
+      <Box sx={{ maxWidth: 700, mx: "auto", p: { xs: 2, sm: 4 } }}>
+        <Card>
+          <CardContent>
+            <SendingEmailSetup onContinue={continueToOpsDesk} />
+          </CardContent>
+        </Card>
+      </Box>
+    );
+  }
 
   return (
     <Box
@@ -193,7 +210,7 @@ export function SetPasswordPage() {
                   fullWidth
                 />
                 <TextField
-                  label="Confirm password"
+                  label="Confirm new password"
                   type="password"
                   autoComplete="new-password"
                   value={confirm}

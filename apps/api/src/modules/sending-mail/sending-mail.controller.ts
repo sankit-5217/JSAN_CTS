@@ -34,7 +34,7 @@ import type { Response } from "express";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
-import { SendingMailService } from "./sending-mail.service";
+import { SendingMailService, returnPathFromState } from "./sending-mail.service";
 
 class SmtpDto {
   @IsIn(["yahoo", "icloud", "zoho"]) provider!: string;
@@ -94,9 +94,17 @@ export class SendingMailController {
   @Post("connect/:provider")
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Authorize the current user's Gmail or Microsoft mailbox" })
-  connect(@CurrentUser() user: AuthenticatedUser, @Param("provider") provider: string) {
-    return this.service.connect(user.id, provider);
+  @ApiOperation({
+    summary: "Authorize the current user's Gmail or Microsoft mailbox",
+    description:
+      "Optional `next` path (client portal, ops console or the mailbox page) the user is sent back to once the provider answers.",
+  })
+  connect(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("provider") provider: string,
+    @Query("next") next?: string,
+  ) {
+    return this.service.connect(user.id, provider, next);
   }
 
   @Post("smtp")
@@ -118,7 +126,11 @@ export class SendingMailController {
   }
 
   @Get("callback/:provider")
-  @ApiOperation({ summary: "Single-use, expiring OAuth callback" })
+  @ApiOperation({
+    summary: "Single-use, expiring OAuth callback",
+    description:
+      "Sends the user back to the page they started from — their own home by default — so a mailbox connection never becomes an extra step.",
+  })
   async callback(
     @Param("provider") provider: string,
     @Query("state") state: string,
@@ -126,16 +138,18 @@ export class SendingMailController {
     @Res() response: Response,
   ) {
     let result = "connected";
+    let target = returnPathFromState(state) ?? "/account/email";
     try {
-      if (!state || state.length > 256) throw new Error("Invalid state");
-      await this.service.callback(provider, state, code);
+      if (!state || state.length > 512) throw new Error("Invalid state");
+      target = await this.service.callback(provider, state, code);
     } catch {
       result = "failed";
     }
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Referrer-Policy", "no-referrer");
     const base = (process.env.WEB_APP_URL ?? "http://localhost:5173").replace(/\/$/, "");
-    return response.redirect(`${base}/account/email?result=${result}`);
+    const separator = target.includes("?") ? "&" : "?";
+    return response.redirect(`${base}${target}${separator}result=${result}`);
   }
 
   @Post("deliver")

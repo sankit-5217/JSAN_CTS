@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useCallback, useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -14,6 +14,8 @@ import {
 import { ApiError, apiPost, getStoredToken, signOut, storeToken } from "../api/client";
 import { decodeJwtPayload, landingPathFor, passwordChangeRequired } from "../api/jwt";
 
+import { SendingEmailSetup } from "../components/SendingEmailSetup";
+
 const MIN_LENGTH = 12;
 
 /**
@@ -23,6 +25,10 @@ const MIN_LENGTH = 12;
  */
 export function ChangePasswordPage() {
   const navigate = useNavigate();
+  const [signedInToken, setSignedInToken] = useState<string | null>(null);
+  const continueToOpsDesk = useCallback(() => {
+    if (signedInToken) navigate(landingPathFor(signedInToken), { replace: true });
+  }, [navigate, signedInToken]);
   const token = getStoredToken();
   const required = passwordChangeRequired();
   const email = token ? (decodeJwtPayload(token)?.email ?? "") : "";
@@ -50,7 +56,7 @@ export function ChangePasswordPage() {
         newPassword: password,
       });
       storeToken(accessToken);
-      navigate(landingPathFor(accessToken), { replace: true });
+      setSignedInToken(accessToken);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         signOut();
@@ -62,6 +68,18 @@ export function ChangePasswordPage() {
       setSaving(false);
     }
   };
+
+  if (signedInToken) {
+    return (
+      <Box sx={{ maxWidth: 700, mx: "auto", p: { xs: 2, sm: 4 } }}>
+        <Card>
+          <CardContent>
+            <SendingEmailSetup onContinue={continueToOpsDesk} />
+          </CardContent>
+        </Card>
+      </Box>
+    );
+  }
 
   return (
     <Box

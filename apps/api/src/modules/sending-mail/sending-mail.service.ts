@@ -22,6 +22,36 @@ interface Credentials {
 }
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
+/**
+ * Where a finished mailbox connection returns the user. A fixed allowlist,
+ * never a caller-supplied URL — the OAuth callback redirects here, so an
+ * arbitrary path would turn it into an open redirect.
+ */
+const RETURN_PATHS = ["/", "/client/home", "/account/email"] as const;
+
+/** The home a role belongs to: the client portal for clients, the console for staff. */
+export function defaultReturnPath(role: string): string {
+  return role === "CLIENT_MANAGER_VIEWER" ? "/client/home" : "/";
+}
+
+/** The path carried inside an OAuth state, or null when it isn't one of ours. */
+export function returnPathFromState(state: string | undefined): string | null {
+  if (!state) return null;
+  const encoded = state.split(".")[1];
+  if (!encoded) return null;
+  try {
+    const path = Buffer.from(encoded, "base64url").toString("utf8");
+    return (RETURN_PATHS as readonly string[]).includes(path) ? path : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveReturnPath(role: string, next?: string): string {
+  if (next && (RETURN_PATHS as readonly string[]).includes(next)) return next;
+  return defaultReturnPath(role);
+}
+
 @Injectable()
 export class SendingMailService {
   constructor(
@@ -56,13 +86,24 @@ export class SendingMailService {
           return { provider, configured: false };
         }
       }),
+      // App-password mailboxes: no admin setup, so every user can reach them
+      // from the same step as the OAuth providers.
+      smtpProviders: Object.keys(SMTP_PROVIDERS).map((provider) => ({ provider })),
     };
   }
 
-  async connect(userId: string, provider: string) {
+  /**
+   * Starts a provider authorization. `next` is the page the user should come
+   * back to once the provider answers — the sign-in step sends them to their
+   * own home, so nobody has to hunt for the mailbox screen afterwards.
+   */
+  async connect(userId: string, provider: string, next?: string) {
     const config = oauthProvider(provider);
     const user = await this.activeUser(userId);
-    const state = randomBytes(32).toString("base64url");
+    const returnPath = resolveReturnPath(user.role, next);
+    const state = `${randomBytes(32).toString("base64url")}.${Buffer.from(returnPath).toString(
+      "base64url",
+    )}`;
     const verifier = randomBytes(32).toString("base64url");
     await this.db.mailAuthorization.deleteMany({
       where: { OR: [{ userId }, { expiresAt: { lt: new Date() } }] },
@@ -120,7 +161,8 @@ export class SendingMailService {
     return result;
   }
 
-  async callback(provider: string, state: string, code?: string) {
+  /** Completes an authorization and reports where the user belongs next. */
+  async callback(provider: string, state: string, code?: string): Promise<string> {
     // Atomically claim state once. Keep it until save so disconnect also cancels in-flight callbacks.
     const stateHash = hash(state);
     const pending = await this.db.$transaction(async (tx) => {
@@ -188,6 +230,7 @@ export class SendingMailService {
       },
       { stateHash, sessionVersion: pending.sessionVersion },
     );
+    return returnPathFromState(state) ?? defaultReturnPath(user.role);
   }
 
   async connectSmtp(userId: string, provider: string, password: string) {

@@ -3,7 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { SendingEmailPage } from "./SendingEmailPage";
 
 const auth = vi.hoisted(() => ({ role: "SUPER_ADMIN", token: "session" }));
-vi.mock("../api/jwt", () => ({ getCurrentUserRole: () => auth.role }));
+vi.mock("../api/jwt", () => ({
+  getCurrentUserRole: () => auth.role,
+  passwordChangeRequired: () => false,
+}));
 vi.mock("../api/client", () => ({
   getStoredToken: () => auth.token,
   apiGet: vi.fn(),

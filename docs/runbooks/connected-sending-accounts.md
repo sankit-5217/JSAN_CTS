@@ -4,8 +4,22 @@ Emails triggered by a user's ticket or record update are sent from that
 authenticated user's registered OpsDesk email. The user must authorize a mailbox
 whose verified email exactly matches their OpsDesk account. Clients, engineers,
 service desk staff and other active users manage only their own connection from
-Account > Sending email. The API verifies the actor and mailbox; the worker
+the sign-in screen immediately after authentication, or from Account > Sending email later.
+Users with a matching connected mailbox continue directly to their role-specific home.
+Required password changes happen first; invite/reset and password-change flows
+then offer the same mailbox step. Users may continue without connecting, with
+the delivery limitation described below. The API verifies the actor and mailbox; the worker
 cannot override the sender through a queued email's headers.
+
+The same step is offered to every role — client, service desk, engineer or
+admin — and the mailbox state is checked at that moment, so no extra screen
+stands between signing in and working. Finishing the connection returns the
+user to their own home: the client portal for clients, the ops console for
+everyone else. Nothing about that return path is caller-supplied; the API
+derives it from the user's role and only accepts a fixed set of paths, so the
+OAuth callback cannot be turned into an open redirect. A user whose provider
+answers with an error comes back to the same place, with the reason and a way
+to retry.
 
 There is no shared mailbox fallback for user-triggered emails. If a sender has
 not connected their mailbox, delivery fails and is retried; the underlying
@@ -32,10 +46,12 @@ worker's configured service sender (`MAIL_FROM` and SMTP settings).
 5. Configure worker SMTP for actorless system mail: `SMTP_HOST`, `SMTP_PORT`,
    `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`, and optionally `SMTP_SECURE`.
    `MAIL_FROM` should be a service address, not a person's mailbox.
-6. Each user signs in, opens Account > Sending email, connects their Google or
-   Microsoft mailbox, and grants send permission. The connected provider
-   address must match the email registered in OpsDesk. A successful connection
-   is shown on that page.
+6. Each user signs in and connects their mailbox directly in the sign-in flow,
+   granting send permission. Google and Microsoft use OAuth; Yahoo, iCloud and
+   Zoho use an app password and need no administrator setup. Account > Sending
+   email remains available for later connections and reconnections. The
+   connected provider address must match the email registered in OpsDesk. A
+   successful connection is shown on that page and on the user's home.
 7. Test a ticket update using a permitted recipient and verify its actual
    `From` address is the triggering user's registered email. Also test a
    system-generated email and verify it uses `MAIL_FROM`.
@@ -80,6 +96,9 @@ configuration. No user or ticket data needs rewriting.
 | System/account mail retains the configured service sender                        | `connected-transport.spec.ts`, account-mail queue tests                              |
 | Only the signed-in user can manage their own credentials                         | Controller bearer guard and user-scoped service operations                           |
 | Sender headers cannot be overridden                                              | `sending-mail.service.spec.ts`: worker delivery header filtering                     |
+| Every role meets the same step and is checked at sign-in                          | `SignInEmail.test.tsx`: inline step for every role, matched address, skip when connected |
+| A finished connection returns the user to their own home, with no extra page     | `sending-mail.service.spec.ts`: per-role return path, rejected foreign path; controller redirect |
+| Every user can reach a provider, including app-password ones                     | `sending-mail.service.spec.ts`: app-password providers listed; `SendingEmailSetup.test.tsx` |
 
 Unit tests use mocked providers and send no real email. A successful deployment
 does not prove provider consent or inbox delivery; each user should complete

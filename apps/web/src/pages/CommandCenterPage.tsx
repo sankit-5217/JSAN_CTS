@@ -20,6 +20,7 @@ import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import { BarChart } from "@mui/x-charts/BarChart";
 import { PieChart } from "@mui/x-charts/PieChart";
 import { apiDownload, apiGet } from "../api/client";
+import { SendingEmailResult, SendingEmailStatus } from "../components/SendingEmailStatus";
 
 type HealthLevel = "HEALTHY" | "WARNING" | "CRITICAL" | "UNKNOWN";
 
@@ -397,6 +398,8 @@ export function CommandCenterPage() {
 
   return (
     <>
+      <SendingEmailResult />
+      <SendingEmailStatus />
       <Stack
         direction={{ xs: "column", sm: "row" }}
         justifyContent="space-between"
