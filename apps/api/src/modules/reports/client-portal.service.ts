@@ -3,6 +3,7 @@ import { SITE_ARCHIVED } from "../sites/site-status";
 import { IncidentStatus, Priority } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { currentCustomerFeedback } from "../incidents/customer-feedback";
 import { OPEN_STATUSES } from "../incidents/incident-transitions";
 import { deriveSlaStatus, SlaStatus } from "../sla/sla-status";
 
@@ -34,6 +35,13 @@ export interface ClientPortalTicket {
     /** Someone has a work session open on the ticket right now. */
     workingNow: { engineer: string; since: Date } | null;
   };
+  /**
+   * The customer's own "is it fixed?" answer, when they've given one that
+   * still applies. Drives the client's "Resolved by Me" view — a customer
+   * never sets RESOLVED themselves, so their confirmation is the only way
+   * a ticket is "resolved by" them.
+   */
+  feedback: { outcome: "FIXED" | "NOT_FIXED"; at: Date } | null;
 }
 
 export interface ClientPortalOverview {
@@ -114,6 +122,11 @@ export class ClientPortalService {
             orderBy: { startedAt: "desc" },
             take: 1,
           },
+          events: {
+            where: { eventType: { in: ["STATUS_CHANGE", "CUSTOMER_FEEDBACK"] } },
+            select: { eventType: true, payload: true, createdAt: true },
+            orderBy: { createdAt: "asc" },
+          },
         },
         orderBy: { createdAt: "desc" },
         take: TICKET_LIMIT,
@@ -151,6 +164,7 @@ export class ClientPortalService {
               ? { engineer: session.engineer.displayName, since: session.startedAt }
               : null,
           },
+          feedback: currentCustomerFeedback(t.events ?? []),
         };
       }),
     };

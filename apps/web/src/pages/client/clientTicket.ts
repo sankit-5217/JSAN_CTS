@@ -49,12 +49,6 @@ export function needsCustomer(status: IncidentStatus): boolean {
   return status === "PENDING_CUSTOMER" || status === "RESOLVED";
 }
 
-/** Waiting on the customer: a question to answer, or a resolved ticket
- *  they haven't said is fixed (or not) yet. */
-export function needsYou(inc: { id: string; status: IncidentStatus }, answered: Set<string>) {
-  return needsCustomer(inc.status) && !answered.has(inc.id);
-}
-
 export function isFinished(status: IncidentStatus): boolean {
   return status === "CLOSED" || status === "CANCELLED" || status === "DUPLICATE";
 }

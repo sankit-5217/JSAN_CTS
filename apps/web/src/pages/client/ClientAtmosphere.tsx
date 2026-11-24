@@ -23,6 +23,11 @@ const SECTIONS = {
     title: "Move the conversation forward.",
     detail: "Review your report, share files and work toward a resolution.",
   },
+  reports: {
+    label: "Reports",
+    title: "Your service, measured.",
+    detail: "How the tickets you've reported have been handled.",
+  },
 };
 
 export function ClientAtmosphere({ pathname }: { pathname: string }) {
@@ -33,9 +38,11 @@ export function ClientAtmosphere({ pathname }: { pathname: string }) {
     ? SECTIONS.detail
     : pathname === "/client/report"
       ? SECTIONS.report
-      : pathname === "/client/tickets"
-        ? SECTIONS.tickets
-        : SECTIONS.home;
+      : pathname === "/client/reports"
+        ? SECTIONS.reports
+        : pathname === "/client/tickets"
+          ? SECTIONS.tickets
+          : SECTIONS.home;
   return (
     <section
       className={`client-atmosphere${compact ? " client-atmosphere-compact" : ""}`}

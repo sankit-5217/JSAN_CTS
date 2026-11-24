@@ -42,6 +42,11 @@ export interface PortalTicket {
     engineer: string | null;
     workingNow: { engineer: string; since: string } | null;
   };
+  /**
+   * The customer's own "is it fixed?" answer, when they've given one that
+   * still applies. Drives the client's "Resolved by Me" view.
+   */
+  feedback: { outcome: "FIXED" | "NOT_FIXED"; at: string } | null;
 }
 
 export interface PortalOverview {

@@ -4,7 +4,12 @@ import { AppBar, Box, Button, Drawer, IconButton, Stack, Toolbar, Typography } f
 import { alpha, ThemeProvider } from "@mui/material/styles";
 import HomeRoundedIcon from "@mui/icons-material/HomeRounded";
 import PostAddRoundedIcon from "@mui/icons-material/PostAddRounded";
-import ConfirmationNumberRoundedIcon from "@mui/icons-material/ConfirmationNumberRounded";
+import DescriptionRoundedIcon from "@mui/icons-material/DescriptionRounded";
+import AssignmentIndRoundedIcon from "@mui/icons-material/AssignmentIndRounded";
+import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
+import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import AssessmentRoundedIcon from "@mui/icons-material/AssessmentRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 import { AccountMenu } from "../../components/AccountMenu";
 import { NotificationBell } from "../../components/NotificationBell";
@@ -12,6 +17,7 @@ import { getStoredToken, signOut } from "../../api/client";
 import { decodeJwtPayload, getCurrentUserRole, passwordChangeRequired } from "../../api/jwt";
 import { clientTheme as theme } from "./clientTheme";
 import { ClientAtmosphere } from "./ClientAtmosphere";
+import { CLIENT_VIEWS, type ClientTicketView } from "./clientViews";
 
 function BrandMark({ large = false }: { large?: boolean }) {
   return (
@@ -30,15 +36,31 @@ function BrandMark({ large = false }: { large?: boolean }) {
   );
 }
 
+/**
+ * The client's ticket views, each one a filter over the tickets they
+ * reported. They all live on the one list page, chosen by a `view` query
+ * parameter, so the nav can highlight whichever is showing and every view
+ * has its own shareable URL.
+ */
+const TICKET_VIEW_ICONS: Record<ClientTicketView, React.ReactElement> = {
+  reported: <DescriptionRoundedIcon fontSize="small" />,
+  assigned: <AssignmentIndRoundedIcon fontSize="small" />,
+  resolved: <TaskAltRoundedIcon fontSize="small" />,
+  open: <PendingActionsRoundedIcon fontSize="small" />,
+  "resolved-all": <CheckCircleRoundedIcon fontSize="small" />,
+};
+
+/** The top-level links above the ticket group. */
 const NAV_ITEMS = [
   { label: "Home", to: "/client/home", icon: <HomeRoundedIcon fontSize="small" /> },
-  { label: "Report an issue", to: "/client/report", icon: <PostAddRoundedIcon fontSize="small" /> },
-  {
-    label: "My tickets",
-    to: "/client/tickets",
-    icon: <ConfirmationNumberRoundedIcon fontSize="small" />,
-  },
+  { label: "Create Ticket", to: "/client/report", icon: <PostAddRoundedIcon fontSize="small" /> },
 ];
+
+const REPORTS_ITEM = {
+  label: "Reports",
+  to: "/client/reports",
+  icon: <AssessmentRoundedIcon fontSize="small" />,
+};
 
 /**
  * The client/end-user shell (CLIENT_MANAGER_VIEWER) — deliberately not the
@@ -72,39 +94,88 @@ export function ClientLayout() {
   const isFullScreenPage =
     location.pathname === "/client/home" ||
     location.pathname === "/client/report" ||
+    location.pathname === "/client/reports" ||
     location.pathname === "/client/tickets" ||
     location.pathname.startsWith("/client/tickets/");
 
+  const navButton = (
+    item: { label: string; to: string; icon: React.ReactElement },
+    active: boolean,
+  ) => (
+    <Button
+      key={item.to}
+      component={Link}
+      to={item.to}
+      startIcon={item.icon}
+      aria-current={active ? "page" : undefined}
+      onClick={() => setMobileNav(false)}
+      sx={{
+        justifyContent: "flex-start",
+        textTransform: "none",
+        fontWeight: active ? 700 : 500,
+        fontSize: 14,
+        px: 1.5,
+        py: 1,
+        borderRadius: 2,
+        color: active ? theme.palette.primary.dark : "text.secondary",
+        bgcolor: active ? alpha(theme.palette.primary.main, 0.1) : "transparent",
+        "& .MuiButton-startIcon": { color: active ? theme.palette.primary.main : "inherit" },
+        "&:hover": { bgcolor: alpha(theme.palette.primary.main, 0.08) },
+      }}
+    >
+      {item.label}
+    </Button>
+  );
+
+  // Which ticket view the list page is showing, so the nav can highlight
+  // it. Defaults to "Reported by Me" — the list with no filter applied.
+  const activeView =
+    (new URLSearchParams(location.search).get("view") as ClientTicketView | null) ?? "reported";
+
   const nav = (
     <Stack component="nav" aria-label="Client navigation" spacing={0.25} sx={{ px: 1.5 }}>
-      {NAV_ITEMS.map((item) => {
-        const active = location.pathname.startsWith(item.to);
-        return (
-          <Button
-            key={item.to}
-            component={Link}
-            to={item.to}
-            startIcon={item.icon}
-            aria-current={active ? "page" : undefined}
-            onClick={() => setMobileNav(false)}
-            sx={{
-              justifyContent: "flex-start",
-              textTransform: "none",
-              fontWeight: active ? 700 : 500,
-              fontSize: 14,
-              px: 1.5,
-              py: 1,
-              borderRadius: 2,
-              color: active ? theme.palette.primary.dark : "text.secondary",
-              bgcolor: active ? alpha(theme.palette.primary.main, 0.1) : "transparent",
-              "& .MuiButton-startIcon": { color: active ? theme.palette.primary.main : "inherit" },
-              "&:hover": { bgcolor: alpha(theme.palette.primary.main, 0.08) },
-            }}
-          >
-            {item.label}
-          </Button>
-        );
-      })}
+      {NAV_ITEMS.map((item) => navButton(item, location.pathname.startsWith(item.to)))}
+
+      <Typography
+        sx={{
+          px: 1.5,
+          pt: 2.5,
+          pb: 0.75,
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "text.disabled",
+        }}
+      >
+        Tickets
+      </Typography>
+      {CLIENT_VIEWS.map((view) =>
+        navButton(
+          {
+            label: view.label,
+            to: `/client/tickets?view=${view.value}`,
+            icon: TICKET_VIEW_ICONS[view.value],
+          },
+          location.pathname === "/client/tickets" && activeView === view.value,
+        ),
+      )}
+
+      <Typography
+        sx={{
+          px: 1.5,
+          pt: 2.5,
+          pb: 0.75,
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "text.disabled",
+        }}
+      >
+        Insights
+      </Typography>
+      {navButton(REPORTS_ITEM, location.pathname.startsWith(REPORTS_ITEM.to))}
     </Stack>
   );
 

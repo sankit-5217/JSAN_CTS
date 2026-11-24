@@ -7,6 +7,7 @@ import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { InboxService } from "../inbox/inbox.service";
 import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import { CustomerFeedbackDto, CustomerFeedbackOutcome } from "./dto/customer-feedback.dto";
+import { currentCustomerFeedback } from "./customer-feedback";
 import { IncidentsService } from "./incidents.service";
 import { REPORT_FIELDS } from "./report-changes";
 
@@ -87,21 +88,18 @@ export class IncidentCustomerService {
     const milestones: IncidentProgress["milestones"] = [
       { status: IncidentStatus.NEW, at: incident.createdAt },
     ];
-    let feedback: IncidentProgress["feedback"] = null;
     const editEvents: typeof events = [];
     for (const e of events) {
       const payload = (e.payload ?? {}) as Record<string, unknown>;
       if (e.eventType === "STATUS_CHANGE" && typeof payload.to === "string") {
         milestones.push({ status: payload.to as IncidentStatus, at: e.createdAt });
-        if (payload.to === IncidentStatus.RESOLVED) {
-          feedback = null; // a new resolution needs a new answer
-        }
-      } else if (e.eventType === "CUSTOMER_FEEDBACK") {
-        feedback = { outcome: payload.outcome as CustomerFeedbackOutcome, at: e.createdAt };
       } else if (e.eventType === "REPORT_EDITED") {
         editEvents.push(e);
       }
     }
+    // The customer's answer, and whether it still applies — the same rule
+    // the client's ticket list uses (a re-resolve needs a fresh answer).
+    const feedback: IncidentProgress["feedback"] = currentCustomerFeedback(events);
     const reportEdits = await this.describeReportEdits(editEvents);
 
     const last = milestones[milestones.length - 1];

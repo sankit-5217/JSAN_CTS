@@ -12,8 +12,6 @@ import {
   Chip,
   IconButton,
   Stack,
-  ToggleButton,
-  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -21,15 +19,13 @@ import { alpha } from "@mui/material/styles";
 import FilterListRoundedIcon from "@mui/icons-material/FilterListRounded";
 import type { IncidentStatus, Priority } from "@cts-dc-opsdesk/shared-types";
 import { apiGet } from "../../api/client";
-import {
-  isFinished,
-  needsYou,
-  relativeTime,
-  STATUS_COLOR,
-  STATUS_LABEL,
-} from "./clientTicket";
+import { isFinished, relativeTime, STATUS_COLOR, STATUS_LABEL } from "./clientTicket";
 import { describeActivity, SLA_LABEL, useClientPortal, type PortalTicket } from "./clientPortal";
-import { useAnsweredResolutions } from "./useAnsweredResolutions";
+import {
+  matchesView,
+  viewDefinition,
+  type ClientTicketView,
+} from "./clientViews";
 import {
   ISSUE_TYPE_ORDER,
   ISSUE_TYPE_TONE,
@@ -56,27 +52,18 @@ interface Paginated<T> {
   total: number;
 }
 
-type Filter = "needs-you" | "open" | "closed" | "all";
-
-const FILTERS: {
-  value: Filter;
-  label: string;
-  match: (i: ClientIncident, answered: Set<string>) => boolean;
-}[] = [
-  { value: "needs-you", label: "Needs you", match: needsYou },
-  { value: "open", label: "Open", match: (i) => !isFinished(i.status) },
-  { value: "closed", label: "Closed", match: (i) => isFinished(i.status) },
-  { value: "all", label: "All", match: () => true },
-];
-
-/** Everything this customer has reported, with the ones waiting on them
- *  called out first. The filter lives in the URL so Home can link to it. */
+/**
+ * The client's ticket list. The left nav chooses which view is showing
+ * (Reported by Me / Assigned to Me / Resolved by Me / All Open / All
+ * Resolved); this page applies that filter, so each tab shows exactly
+ * what its name says.
+ */
 export function MyTicketsPage() {
   const [incidents, setIncidents] = useState<ClientIncident[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
   const [showFilters, setShowFilters] = useState(true);
-  const filter = (FILTERS.find((f) => f.value === params.get("show"))?.value ?? "open") as Filter;
+  const view = (params.get("view") as ClientTicketView | null) ?? "reported";
   const typeFilter = params.get("type") ?? "";
 
   const setType = (t: string) => {
@@ -92,18 +79,9 @@ export function MyTicketsPage() {
       .catch((err: Error) => setError(err.message));
   }, []);
 
-  const answered = useAnsweredResolutions(incidents);
   // SLA badges and live activity are extras on top of the list: if the
   // overview fails to load, the tickets still show without them.
   const { ticketsById } = useClientPortal();
-
-  const counts = useMemo(() => {
-    const c: Record<Filter, number> = { "needs-you": 0, open: 0, closed: 0, all: 0 };
-    for (const inc of incidents ?? []) {
-      for (const f of FILTERS) if (f.match(inc, answered)) c[f.value] += 1;
-    }
-    return c;
-  }, [incidents, answered]);
 
   const typeCounts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -114,16 +92,46 @@ export function MyTicketsPage() {
     return c;
   }, [incidents]);
 
+  // The ticket list carries the status; the customer's own "is it fixed?"
+  // answer comes from the portal overview, which loads it alongside the
+  // SLA state. Without it we can still filter on status, just not on the
+  // customer's answer.
+  const withFeedback = useMemo(
+    () =>
+      (incidents ?? []).map((inc) => ({
+        ...inc,
+        feedback: ticketsById.get(inc.id)?.feedback ?? null,
+      })),
+    [incidents, ticketsById],
+  );
+
   const shown = useMemo(() => {
-    const match = FILTERS.find((f) => f.value === filter)!.match;
-    return (incidents ?? [])
-      .filter((i) => match(i, answered) && (!typeFilter || i.issueType === typeFilter))
-      .sort(
-        (a, b) =>
-          Number(needsYou(b, answered)) - Number(needsYou(a, answered)) ||
-          b.updatedAt.localeCompare(a.updatedAt),
-      );
-  }, [incidents, filter, answered, typeFilter]);
+    return withFeedback
+      .filter((inc) => matchesView(inc, view))
+      .filter((inc) => !typeFilter || inc.issueType === typeFilter)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }, [withFeedback, view, typeFilter]);
+
+  const definition = viewDefinition(view);
+  const emptyMessage = (() => {
+    if (!incidents) return "";
+    if (incidents.length === 0) {
+      return 'Nothing reported yet. Use "Create Ticket" when something comes up.';
+    }
+    if (typeFilter) return "No tickets of this type in this view.";
+    switch (view) {
+      case "assigned":
+        return "Nothing is waiting on you right now.";
+      case "resolved":
+        return "You haven't confirmed a fix yet.";
+      case "open":
+        return "No open tickets — everything has been resolved.";
+      case "resolved-all":
+        return "Nothing has been resolved yet.";
+      default:
+        return "No tickets here.";
+    }
+  })();
 
   return (
     <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
@@ -138,11 +146,9 @@ export function MyTicketsPage() {
       >
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
-            My tickets
+            {definition.label}
           </Typography>
-          <Typography color="text.secondary">
-            Everything you've reported, and where it stands.
-          </Typography>
+          <Typography color="text.secondary">{definition.hint}</Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <Tooltip title={showFilters ? "Hide issue-type filters" : "Show issue-type filters"}>
@@ -173,7 +179,7 @@ export function MyTicketsPage() {
             variant="contained"
             sx={{ textTransform: "none", fontWeight: 600 }}
           >
-            Report an issue
+            Create Ticket
           </Button>
         </Stack>
       </Stack>
@@ -220,50 +226,12 @@ export function MyTicketsPage() {
         </Stack>
       )}
 
-      <ToggleButtonGroup
-        exclusive
-        size="small"
-        value={filter}
-        onChange={(_, v: Filter | null) => {
-          if (!v) return;
-          const next = new URLSearchParams(params);
-          next.set("show", v);
-          setParams(next, { replace: true });
-        }}
-        sx={{ mb: 2, flexWrap: "wrap" }}
-      >
-        {FILTERS.map((f) => (
-          <ToggleButton key={f.value} value={f.value} sx={{ textTransform: "none", px: 2 }}>
-            {f.label}
-            {incidents && (
-              <Box
-                component="span"
-                sx={{
-                  ml: 1,
-                  fontWeight: 700,
-                  color:
-                    f.value === "needs-you" && counts[f.value] > 0 ? "warning.main" : "inherit",
-                }}
-              >
-                {counts[f.value]}
-              </Box>
-            )}
-          </ToggleButton>
-        ))}
-      </ToggleButtonGroup>
-
       {error && <Alert severity="error">Couldn't load your tickets: {error}</Alert>}
       {!error && incidents === null && <Typography color="text.secondary">Loading...</Typography>}
       {incidents && shown.length === 0 && (
         <Card elevation={0} sx={{ borderRadius: 3, border: "1px dashed", borderColor: "divider" }}>
           <CardContent sx={{ py: 5, textAlign: "center" }}>
-            <Typography color="text.secondary">
-              {incidents.length === 0
-                ? 'Nothing reported yet. Use "Report an issue" when something comes up.'
-                : filter === "needs-you"
-                  ? "Nothing needs you right now."
-                  : "No tickets here."}
-            </Typography>
+            <Typography color="text.secondary">{emptyMessage}</Typography>
           </CardContent>
         </Card>
       )}
@@ -273,8 +241,11 @@ export function MyTicketsPage() {
           <TicketRow
             key={inc.id}
             incident={inc}
-            actionNeeded={needsYou(inc, answered)}
             portal={ticketsById.get(inc.id)}
+            waitingOnYou={
+              inc.status === "PENDING_CUSTOMER" ||
+              (inc.status === "RESOLVED" && !inc.feedback)
+            }
           />
         ))}
       </Stack>
@@ -284,13 +255,13 @@ export function MyTicketsPage() {
 
 export function TicketRow({
   incident: inc,
-  actionNeeded,
   portal,
+  waitingOnYou = false,
 }: {
-  incident: ClientIncident;
-  actionNeeded: boolean;
-  /** SLA status and live activity, once the portal overview has loaded. */
+  incident: ClientIncident & { feedback?: { outcome: string; at: string } | null };
   portal?: PortalTicket;
+  /** The next move is the customer's — surfaced as a prompt on the row. */
+  waitingOnYou?: boolean;
 }) {
   const activity =
     portal && !isFinished(inc.status) ? describeActivity(portal.activity, relativeTime) : null;
@@ -301,8 +272,8 @@ export function TicketRow({
       sx={{
         borderRadius: 3,
         border: "1px solid",
-        borderColor: actionNeeded ? "warning.light" : "divider",
-        borderLeftWidth: actionNeeded ? 4 : 1,
+        borderColor: waitingOnYou ? "warning.light" : "divider",
+        borderLeftWidth: waitingOnYou ? 4 : 1,
       }}
     >
       <CardActionArea component={RouterLink} to={`/client/tickets/${inc.id}`}>
@@ -314,7 +285,7 @@ export function TicketRow({
             <Typography variant="body2" color="text.secondary">
               {inc.incidentNo} · updated {relativeTime(inc.updatedAt)}
             </Typography>
-            {actionNeeded && (
+            {waitingOnYou && (
               <Typography variant="body2" sx={{ color: "warning.dark", fontWeight: 600, mt: 0.25 }}>
                 {inc.status === "RESOLVED" ? "Please confirm it's fixed" : "Waiting for your reply"}
               </Typography>

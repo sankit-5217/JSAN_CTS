@@ -46,6 +46,7 @@ import { decodeJwtPayload, getCurrentUserRole, passwordChangeRequired } from "./
 import { theme } from "./theme/theme";
 import { ClientHomePage } from "./pages/client/ClientHomePage";
 import { ClientLayout } from "./pages/client/ClientLayout";
+import { ClientReportsPage } from "./pages/client/ClientReportsPage";
 import { MyTicketsPage } from "./pages/client/MyTicketsPage";
 import { ReportIssuePage } from "./pages/client/ReportIssuePage";
 import { TicketDetailPage } from "./pages/client/TicketDetailPage";
@@ -452,6 +453,7 @@ export function App() {
         <Route path="/client" element={<Navigate to="/client/home" replace />} />
         <Route path="/client/home" element={<ClientHomePage />} />
         <Route path="/client/report" element={<ReportIssuePage />} />
+        <Route path="/client/reports" element={<ClientReportsPage />} />
         <Route path="/client/tickets" element={<MyTicketsPage />} />
         <Route path="/client/tickets/:id" element={<TicketDetailPage />} />
       </Route>

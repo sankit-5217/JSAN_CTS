@@ -20,10 +20,10 @@ import { apiGet, getStoredToken } from "../../api/client";
 import { decodeJwtPayload } from "../../api/jwt";
 import { SendingEmailResult, SendingEmailStatus } from "../../components/SendingEmailStatus";
 import { SLA_LABEL, useClientPortal, type SlaClockState } from "./clientPortal";
-import { isFinished, needsYou } from "./clientTicket";
+import { isFinished } from "./clientTicket";
+import { needsYou } from "./clientViews";
 import { TicketRow, type ClientIncident } from "./MyTicketsPage";
 import { SitePanel } from "./SitePanel";
-import { useAnsweredResolutions } from "./useAnsweredResolutions";
 
 const HOW_IT_WORKS = [
   {
@@ -73,7 +73,6 @@ export function ClientHomePage() {
       .catch((err: Error) => setError(err.message));
   }, []);
 
-  const answered = useAnsweredResolutions(incidents);
   const { overview, ticketsById, error: overviewError } = useClientPortal();
 
   // How the open tickets are doing against their targets, worst first.
@@ -95,13 +94,16 @@ export function ClientHomePage() {
   const { attention, open, closed } = useMemo(() => {
     const all = incidents ?? [];
     return {
+      // The same rule the "Assigned to Me" view uses: the next move is
+      // the customer's — the desk asked them something, or it says it's
+      // fixed and needs their confirmation.
       attention: all
-        .filter((i) => needsYou(i, answered))
+        .filter((i) => needsYou({ ...i, feedback: ticketsById.get(i.id)?.feedback ?? null }))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       open: all.filter((i) => !isFinished(i.status)).length,
       closed: all.filter((i) => isFinished(i.status)).length,
     };
-  }, [incidents, answered]);
+  }, [incidents, ticketsById]);
 
   return (
     <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
@@ -119,18 +121,18 @@ export function ClientHomePage() {
           <StatCard
             label="Need you"
             value={incidents ? attention.length : "–"}
-            to="/client/tickets?show=needs-you"
+            to="/client/tickets?view=assigned"
             highlight={attention.length > 0}
           />
         </Grid>
         <Grid size={{ xs: 6, sm: 4 }}>
-          <StatCard label="Open" value={incidents ? open : "–"} to="/client/tickets?show=open" />
+          <StatCard label="Open" value={incidents ? open : "–"} to="/client/tickets?view=open" />
         </Grid>
         <Grid size={{ xs: 6, sm: 4 }}>
           <StatCard
             label="Closed"
             value={incidents ? closed : "–"}
-            to="/client/tickets?show=closed"
+            to="/client/tickets?view=resolved-all"
           />
         </Grid>
       </Grid>
@@ -181,10 +183,10 @@ export function ClientHomePage() {
       )}
       <Stack spacing={1.25} sx={{ mb: 4 }}>
         {attention.slice(0, 5).map((inc) => (
-          <TicketRow key={inc.id} incident={inc} actionNeeded portal={ticketsById.get(inc.id)} />
+          <TicketRow key={inc.id} incident={inc} waitingOnYou portal={ticketsById.get(inc.id)} />
         ))}
         {attention.length > 5 && (
-          <Link component={RouterLink} to="/client/tickets?show=needs-you">
+          <Link component={RouterLink} to="/client/tickets?view=assigned">
             See all {attention.length}
           </Link>
         )}
