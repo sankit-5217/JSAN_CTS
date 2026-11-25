@@ -101,7 +101,11 @@ describe("Conversation edits, default group, site delete (e2e)", () => {
           .expect(200);
         expect(progress.body.reportEdits).toHaveLength(1);
         const [edit] = progress.body.reportEdits;
-        expect(edit.by).toEqual({ name: "E2E Client Viewer", role: "CLIENT_MANAGER_VIEWER" });
+        expect(edit.by).toEqual({
+          name: "E2E Client Viewer",
+          email: fx.users.clientViewer.email,
+          role: "CLIENT_MANAGER_VIEWER",
+        });
         expect(edit.detailed).toBe(true);
         expect(edit.changes).toEqual(
           expect.arrayContaining([
