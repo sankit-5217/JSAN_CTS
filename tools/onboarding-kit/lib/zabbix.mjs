@@ -17,7 +17,8 @@ export function zabbixClient(url, token) {
       signal: AbortSignal.timeout(30000),
     });
     const body = await res.json();
-    if (body.error) throw new Error(`Zabbix ${method}: ${body.error.message} ${body.error.data ?? ""}`.trim());
+    if (body.error)
+      throw new Error(`Zabbix ${method}: ${body.error.message} ${body.error.data ?? ""}`.trim());
     return body.result;
   };
 }
@@ -46,16 +47,17 @@ export function zabbixCentral(zbx, log = () => {}) {
     return r.groupids[0];
   }
 
-
   async function ensureTemplateGroup(name) {
     const [g] = await zbx("templategroup.get", { filter: { name: [name] }, output: ["groupid"] });
     if (g) return g.groupid;
     return (await zbx("templategroup.create", { name })).groupids[0];
   }
 
-
   async function ensureUpsTemplate() {
-    const [existing] = await zbx("template.get", { filter: { host: [UPS_TEMPLATE] }, output: ["templateid"] });
+    const [existing] = await zbx("template.get", {
+      filter: { host: [UPS_TEMPLATE] },
+      output: ["templateid"],
+    });
     if (existing) {
       log(`template "${UPS_TEMPLATE}" exists`);
       return existing.templateid;
@@ -63,10 +65,15 @@ export function zabbixCentral(zbx, log = () => {}) {
     const groupid = await ensureTemplateGroup("Templates/OpsDesk");
     const { templateids } = await zbx("template.create", {
       host: UPS_TEMPLATE,
-      description: "RFC 1628 UPS-MIB (vendor-neutral). Built by tools/client-site-lab/provision.mjs.",
+      description:
+        "RFC 1628 UPS-MIB (vendor-neutral). Built by tools/client-site-lab/provision.mjs.",
       groups: [{ groupid }],
       macros: [
-        { macro: "{$UPS.RUNTIME.CRIT}", value: "600", description: "Seconds of battery runtime that count as critical" },
+        {
+          macro: "{$UPS.RUNTIME.CRIT}",
+          value: "600",
+          description: "Seconds of battery runtime that count as critical",
+        },
         { macro: "{$UPS.LOAD.WARN}", value: "80" },
         { macro: "{$UPS.CHARGE.WARN}", value: "50" },
       ],
@@ -80,9 +87,20 @@ export function zabbixCentral(zbx, log = () => {}) {
           mappings: Object.entries(mappings).map(([value, newvalue]) => ({ value, newvalue })),
         })
       ).valuemapids[0];
-    const batteryMap = await vm("UPS-MIB battery status", { 1: "Unknown", 2: "Normal", 3: "Low", 4: "Depleted" });
+    const batteryMap = await vm("UPS-MIB battery status", {
+      1: "Unknown",
+      2: "Normal",
+      3: "Low",
+      4: "Depleted",
+    });
     const sourceMap = await vm("UPS-MIB output source", {
-      1: "Other", 2: "None", 3: "Mains (normal)", 4: "Bypass", 5: "Battery", 6: "Booster", 7: "Reducer",
+      1: "Other",
+      2: "None",
+      3: "Mains (normal)",
+      4: "Bypass",
+      5: "Battery",
+      6: "Booster",
+      7: "Reducer",
     });
 
     const U = "1.3.6.1.2.1.33.1";
@@ -98,24 +116,60 @@ export function zabbixCentral(zbx, log = () => {}) {
       trends: "365d",
       ...extra,
     });
-    const scale = (factor) => ({ preprocessing: [{ type: 1, params: String(factor), error_handler: 0, error_handler_params: "" }] });
+    const scale = (factor) => ({
+      preprocessing: [
+        { type: 1, params: String(factor), error_handler: 0, error_handler_params: "" },
+      ],
+    });
     const text = { value_type: 1, delay: "1h", trends: "0" };
     const tag = (value) => ({ tags: [{ tag: "component", value }] });
     await zbx("item.create", [
       snmp("ups.manufacturer", "UPS manufacturer", `${U}.1.1.0`, { ...text, ...tag("inventory") }),
       snmp("ups.model", "UPS model", `${U}.1.2.0`, { ...text, ...tag("inventory") }),
       snmp("ups.firmware", "UPS firmware", `${U}.1.3.0`, { ...text, ...tag("inventory") }),
-      snmp("ups.agent.firmware", "UPS management card firmware", `${U}.1.4.0`, { ...text, ...tag("inventory") }),
-      snmp("ups.battery.status", "Battery status", `${U}.2.1.0`, { valuemapid: batteryMap, ...tag("battery") }),
-      snmp("ups.battery.time_on", "Time on battery", `${U}.2.2.0`, { units: "s", ...tag("battery") }),
-      snmp("ups.battery.runtime", "Battery runtime remaining", `${U}.2.3.0`, { units: "s", ...scale(60), ...tag("battery") }),
+      snmp("ups.agent.firmware", "UPS management card firmware", `${U}.1.4.0`, {
+        ...text,
+        ...tag("inventory"),
+      }),
+      snmp("ups.battery.status", "Battery status", `${U}.2.1.0`, {
+        valuemapid: batteryMap,
+        ...tag("battery"),
+      }),
+      snmp("ups.battery.time_on", "Time on battery", `${U}.2.2.0`, {
+        units: "s",
+        ...tag("battery"),
+      }),
+      snmp("ups.battery.runtime", "Battery runtime remaining", `${U}.2.3.0`, {
+        units: "s",
+        ...scale(60),
+        ...tag("battery"),
+      }),
       snmp("ups.battery.charge", "Battery charge", `${U}.2.4.0`, { units: "%", ...tag("battery") }),
-      snmp("ups.battery.voltage", "Battery voltage", `${U}.2.5.0`, { value_type: 0, units: "V", ...scale(0.1), ...tag("battery") }),
-      snmp("ups.battery.temperature", "Battery temperature", `${U}.2.7.0`, { units: "°C", ...tag("battery") }),
-      snmp("ups.input.frequency", "Input frequency", `${U}.3.3.1.2.1`, { value_type: 0, units: "Hz", ...scale(0.1), ...tag("input") }),
+      snmp("ups.battery.voltage", "Battery voltage", `${U}.2.5.0`, {
+        value_type: 0,
+        units: "V",
+        ...scale(0.1),
+        ...tag("battery"),
+      }),
+      snmp("ups.battery.temperature", "Battery temperature", `${U}.2.7.0`, {
+        units: "°C",
+        ...tag("battery"),
+      }),
+      snmp("ups.input.frequency", "Input frequency", `${U}.3.3.1.2.1`, {
+        value_type: 0,
+        units: "Hz",
+        ...scale(0.1),
+        ...tag("input"),
+      }),
       snmp("ups.input.voltage", "Input voltage", `${U}.3.3.1.3.1`, { units: "V", ...tag("input") }),
-      snmp("ups.output.source", "Output source", `${U}.4.1.0`, { valuemapid: sourceMap, ...tag("output") }),
-      snmp("ups.output.voltage", "Output voltage", `${U}.4.4.1.2.1`, { units: "V", ...tag("output") }),
+      snmp("ups.output.source", "Output source", `${U}.4.1.0`, {
+        valuemapid: sourceMap,
+        ...tag("output"),
+      }),
+      snmp("ups.output.voltage", "Output voltage", `${U}.4.4.1.2.1`, {
+        units: "V",
+        ...tag("output"),
+      }),
       snmp("ups.output.load", "Output load", `${U}.4.4.1.5.1`, { units: "%", ...tag("output") }),
       {
         hostid: templateid,
@@ -152,22 +206,40 @@ export function zabbixCentral(zbx, log = () => {}) {
           comments: "Equipment will lose power soon. Start graceful shutdowns.",
         },
       ),
-      trig("UPS load is high (over {$UPS.LOAD.WARN}%)", 2, `min(${T}/ups.output.load,2m)>{$UPS.LOAD.WARN}`, "ups.overload"),
-      trig("UPS battery charge below {$UPS.CHARGE.WARN}%", 3, `last(${T}/ups.battery.charge)<{$UPS.CHARGE.WARN}`, "ups.battery_charge_low"),
-      trig("UPS battery temperature is high (over 40°C)", 2, `last(${T}/ups.battery.temperature)>40`, "ups.battery_temperature"),
-      trig("UPS has no SNMP data", 3, `max(${T}/zabbix[host,snmp,available],2m)=0`, "ups.snmp_unreachable"),
+      trig(
+        "UPS load is high (over {$UPS.LOAD.WARN}%)",
+        2,
+        `min(${T}/ups.output.load,2m)>{$UPS.LOAD.WARN}`,
+        "ups.overload",
+      ),
+      trig(
+        "UPS battery charge below {$UPS.CHARGE.WARN}%",
+        3,
+        `last(${T}/ups.battery.charge)<{$UPS.CHARGE.WARN}`,
+        "ups.battery_charge_low",
+      ),
+      trig(
+        "UPS battery temperature is high (over 40°C)",
+        2,
+        `last(${T}/ups.battery.temperature)>40`,
+        "ups.battery_temperature",
+      ),
+      trig(
+        "UPS has no SNMP data",
+        3,
+        `max(${T}/zabbix[host,snmp,available],2m)=0`,
+        "ups.snmp_unreachable",
+      ),
     ]);
     log(`template "${UPS_TEMPLATE}" created (15 items, 6 triggers)`);
     return templateid;
   }
-
 
   async function templateId(name) {
     const [t] = await zbx("template.get", { filter: { host: [name] }, output: ["templateid"] });
     if (!t) throw new Error(`Zabbix template "${name}" not found`);
     return t.templateid;
   }
-
 
   const WEBHOOK_SCRIPT = `
   var p = JSON.parse(value);
@@ -222,7 +294,8 @@ export function zabbixCentral(zbx, log = () => {}) {
       timeout: "10s",
       maxattempts: 3,
       attempt_interval: "10s",
-      description: "Pushes problems, recoveries and acknowledgements to OpsDesk /alerts/sources/zabbix",
+      description:
+        "Pushes problems, recoveries and acknowledgements to OpsDesk /alerts/sources/zabbix",
       message_templates: [0, 1, 2].map((recovery) => ({
         eventsource: 0,
         recovery,
@@ -230,7 +303,10 @@ export function zabbixCentral(zbx, log = () => {}) {
         message: "{EVENT.NAME} on {HOST.NAME}",
       })),
     };
-    const [m] = await zbx("mediatype.get", { filter: { name: ["OpsDesk"] }, output: ["mediatypeid"] });
+    const [m] = await zbx("mediatype.get", {
+      filter: { name: ["OpsDesk"] },
+      output: ["mediatypeid"],
+    });
     if (m) {
       await zbx("mediatype.update", { mediatypeid: m.mediatypeid, ...fields });
       log("media type OpsDesk updated");
@@ -259,19 +335,32 @@ export function zabbixCentral(zbx, log = () => {}) {
     const GROUP_NAME = WEBHOOK_USER_GROUP;
     const hostgroups = await zbx("hostgroup.get", { output: ["groupid"] });
     const hostgroup_rights = hostgroups.map((g) => ({ id: g.groupid, permission: 2 })); // read
-    let [grp] = await zbx("usergroup.get", { filter: { name: [GROUP_NAME] }, output: ["usrgrpid"] });
+    let [grp] = await zbx("usergroup.get", {
+      filter: { name: [GROUP_NAME] },
+      output: ["usrgrpid"],
+    });
     if (grp) {
       await zbx("usergroup.update", { usrgrpid: grp.usrgrpid, hostgroup_rights });
     } else {
-      const r = await zbx("usergroup.create", { name: GROUP_NAME, gui_access: 3, hostgroup_rights }); // 3 = no frontend
+      const r = await zbx("usergroup.create", {
+        name: GROUP_NAME,
+        gui_access: 3,
+        hostgroup_rights,
+      }); // 3 = no frontend
       grp = { usrgrpid: r.usrgrpids[0] };
       log(`user group "${GROUP_NAME}" created (read-only, no frontend)`);
     }
     const [role] = await zbx("role.get", { filter: { name: ["User role"] }, output: ["roleid"] });
-    const medias = [{ mediatypeid, sendto: "opsdesk", active: 0, severity: 63, period: "1-7,00:00-24:00" }];
+    const medias = [
+      { mediatypeid, sendto: "opsdesk", active: 0, severity: 63, period: "1-7,00:00-24:00" },
+    ];
     let [user] = await zbx("user.get", { filter: { username: [USER] }, output: ["userid"] });
     if (user) {
-      await zbx("user.update", { userid: user.userid, usrgrps: [{ usrgrpid: grp.usrgrpid }], medias });
+      await zbx("user.update", {
+        userid: user.userid,
+        usrgrps: [{ usrgrpid: grp.usrgrpid }],
+        medias,
+      });
     } else {
       const r = await zbx("user.create", {
         username: USER,
@@ -286,20 +375,29 @@ export function zabbixCentral(zbx, log = () => {}) {
       log(`user ${USER} created (receives the OpsDesk media only)`);
     }
     // Earlier versions of this script put the media on Admin; take it off again.
-    const [admin] = await zbx("user.get", { filter: { username: ["Admin"] }, output: ["userid"], selectMedias: "extend" });
+    const [admin] = await zbx("user.get", {
+      filter: { username: ["Admin"] },
+      output: ["userid"],
+      selectMedias: "extend",
+    });
     const adminMedias = admin.medias ?? [];
     if (adminMedias.some((m) => m.mediatypeid === mediatypeid)) {
       await zbx("user.update", {
         userid: admin.userid,
         medias: adminMedias
           .filter((m) => m.mediatypeid !== mediatypeid)
-          .map(({ mediatypeid: mt, sendto, active, severity, period }) => ({ mediatypeid: mt, sendto, active, severity, period })),
+          .map(({ mediatypeid: mt, sendto, active, severity, period }) => ({
+            mediatypeid: mt,
+            sendto,
+            active,
+            severity,
+            period,
+          })),
       });
       log("OpsDesk media removed from Admin");
     }
     return user.userid;
   }
-
 
   async function ensureAction(mediatypeid, userid) {
     const fields = {
@@ -320,7 +418,10 @@ export function zabbixCentral(zbx, log = () => {}) {
       recovery_operations: [{ operationtype: 11, opmessage: { default_msg: 1 } }],
       update_operations: [{ operationtype: 12, opmessage: { default_msg: 1 } }],
     };
-    const [a] = await zbx("action.get", { filter: { name: ["Send problems to OpsDesk"] }, output: ["actionid"] });
+    const [a] = await zbx("action.get", {
+      filter: { name: ["Send problems to OpsDesk"] },
+      output: ["actionid"],
+    });
     if (a) {
       await zbx("action.update", { actionid: a.actionid, ...fields });
       log('action "Send problems to OpsDesk" updated');
@@ -342,10 +443,18 @@ export function zabbixCentral(zbx, log = () => {}) {
       output: ["usrgrpid"],
       selectHostGroupRights: ["id", "permission"],
     });
-    if (!grp) throw new Error(`Zabbix user group "${WEBHOOK_USER_GROUP}" missing — run setup-central.mjs first`);
+    if (!grp)
+      throw new Error(
+        `Zabbix user group "${WEBHOOK_USER_GROUP}" missing — run setup-central.mjs first`,
+      );
     const rights = grp.hostgroup_rights ?? [];
     if (rights.some((r) => r.id === groupid && Number(r.permission) >= 2)) return false;
-    const merged = [...rights.filter((r) => r.id !== groupid).map((r) => ({ id: r.id, permission: Number(r.permission) })), { id: groupid, permission: 2 }];
+    const merged = [
+      ...rights
+        .filter((r) => r.id !== groupid)
+        .map((r) => ({ id: r.id, permission: Number(r.permission) })),
+      { id: groupid, permission: 2 },
+    ];
     await zbx("usergroup.update", { usrgrpid: grp.usrgrpid, hostgroup_rights: merged });
     log(`webhook user group can now read host group ${groupid}`);
     return true;

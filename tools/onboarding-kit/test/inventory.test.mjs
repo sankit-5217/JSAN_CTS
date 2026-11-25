@@ -3,13 +3,23 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseCsv, validateInventory } from "../lib/inventory.mjs";
 
-const HEADER = "host,name,type,address,port,snmp_version,snmp_community,v3_user,v3_auth_protocol,v3_auth_pass,v3_priv_protocol,v3_priv_pass,criticality";
+const HEADER =
+  "host,name,type,address,port,snmp_version,snmp_community,v3_user,v3_auth_protocol,v3_auth_pass,v3_priv_protocol,v3_priv_pass,criticality";
 const csv = (...rows) => [HEADER, ...rows].join("\n");
 
 test("parses quoted fields, doubled quotes and CRLF", () => {
   const rows = parseCsv('a,"b,c","d ""e"""\r\n1,2,3\r\n');
-  assert.deepEqual(rows.map((r) => [...r]), [["a", "b,c", 'd "e"'], ["1", "2", "3"]]);
-  assert.deepEqual(rows.map((r) => r.line), [1, 2]);
+  assert.deepEqual(
+    rows.map((r) => [...r]),
+    [
+      ["a", "b,c", 'd "e"'],
+      ["1", "2", "3"],
+    ],
+  );
+  assert.deepEqual(
+    rows.map((r) => r.line),
+    [1, 2],
+  );
 });
 
 test("accepts a valid SNMPv3, v2c, ping and agent inventory", () => {
@@ -67,24 +77,37 @@ test("rejects missing or weak SNMP credentials and bad addresses", () => {
 
 test("rejects the same address and port twice", () => {
   const { errors } = validateInventory(
-    csv("SITE03-SW-001,A,switch,10.0.0.2,,2c,ro,,,,,,", "SITE03-SW-002,B,switch,10.0.0.2,161,2c,ro,,,,,,"),
+    csv(
+      "SITE03-SW-001,A,switch,10.0.0.2,,2c,ro,,,,,,",
+      "SITE03-SW-002,B,switch,10.0.0.2,161,2c,ro,,,,,,",
+    ),
     "SITE03",
   );
   assert.ok(errors.some((e) => e.includes("same address and port as SITE03-SW-001")));
 });
 
 test("flags an unquoted comma that shifts columns", () => {
-  const { errors } = validateInventory(csv("SITE03-SW-001,Core, floor 2,switch,10.0.0.2,,2c,ro,,,,,,"), "SITE03");
+  const { errors } = validateInventory(
+    csv("SITE03-SW-001,Core, floor 2,switch,10.0.0.2,,2c,ro,,,,,,"),
+    "SITE03",
+  );
   assert.ok(errors.some((e) => e.includes("quote values that contain commas")));
 });
 
 test("reports real file line numbers across comments and blank lines", () => {
   const text = [HEADER, "# comment", "", "SITE03-SW-001,SW,switch,10.0.0.2,,2c,,,,,,,"].join("\n");
   const { errors } = validateInventory(text, "SITE03");
-  assert.ok(errors.some((e) => e.startsWith("line 4 (SITE03-SW-001)")), errors.join(" | "));
+  assert.ok(
+    errors.some((e) => e.startsWith("line 4 (SITE03-SW-001)")),
+    errors.join(" | "),
+  );
 });
 
 test("rejects unknown columns and empty files", () => {
-  assert.ok(validateInventory("host,name,type,colour\nSITE03-A,a,switch,red", "SITE03").errors[0].includes("Unknown column"));
+  assert.ok(
+    validateInventory("host,name,type,colour\nSITE03-A,a,switch,red", "SITE03").errors[0].includes(
+      "Unknown column",
+    ),
+  );
   assert.ok(validateInventory(HEADER, "SITE03").errors[0].includes("no device rows"));
 });

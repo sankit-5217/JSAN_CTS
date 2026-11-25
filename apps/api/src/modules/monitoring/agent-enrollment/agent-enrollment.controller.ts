@@ -58,7 +58,9 @@ export class AgentEnrollmentController {
   @Post(":id/revoke")
   @HttpCode(200)
   @Roles(...ZABBIX_ADMIN_ROLES)
-  @ApiOperation({ summary: "Revoke a link: no new machines can use it (enrolled ones keep working)" })
+  @ApiOperation({
+    summary: "Revoke a link: no new machines can use it (enrolled ones keep working)",
+  })
   revoke(
     @Param("id", ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -99,7 +101,9 @@ export class AgentEnrollmentPublicController {
   @Post(":code/register")
   @HttpCode(200)
   @Header("Cache-Control", "no-store")
-  @ApiOperation({ summary: "Called by the installer: registers the machine, returns its agent settings" })
+  @ApiOperation({
+    summary: "Called by the installer: registers the machine, returns its agent settings",
+  })
   register(@Param("code") code: string, @Body() dto: RegisterAgentDto) {
     return this.enrollments.register(code, dto);
   }

@@ -22,29 +22,53 @@ else {
   if (!version) skip = `Zabbix not reachable at ${URL_}`;
 }
 
-const results = skip ? [] : (await liveChecks(zabbixClient(URL_, TOKEN), planWorkbook(fixtureSheets()).plans, { extraDeviceTypes: ruleDeviceTypes() })).results;
+const results = skip
+  ? []
+  : (
+      await liveChecks(zabbixClient(URL_, TOKEN), planWorkbook(fixtureSheets()).plans, {
+        extraDeviceTypes: ruleDeviceTypes(),
+      })
+    ).results;
 const byId = (id) => results.filter((r) => r.id === id);
-const failures = (id) => byId(id).filter((r) => !r.ok).map((r) => `${r.subject}: ${r.detail}`);
+const failures = (id) =>
+  byId(id)
+    .filter((r) => !r.ok)
+    .map((r) => `${r.subject}: ${r.detail}`);
 
-test(`M3: every template the plan or the kit uses exists on Zabbix ${version ?? ""} (${URL_})`, { skip }, () => {
-  // Device types sharing a template set (e.g. every ping-only type) are checked once.
-  const distinct = new Set(ruleDeviceTypes().map((t) => templatesFor({ deviceType: t }).join("+")));
-  const checked = new Set(byId("M3").map((r) => r.detail));
-  for (const set of distinct) assert.ok(checked.has(set.replace(/\+/g, " + ")), `template set not checked: ${set}`);
-  assert.deepEqual(failures("M3"), []);
-});
+test(
+  `M3: every template the plan or the kit uses exists on Zabbix ${version ?? ""} (${URL_})`,
+  { skip },
+  () => {
+    // Device types sharing a template set (e.g. every ping-only type) are checked once.
+    const distinct = new Set(
+      ruleDeviceTypes().map((t) => templatesFor({ deviceType: t }).join("+")),
+    );
+    const checked = new Set(byId("M3").map((r) => r.detail));
+    for (const set of distinct)
+      assert.ok(checked.has(set.replace(/\+/g, " + ")), `template set not checked: ${set}`);
+    assert.deepEqual(failures("M3"), []);
+  },
+);
 
 test("M4: every monitored item is checked up/down at least once a minute", { skip }, () => {
   assert.ok(byId("M4").length > 0);
   assert.deepEqual(failures("M4"), []);
 });
 
-test("M5: everything the plan says Zabbix watches is really in the templates (direct and via)", { skip }, () => {
-  assert.ok(byId("M5").length > 0);
-  assert.deepEqual(failures("M5"), []);
-});
+test(
+  "M5: everything the plan says Zabbix watches is really in the templates (direct and via)",
+  { skip },
+  () => {
+    assert.ok(byId("M5").length > 0);
+    assert.deepEqual(failures("M5"), []);
+  },
+);
 
-test("M15: every software claim (firmware, BIOS, OS version, services) is really in its template", { skip }, () => {
-  assert.ok(byId("M15").length > 0);
-  assert.deepEqual(failures("M15"), []);
-});
+test(
+  "M15: every software claim (firmware, BIOS, OS version, services) is really in its template",
+  { skip },
+  () => {
+    assert.ok(byId("M15").length > 0);
+    assert.deepEqual(failures("M15"), []);
+  },
+);

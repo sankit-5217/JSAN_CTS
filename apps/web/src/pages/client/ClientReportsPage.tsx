@@ -127,7 +127,10 @@ export function ClientReportsPage() {
         </Grid>
       </Grid>
 
-      <Card elevation={0} sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mb: 3 }}>
+      <Card
+        elevation={0}
+        sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider", mb: 3 }}
+      >
         <CardContent sx={{ p: { xs: 2.5, sm: 3 } }}>
           <Typography sx={{ fontWeight: 700, mb: 0.5 }}>Service targets</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>

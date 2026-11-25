@@ -40,6 +40,9 @@ for (const name of SERVICES) {
   const input = JSON.parse(readFileSync(join(here, `${name}.json`), "utf8"));
   const variables = JSON.stringify({ serviceId: ids[name], environmentId: env.id, input });
   railway(["api", mutation, "--variables", "@-", "--compact"], variables);
-  railway(["variable", "set", "RAILPACK_INSTALL_CMD", "--stdin", "--service", name, "--skip-deploys"], INSTALL_CMD);
+  railway(
+    ["variable", "set", "RAILPACK_INSTALL_CMD", "--stdin", "--service", name, "--skip-deploys"],
+    INSTALL_CMD,
+  );
   console.log(`${name}: settings applied`);
 }

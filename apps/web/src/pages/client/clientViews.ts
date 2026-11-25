@@ -19,12 +19,7 @@ import type { IncidentStatus } from "@cts-dc-opsdesk/shared-types";
  * already answered "is it fixed?", which the API reports per ticket as
  * `feedback` (FIXED / NOT_FIXED / null).
  */
-export type ClientTicketView =
-  | "reported"
-  | "assigned"
-  | "resolved"
-  | "open"
-  | "resolved-all";
+export type ClientTicketView = "reported" | "assigned" | "resolved" | "open" | "resolved-all";
 
 export interface ClientTicketFeedback {
   outcome: "FIXED" | "NOT_FIXED";

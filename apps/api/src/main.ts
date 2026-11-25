@@ -51,9 +51,11 @@ async function bootstrap() {
 
   if (apiDocsEnabled(process.env)) {
     const config = new DocumentBuilder()
-    .setTitle("JSAN Data Center OpsDesk API")
-    .setDescription("ITSM + CMDB + monitoring integration platform for JSAN data-center operations")
-    .setVersion("0.1.0")
+      .setTitle("JSAN Data Center OpsDesk API")
+      .setDescription(
+        "ITSM + CMDB + monitoring integration platform for JSAN data-center operations",
+      )
+      .setVersion("0.1.0")
       .addBearerAuth()
       .build();
     const document = SwaggerModule.createDocument(app, config);

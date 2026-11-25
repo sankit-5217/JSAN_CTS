@@ -203,9 +203,9 @@ describe("KnowledgeService", () => {
       prisma.knowledgeArticle.findUnique.mockResolvedValue(
         storedArticle({ approvalState: "APPROVED" }),
       );
-      await expect(
-        service.approve("art-1", { reviewDueAt: FUTURE }, ACTOR),
-      ).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.approve("art-1", { reviewDueAt: FUTURE }, ACTOR)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
     });
 
     // The reviewer is always the authenticated caller (ACTOR), never a
@@ -215,9 +215,9 @@ describe("KnowledgeService", () => {
       prisma.knowledgeArticle.findUnique.mockResolvedValue(
         storedArticle({ ownerId: ACTOR.actorId }),
       );
-      await expect(
-        service.approve("art-1", { reviewDueAt: FUTURE }, ACTOR),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.approve("art-1", { reviewDueAt: FUTURE }, ACTOR)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     });
 
     it("allows approval by someone other than the owner", async () => {
@@ -225,16 +225,14 @@ describe("KnowledgeService", () => {
       prisma.knowledgeArticle.update.mockResolvedValue(
         storedArticle({ ownerId: OWNER, approvalState: "APPROVED", reviewDueAt: new Date(FUTURE) }),
       );
-      await expect(
-        service.approve("art-1", { reviewDueAt: FUTURE }, ACTOR),
-      ).resolves.toBeDefined();
+      await expect(service.approve("art-1", { reviewDueAt: FUTURE }, ACTOR)).resolves.toBeDefined();
     });
 
     it("rejects a review date in the past", async () => {
       prisma.knowledgeArticle.findUnique.mockResolvedValue(storedArticle());
-      await expect(
-        service.approve("art-1", { reviewDueAt: PAST }, ACTOR),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.approve("art-1", { reviewDueAt: PAST }, ACTOR)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     });
 
     it("sets APPROVED with the review date and returns it authoritative", async () => {

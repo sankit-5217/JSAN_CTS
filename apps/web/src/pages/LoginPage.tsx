@@ -1,12 +1,4 @@
-import {
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Grid,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Box, Button, Card, CardContent, Grid, Stack, Typography } from "@mui/material";
 import { alpha, keyframes } from "@mui/material/styles";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import DnsOutlinedIcon from "@mui/icons-material/DnsOutlined";

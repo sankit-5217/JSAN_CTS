@@ -38,7 +38,10 @@ describe("AlertsController (source payload validation)", () => {
       controllers: [AlertsController],
       providers: [
         { provide: AlertsService, useValue: service },
-        { provide: AuthzService, useValue: { getAccessibleSiteIds: jest.fn().mockResolvedValue(null) } },
+        {
+          provide: AuthzService,
+          useValue: { getAccessibleSiteIds: jest.fn().mockResolvedValue(null) },
+        },
       ],
     })
       .overrideGuard(JwtAuthGuard)

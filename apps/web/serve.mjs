@@ -56,7 +56,9 @@ createServer((req, res) => {
     res.end();
     return;
   }
-  createReadStream(file).on("error", () => res.destroy()).pipe(res);
+  createReadStream(file)
+    .on("error", () => res.destroy())
+    .pipe(res);
 }).listen(port, "0.0.0.0", () => {
   console.log(`OpsDesk web listening on :${port}`);
 });

@@ -28,7 +28,7 @@ groups:
           severity: warning
           component: memory
         annotations:
-          summary: "{{ $labels.ci }} memory use is {{ $value | printf \"%.0f\" }}%"
+          summary: '{{ $labels.ci }} memory use is {{ $value | printf "%.0f" }}%'
 
       - alert: HostDiskSpaceLow
         expr: |
@@ -39,4 +39,4 @@ groups:
           severity: warning
           component: "disk {{ $labels.volume }}"
         annotations:
-          summary: "{{ $labels.ci }} volume {{ $labels.volume }} has {{ $value | printf \"%.0f\" }}% free"
+          summary: '{{ $labels.ci }} volume {{ $labels.volume }} has {{ $value | printf "%.0f" }}% free'

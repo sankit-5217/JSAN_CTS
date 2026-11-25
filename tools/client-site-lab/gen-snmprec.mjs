@@ -114,9 +114,21 @@ const firewall = {
     [42, 40, 0, 3, 11, 20, 8, 35, 7].map((v, k) => [`${FG}.9.2.1.1.${k + 1}.1`, cnt32(v)]),
   ),
   ...interfaces([
-    { name: "wan1", alias: "ISP-A primary (Airtel 100M)", up: true, rateBps: 2_500_000, speedMbps: 1000 },
+    {
+      name: "wan1",
+      alias: "ISP-A primary (Airtel 100M)",
+      up: true,
+      rateBps: 2_500_000,
+      speedMbps: 1000,
+    },
     { name: "wan2", alias: "ISP-B backup (Jio 50M)", up: true, rateBps: 150_000, speedMbps: 1000 },
-    { name: "internal", alias: "LAN to SITE02-SW-001", up: true, rateBps: 3_000_000, speedMbps: 1000 },
+    {
+      name: "internal",
+      alias: "LAN to SITE02-SW-001",
+      up: true,
+      rateBps: 3_000_000,
+      speedMbps: 1000,
+    },
     { name: "dmz", alias: "DMZ", up: true, rateBps: 40_000, speedMbps: 1000 },
   ]),
 };
@@ -138,7 +150,13 @@ const sw = {
     { name: "Gi1/0/5", alias: "SITE02-SRV-001", up: true, rateBps: 800_000, speedMbps: 1000 },
     { name: "Gi1/0/6", alias: "Access control panel", up: true, rateBps: 5_000, speedMbps: 100 },
     { name: "Gi1/0/7", alias: "spare", up: false, rateBps: 0, speedMbps: 1000 },
-    { name: "Gi1/0/8", alias: "Uplink to SITE02-FW-001", up: true, rateBps: 3_000_000, speedMbps: 1000 },
+    {
+      name: "Gi1/0/8",
+      alias: "Uplink to SITE02-FW-001",
+      up: true,
+      rateBps: 3_000_000,
+      speedMbps: 1000,
+    },
   ]),
 };
 
@@ -168,10 +186,17 @@ const ups = {
 };
 
 function oidKey(o) {
-  return o.split(".").map((n) => n.padStart(10, "0")).join(".");
+  return o
+    .split(".")
+    .map((n) => n.padStart(10, "0"))
+    .join(".");
 }
 
-for (const [name, rows] of Object.entries({ "SITE02-FW-001": firewall, "SITE02-SW-001": sw, "SITE02-UPS-001": ups })) {
+for (const [name, rows] of Object.entries({
+  "SITE02-FW-001": firewall,
+  "SITE02-SW-001": sw,
+  "SITE02-UPS-001": ups,
+})) {
   const lines = Object.entries(rows)
     .sort(([a], [b]) => (oidKey(a) < oidKey(b) ? -1 : 1))
     .map(([o, [type, value]]) => `${o}|${type}|${value}`);

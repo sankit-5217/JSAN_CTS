@@ -93,17 +93,17 @@ configuration. No user or ticket data needs rewriting.
 
 ## Acceptance rubric
 
-| Requirement                                                                      | Automated evidence                                                                   |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Clients, engineers and service desk users send from their own registered address | `sending-mail.service.spec.ts`: role matrix, mailbox verification and generated MIME |
-| A user without a connected/matching mailbox cannot send as another address       | `sending-mail.service.spec.ts`: missing mailbox and OAuth mismatch                   |
-| Actor identity is carried to the worker for authored notifications               | `notifications.queue.spec.ts`, incident/change/vendor/risk service specs             |
-| System/account mail retains the configured service sender                        | `connected-transport.spec.ts`, account-mail queue tests                              |
-| Only the signed-in user can manage their own credentials                         | Controller bearer guard and user-scoped service operations                           |
-| Sender headers cannot be overridden                                              | `sending-mail.service.spec.ts`: worker delivery header filtering                     |
-| Every role meets the same step and is checked at sign-in                          | `SignInEmail.test.tsx`: inline step for every role, matched address, skip when connected |
+| Requirement                                                                      | Automated evidence                                                                               |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Clients, engineers and service desk users send from their own registered address | `sending-mail.service.spec.ts`: role matrix, mailbox verification and generated MIME             |
+| A user without a connected/matching mailbox cannot send as another address       | `sending-mail.service.spec.ts`: missing mailbox and OAuth mismatch                               |
+| Actor identity is carried to the worker for authored notifications               | `notifications.queue.spec.ts`, incident/change/vendor/risk service specs                         |
+| System/account mail retains the configured service sender                        | `connected-transport.spec.ts`, account-mail queue tests                                          |
+| Only the signed-in user can manage their own credentials                         | Controller bearer guard and user-scoped service operations                                       |
+| Sender headers cannot be overridden                                              | `sending-mail.service.spec.ts`: worker delivery header filtering                                 |
+| Every role meets the same step and is checked at sign-in                         | `SignInEmail.test.tsx`: inline step for every role, matched address, skip when connected         |
 | A finished connection returns the user to their own home, with no extra page     | `sending-mail.service.spec.ts`: per-role return path, rejected foreign path; controller redirect |
-| Every user can reach a provider, including app-password ones                     | `sending-mail.service.spec.ts`: app-password providers listed; `SendingEmailSetup.test.tsx` |
+| Every user can reach a provider, including app-password ones                     | `sending-mail.service.spec.ts`: app-password providers listed; `SendingEmailSetup.test.tsx`      |
 
 Unit tests use mocked providers and send no real email. A successful deployment
 does not prove provider consent or inbox delivery; each user should complete

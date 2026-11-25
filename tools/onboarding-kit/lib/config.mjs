@@ -22,7 +22,9 @@ export function secretFile(name) {
 export function loadConfig() {
   const zabbixToken = process.env.ZABBIX_API_TOKEN ?? secretFile("zabbix-api-token");
   if (!zabbixToken) {
-    throw new Error(`No Zabbix API token: put one in ${join(SECRETS_DIR, "zabbix-api-token")} or set ZABBIX_API_TOKEN`);
+    throw new Error(
+      `No Zabbix API token: put one in ${join(SECRETS_DIR, "zabbix-api-token")} or set ZABBIX_API_TOKEN`,
+    );
   }
   const adminEmail = process.env.OPSDESK_ADMIN_EMAIL ?? "admin@example.com";
   const adminPassword = process.env.OPSDESK_ADMIN_PASSWORD ?? secretFile("opsdesk-admin-password");
@@ -47,7 +49,10 @@ export function parseArgs(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (!a.startsWith("--")) { out._.push(a); continue; }
+    if (!a.startsWith("--")) {
+      out._.push(a);
+      continue;
+    }
     const [k, v] = a.slice(2).split("=", 2);
     if (v !== undefined) out[k] = v;
     else if (argv[i + 1] && !argv[i + 1].startsWith("--")) out[k] = argv[++i];

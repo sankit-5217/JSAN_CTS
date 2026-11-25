@@ -147,8 +147,13 @@ describe("Zabbix event rebuilding", () => {
 
   it("can't replay a recovery without the stored Zabbix metadata", () => {
     expect(
-      toRecoveryEvent({ externalEventId: "zbx-1", summary: "x", details: { truncated: true } }, NOW),
+      toRecoveryEvent(
+        { externalEventId: "zbx-1", summary: "x", details: { truncated: true } },
+        NOW,
+      ),
     ).toBeNull();
-    expect(toRecoveryEvent({ externalEventId: "zbx-1", summary: "x", details: null }, NOW)).toBeNull();
+    expect(
+      toRecoveryEvent({ externalEventId: "zbx-1", summary: "x", details: null }, NOW),
+    ).toBeNull();
   });
 });

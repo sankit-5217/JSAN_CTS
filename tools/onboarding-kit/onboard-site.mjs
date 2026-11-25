@@ -28,7 +28,10 @@ const usage = () => {
   process.exit(2);
 };
 const SITE = String(args.site ?? "").toUpperCase();
-if (!/^[A-Z][A-Z0-9]{2,15}$/.test(SITE)) { console.error("--site must look like SITE03 (letters/digits, 3-16 chars)"); usage(); }
+if (!/^[A-Z][A-Z0-9]{2,15}$/.test(SITE)) {
+  console.error("--site must look like SITE03 (letters/digits, 3-16 chars)");
+  usage();
+}
 if (!args.name || !args.timezone || !args.server || !args.inventory) usage();
 const DRY = Boolean(args["dry-run"]);
 const [serverHost, serverPortRaw] = String(args.server).split(":");
@@ -45,14 +48,18 @@ const fail = (m) => problems.push(m);
 const log = (m) => console.log(`  ${m}`);
 
 // ------------------------------------------------------------------ 1. inputs
-console.log(`Onboarding ${SITE} — "${args.name}"${DRY ? "  (dry run: nothing will be changed)" : ""}`);
+console.log(
+  `Onboarding ${SITE} — "${args.name}"${DRY ? "  (dry run: nothing will be changed)" : ""}`,
+);
 try {
   Intl.DateTimeFormat(undefined, { timeZone: args.timezone });
 } catch {
   fail(`--timezone "${args.timezone}" is not a valid IANA time zone (e.g. Asia/Kolkata)`);
 }
-if (!serverHost || !Number.isInteger(serverPort) || serverPort < 1 || serverPort > 65535) fail(`--server "${args.server}" is not HOST[:PORT]`);
-if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) fail("--proxy-listen-port is not a port");
+if (!serverHost || !Number.isInteger(serverPort) || serverPort < 1 || serverPort > 65535)
+  fail(`--server "${args.server}" is not HOST[:PORT]`);
+if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535)
+  fail("--proxy-listen-port is not a port");
 if (!existsSync(args.inventory)) fail(`inventory file not found: ${args.inventory}`);
 
 let devices = [];
@@ -63,7 +70,10 @@ if (existsSync(args.inventory)) {
   devices = inv.devices;
 }
 if (withProxyAgent) {
-  if (devices.some((d) => d.host === PROXY_VM)) fail(`${PROXY_VM} is reserved for the proxy VM — remove it from the inventory or use --no-proxy-agent`);
+  if (devices.some((d) => d.host === PROXY_VM))
+    fail(
+      `${PROXY_VM} is reserved for the proxy VM — remove it from the inventory or use --no-proxy-agent`,
+    );
   devices.push({
     host: PROXY_VM,
     name: `${args.name} — monitoring proxy VM`,
@@ -104,19 +114,33 @@ if (!problems.length) {
   const [mt] = await zbx("mediatype.get", { filter: { name: ["OpsDesk"] }, output: ["status"] });
   if (!mt) fail("Zabbix media type OpsDesk is missing — run setup-central.mjs first");
   else if (mt.status !== "0") fail("Zabbix media type OpsDesk is disabled — run setup-central.mjs");
-  const [ug] = await zbx("usergroup.get", { filter: { name: [WEBHOOK_USER_GROUP] }, output: ["usrgrpid"] });
-  if (!ug) fail(`Zabbix user group "${WEBHOOK_USER_GROUP}" is missing — run setup-central.mjs first`);
-  const [action] = await zbx("action.get", { filter: { name: ["Send problems to OpsDesk"] }, output: ["status"] });
-  if (!action || action.status !== "0") fail('Zabbix action "Send problems to OpsDesk" is missing or disabled — run setup-central.mjs');
+  const [ug] = await zbx("usergroup.get", {
+    filter: { name: [WEBHOOK_USER_GROUP] },
+    output: ["usrgrpid"],
+  });
+  if (!ug)
+    fail(`Zabbix user group "${WEBHOOK_USER_GROUP}" is missing — run setup-central.mjs first`);
+  const [action] = await zbx("action.get", {
+    filter: { name: ["Send problems to OpsDesk"] },
+    output: ["status"],
+  });
+  if (!action || action.status !== "0")
+    fail('Zabbix action "Send problems to OpsDesk" is missing or disabled — run setup-central.mjs');
 
   // Templates exist?
   for (const t of new Set(devices.flatMap(deviceTemplates))) {
     const [tpl] = await zbx("template.get", { filter: { host: [t] }, output: ["templateid"] });
-    if (!tpl) fail(`Zabbix template "${t}" not found${t.startsWith("OpsDesk") ? " — run setup-central.mjs" : ""}`);
+    if (!tpl)
+      fail(
+        `Zabbix template "${t}" not found${t.startsWith("OpsDesk") ? " — run setup-central.mjs" : ""}`,
+      );
   }
 
   // Proxy: must be ours if it exists.
-  [proxy] = await zbx("proxy.get", { filter: { name: [PROXY] }, output: ["proxyid", "operating_mode", "tls_accept"] });
+  [proxy] = await zbx("proxy.get", {
+    filter: { name: [PROXY] },
+    output: ["proxyid", "operating_mode", "tls_accept"],
+  });
 
   // Hosts: an existing host must already belong to this site and this proxy.
   const found = await zbx("host.get", {
@@ -126,8 +150,10 @@ if (!problems.length) {
   });
   for (const h of found) {
     const siteTag = h.tags.find((t) => t.tag === "site")?.value;
-    if (siteTag && siteTag !== SITE) fail(`Zabbix host ${h.host} already exists for site ${siteTag}`);
-    else if (proxy && h.monitored_by === "1" && h.proxyid !== proxy.proxyid) fail(`Zabbix host ${h.host} is monitored by another proxy`);
+    if (siteTag && siteTag !== SITE)
+      fail(`Zabbix host ${h.host} already exists for site ${siteTag}`);
+    else if (proxy && h.monitored_by === "1" && h.proxyid !== proxy.proxyid)
+      fail(`Zabbix host ${h.host} is monitored by another proxy`);
     existingHosts.set(h.host, h);
   }
   // The same IP:port twice behind THIS proxy means a copy-paste mistake. Other
@@ -135,7 +161,10 @@ if (!problems.length) {
   // hosts already on this site's proxy are compared.
   const snmpDevs = devices.filter((d) => d.iface === "snmp");
   if (snmpDevs.length && proxy) {
-    const ifaces = await zbx("hostinterface.get", { output: ["hostid", "ip", "dns", "port"], filter: { type: 2 } });
+    const ifaces = await zbx("hostinterface.get", {
+      output: ["hostid", "ip", "dns", "port"],
+      filter: { type: 2 },
+    });
     const others = ifaces.filter((i) => !found.some((h) => h.hostid === i.hostid));
     if (others.length) {
       const otherHosts = await zbx("host.get", {
@@ -145,7 +174,11 @@ if (!problems.length) {
       for (const d of snmpDevs) {
         for (const i of others) {
           const host = otherHosts.find((h) => h.hostid === i.hostid);
-          if ((i.ip === d.address || i.dns === d.address) && Number(i.port) === d.port && host?.proxyid === proxy.proxyid) {
+          if (
+            (i.ip === d.address || i.dns === d.address) &&
+            Number(i.port) === d.port &&
+            host?.proxyid === proxy.proxyid
+          ) {
             fail(`${d.host}: ${d.address}:${d.port} is already monitored as ${host?.host}`);
           }
         }
@@ -155,10 +188,12 @@ if (!problems.length) {
 
   // OpsDesk: site and CI codes.
   site = await ops.findSite(SITE);
-  if (site && site.name !== args.name) console.log(`  note: OpsDesk site ${SITE} exists as "${site.name}" — keeping that name`);
+  if (site && site.name !== args.name)
+    console.log(`  note: OpsDesk site ${SITE} exists as "${site.name}" — keeping that name`);
   for (const d of devices) {
     const ci = await ops.findCi(d.host);
-    if (ci && site && ci.siteId !== site.id) fail(`OpsDesk CI ${d.host} already exists at another site`);
+    if (ci && site && ci.siteId !== site.id)
+      fail(`OpsDesk CI ${d.host} already exists at another site`);
     if (ci && !site) fail(`OpsDesk CI ${d.host} exists but site ${SITE} does not`);
     d.existingCi = ci;
   }
@@ -173,12 +208,15 @@ if (problems.length) {
 // PSK: keep the one in the existing bundle unless asked to rotate.
 const envPath = join(BUNDLE, "proxy.env");
 let psk = null;
-if (existsSync(envPath) && !args["rotate-psk"]) psk = readFileSync(envPath, "utf8").match(/^PSK=([0-9a-f]{64})$/m)?.[1] ?? null;
+if (existsSync(envPath) && !args["rotate-psk"])
+  psk = readFileSync(envPath, "utf8").match(/^PSK=([0-9a-f]{64})$/m)?.[1] ?? null;
 let pskIsNew = false;
 if (!psk) {
   if (proxy && !args["rotate-psk"]) {
     console.error(`\nProxy ${PROXY} exists in Zabbix but its key is not in ${envPath}.`);
-    console.error("Zabbix never reveals a stored key. Re-run with --rotate-psk and reinstall the bundle at the client.");
+    console.error(
+      "Zabbix never reveals a stored key. Re-run with --rotate-psk and reinstall the bundle at the client.",
+    );
     process.exit(1);
   }
   psk = randomBytes(32).toString("hex");
@@ -187,11 +225,15 @@ if (!psk) {
 
 console.log("\nPlan:");
 log(`OpsDesk site ${SITE}: ${site ? "exists" : "create"}`);
-log(`Zabbix proxy ${PROXY} (active, PSK): ${proxy ? (pskIsNew ? "update + NEW key" : "update") : "create"}`);
+log(
+  `Zabbix proxy ${PROXY} (active, PSK): ${proxy ? (pskIsNew ? "update + NEW key" : "update") : "create"}`,
+);
 log(`Zabbix host group "${GROUP}" + webhook read access`);
 for (const d of devices) {
-  log(`${d.host.padEnd(22)} ${d.type.padEnd(18)} ${(d.address ? `${d.address}${d.port ? `:${d.port}` : ""}` : "agent → proxy").padEnd(22)} ` +
-      `Zabbix: ${existingHosts.has(d.host) ? "update" : "create"} · CMDB: ${d.existingCi ? "exists" : "create"}`);
+  log(
+    `${d.host.padEnd(22)} ${d.type.padEnd(18)} ${(d.address ? `${d.address}${d.port ? `:${d.port}` : ""}` : "agent → proxy").padEnd(22)} ` +
+      `Zabbix: ${existingHosts.has(d.host) ? "update" : "create"} · CMDB: ${d.existingCi ? "exists" : "create"}`,
+  );
 }
 if (DRY) {
   console.log("\nDry run complete — nothing was changed.");
@@ -201,7 +243,12 @@ if (DRY) {
 // ------------------------------------------------------------------ 3. write
 console.log("\nApplying:");
 if (!site) {
-  site = await ops.createSite({ code: SITE, name: String(args.name), timezone: String(args.timezone), is247: Boolean(args.is247) });
+  site = await ops.createSite({
+    code: SITE,
+    name: String(args.name),
+    timezone: String(args.timezone),
+    is247: Boolean(args.is247),
+  });
   log(`OpsDesk site ${SITE} created`);
 }
 for (const d of devices) {
@@ -242,7 +289,9 @@ const proxyFields = {
 let proxyid;
 if (proxy) {
   // Only send the key when it changes; Zabbix requires identity+key together.
-  const fields = pskIsNew ? proxyFields : { operating_mode: 0, tls_accept: 2, description: proxyFields.description };
+  const fields = pskIsNew
+    ? proxyFields
+    : { operating_mode: 0, tls_accept: 2, description: proxyFields.description };
   await zbx("proxy.update", { proxyid: proxy.proxyid, ...fields });
   proxyid = proxy.proxyid;
   log(`proxy ${PROXY} updated${pskIsNew ? " with a NEW key" : ""}`);
@@ -261,10 +310,19 @@ for (const d of devices) {
   if (existing) {
     // Secret macros are write-only in Zabbix; re-send them so a corrected
     // credential in the inventory takes effect.
-    await zbx("host.update", { hostid: existing.hostid, ...common, ...(macros.length ? { macros } : {}) });
+    await zbx("host.update", {
+      hostid: existing.hostid,
+      ...common,
+      ...(macros.length ? { macros } : {}),
+    });
     if (interfaces.length) {
-      const [cur] = await zbx("hostinterface.get", { hostids: [existing.hostid], output: ["interfaceid"], filter: { main: 1, type: interfaces[0].type } });
-      if (cur) await zbx("hostinterface.update", { interfaceid: cur.interfaceid, ...interfaces[0] });
+      const [cur] = await zbx("hostinterface.get", {
+        hostids: [existing.hostid],
+        output: ["interfaceid"],
+        filter: { main: 1, type: interfaces[0].type },
+      });
+      if (cur)
+        await zbx("hostinterface.update", { interfaceid: cur.interfaceid, ...interfaces[0] });
     }
     log(`Zabbix host ${d.host} updated`);
   } else {
@@ -297,15 +355,31 @@ const agentServers = devices.filter((d) => d.iface === "agent-active" && d.host 
 writeFileSync(join(BUNDLE, "CLIENT-README.txt"), clientReadme(agentServers));
 writeFileSync(
   join(BUNDLE, "onboarding-summary.json"),
-  JSON.stringify({ site: SITE, name: args.name, proxy: PROXY, server: `${serverHost}:${serverPort}`, generatedAt: new Date().toISOString(),
-    devices: devices.map(({ host, type, template, ciType, address, port }) => ({ host, type, template, ciType, address, port })) }, null, 2),
+  JSON.stringify(
+    {
+      site: SITE,
+      name: args.name,
+      proxy: PROXY,
+      server: `${serverHost}:${serverPort}`,
+      generatedAt: new Date().toISOString(),
+      devices: devices.map(({ host, type, template, ciType, address, port }) => ({
+        host,
+        type,
+        template,
+        ciType,
+        address,
+        port,
+      })),
+    },
+    null,
+    2,
+  ),
 );
 console.log(`\nDone. Client bundle: ${BUNDLE}`);
 console.log("  proxy.env         SECRET — send through a secure channel");
 console.log("  install-proxy.sh  the client runs: sudo bash install-proxy.sh proxy.env");
 console.log("  CLIENT-README.txt instructions for the client");
 console.log(`Then check: node tools/onboarding-kit/check-site.mjs --site ${SITE}`);
-
 
 function clientReadme(servers) {
   return `JSAN OpsDesk monitoring — setup for ${args.name} (${SITE})
@@ -334,7 +408,9 @@ What this does
    It checks the connection to JSAN, installs the proxy, and tells you if
    anything is wrong. Keep proxy.env private and delete it afterwards
    (the installer keeps its own copy of the key, readable only by Zabbix).
-${servers.length ? `
+${
+  servers.length
+    ? `
 5. Servers (optional, recommended)
    Install "Zabbix agent 2" on these servers in ACTIVE mode, pointing to the
    proxy VM on port ${listenPort}, with exactly this Hostname:
@@ -343,7 +419,9 @@ ${servers.map((s) => `       ${s.host}   (${s.name})`).join("\n")}
        ServerActive=<proxy VM IP>:${listenPort}
        Server=<proxy VM IP>
        Hostname=<one of the names above>
-` : ""}
+`
+    : ""
+}
 Questions: contact the JSAN NOC.
 `;
 }

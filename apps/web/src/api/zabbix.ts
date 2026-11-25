@@ -19,7 +19,7 @@ export const ZABBIX_ACK_ROLES = [
   "SERVICE_DESK_NOC",
   "SITE_ENGINEER",
   "INFRASTRUCTURE_LEAD",
-]
+];
 
 export const ZABBIX_BASE = "/monitoring/zabbix";
 export const REFRESH_MS = 30_000;

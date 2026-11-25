@@ -26,7 +26,10 @@ export class HealthController {
       await Promise.race([
         this.prisma.$queryRaw`SELECT 1`,
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("database check timed out")), DB_CHECK_TIMEOUT_MS).unref(),
+          setTimeout(
+            () => reject(new Error("database check timed out")),
+            DB_CHECK_TIMEOUT_MS,
+          ).unref(),
         ),
       ]);
     } catch (err) {

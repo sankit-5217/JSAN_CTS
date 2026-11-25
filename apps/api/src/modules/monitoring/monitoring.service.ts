@@ -119,24 +119,25 @@ export class MonitoringService {
             openAlertEventId,
           },
         });
-        if (changed) await this.audit.record(
-          {
-            actorId: actor.actorId,
-            correlationId: actor.correlationId,
-            entityType: "health_snapshot",
-            entityId: row.id,
-            action: "HEALTH_SNAPSHOT_RECORDED",
-            after: {
-              ciCode,
-              source: snap.source,
-              overallHealth: snap.overallHealth,
-              powerState: snap.powerState,
-              degradedCount,
-              predictiveFailures: snap.predictiveFailures?.length ?? 0,
+        if (changed)
+          await this.audit.record(
+            {
+              actorId: actor.actorId,
+              correlationId: actor.correlationId,
+              entityType: "health_snapshot",
+              entityId: row.id,
+              action: "HEALTH_SNAPSHOT_RECORDED",
+              after: {
+                ciCode,
+                source: snap.source,
+                overallHealth: snap.overallHealth,
+                powerState: snap.powerState,
+                degradedCount,
+                predictiveFailures: snap.predictiveFailures?.length ?? 0,
+              },
             },
-          },
-          tx,
-        );
+            tx,
+          );
         return row;
       });
 

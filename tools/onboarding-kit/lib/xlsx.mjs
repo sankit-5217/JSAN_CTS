@@ -9,7 +9,10 @@ export function unzip(buf) {
   // End of central directory: last occurrence of PK\x05\x06.
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
-    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
   }
   if (eocd < 0) throw new Error("Not an .xlsx file (no zip directory found)");
   const count = buf.readUInt16LE(eocd + 10);
@@ -38,7 +41,9 @@ const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
 export function decodeXml(s) {
   return s.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (_, e) =>
     e[0] === "#"
-      ? String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10))
+      ? String.fromCodePoint(
+          e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10),
+        )
       : ENTITIES[e.toLowerCase()],
   );
 }
@@ -46,7 +51,8 @@ export function decodeXml(s) {
 /** Text of a <si> or <is> element: all <t> runs joined (rich text keeps its text). */
 function runsText(xml) {
   let text = "";
-  for (const m of xml.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>|<t(?:\s[^>]*)?\/>/g)) text += decodeXml(m[1] ?? "");
+  for (const m of xml.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>|<t(?:\s[^>]*)?\/>/g))
+    text += decodeXml(m[1] ?? "");
   return text;
 }
 

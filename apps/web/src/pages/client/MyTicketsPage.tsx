@@ -21,11 +21,7 @@ import type { IncidentStatus, Priority } from "@cts-dc-opsdesk/shared-types";
 import { apiGet } from "../../api/client";
 import { isFinished, relativeTime, STATUS_COLOR, STATUS_LABEL } from "./clientTicket";
 import { describeActivity, SLA_LABEL, useClientPortal, type PortalTicket } from "./clientPortal";
-import {
-  matchesView,
-  viewDefinition,
-  type ClientTicketView,
-} from "./clientViews";
+import { matchesView, viewDefinition, type ClientTicketView } from "./clientViews";
 import {
   ISSUE_TYPE_ORDER,
   ISSUE_TYPE_TONE,
@@ -243,8 +239,7 @@ export function MyTicketsPage() {
             incident={inc}
             portal={ticketsById.get(inc.id)}
             waitingOnYou={
-              inc.status === "PENDING_CUSTOMER" ||
-              (inc.status === "RESOLVED" && !inc.feedback)
+              inc.status === "PENDING_CUSTOMER" || (inc.status === "RESOLVED" && !inc.feedback)
             }
           />
         ))}

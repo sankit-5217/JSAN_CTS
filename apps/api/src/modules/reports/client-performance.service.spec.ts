@@ -78,9 +78,7 @@ describe("ClientPerformanceService.getReport", () => {
   });
 
   it("counts a cancelled ticket as neither open nor resolved", async () => {
-    const { service } = makeService([
-      incident({ id: "a", status: IncidentStatus.CANCELLED }),
-    ]);
+    const { service } = makeService([incident({ id: "a", status: IncidentStatus.CANCELLED })]);
 
     const report = await service.getReport(CUSTOMER, ["site-a"], NOW);
 

@@ -34,7 +34,12 @@ const DEVICES = [
     name: "SITE02 Firewall (FortiGate-60F)",
     template: "FortiGate by SNMP",
     snmp: "127.0.0.21",
-    ci: { ciType: "FIREWALL", manufacturer: "Fortinet", model: "FortiGate-60F", criticality: "CRITICAL" },
+    ci: {
+      ciType: "FIREWALL",
+      manufacturer: "Fortinet",
+      model: "FortiGate-60F",
+      criticality: "CRITICAL",
+    },
   },
   {
     host: "SITE02-SW-001",
@@ -48,7 +53,12 @@ const DEVICES = [
     name: "SITE02 UPS (Smart-UPS SRT 5000)",
     template: UPS_TEMPLATE,
     snmp: "127.0.0.23",
-    ci: { ciType: "UPS", manufacturer: "APC", model: "Smart-UPS SRT 5000", criticality: "CRITICAL" },
+    ci: {
+      ciType: "UPS",
+      manufacturer: "APC",
+      model: "Smart-UPS SRT 5000",
+      criticality: "CRITICAL",
+    },
   },
   {
     host: "SITE02-ISP-001",
@@ -74,7 +84,9 @@ function secret(name) {
 
 const zbxToken = secret("zabbix-api-token");
 if (!zbxToken) {
-  console.error(`Missing ${join(SECRETS, "zabbix-api-token")} — create a Zabbix API token first (see README).`);
+  console.error(
+    `Missing ${join(SECRETS, "zabbix-api-token")} — create a Zabbix API token first (see README).`,
+  );
   process.exit(1);
 }
 
@@ -86,7 +98,8 @@ async function zbx(method, params) {
     body: JSON.stringify({ jsonrpc: "2.0", method, params, id: rpcId++ }),
   });
   const body = await res.json();
-  if (body.error) throw new Error(`Zabbix ${method}: ${body.error.message} ${body.error.data ?? ""}`);
+  if (body.error)
+    throw new Error(`Zabbix ${method}: ${body.error.message} ${body.error.data ?? ""}`);
   return body.result;
 }
 
@@ -108,16 +121,28 @@ async function ops(method, path, body) {
 
 const log = (msg) => console.log(`  ${msg}`);
 // Central objects (UPS template, webhook, webhook user, action) are shared with the onboarding kit.
-const { ensureHostGroup, ensureUpsTemplate, templateId, ensureWebhook, ensureWebhookUser, ensureAction, grantWebhookRead } =
-  zabbixCentral(zbx, log);
+const {
+  ensureHostGroup,
+  ensureUpsTemplate,
+  templateId,
+  ensureWebhook,
+  ensureWebhookUser,
+  ensureAction,
+  grantWebhookRead,
+} = zabbixCentral(zbx, log);
 
 // ------------------------------------------------------------------ Zabbix
 
 async function ensureProxy() {
-  const psk = execFileSync("wsl", ["-d", DISTRO, "-u", "root", "--", "cat", "/etc/zabbix/client-lab/site02-proxy.psk"], {
-    encoding: "utf8",
-  }).trim();
-  if (!/^[0-9a-f]{64}$/i.test(psk)) throw new Error("PSK file in WSL is missing or malformed — run setup-wsl.sh");
+  const psk = execFileSync(
+    "wsl",
+    ["-d", DISTRO, "-u", "root", "--", "cat", "/etc/zabbix/client-lab/site02-proxy.psk"],
+    {
+      encoding: "utf8",
+    },
+  ).trim();
+  if (!/^[0-9a-f]{64}$/i.test(psk))
+    throw new Error("PSK file in WSL is missing or malformed — run setup-wsl.sh");
   const fields = {
     operating_mode: 0, // active: the proxy connects out to the server
     tls_accept: 2, // PSK only
@@ -142,7 +167,14 @@ async function ensureHost(dev, proxyid, groupid) {
     { tag: "site", value: SITE },
     { tag: "ci", value: dev.host },
   ];
-  const common = { name: dev.name, groups: [{ groupid }], templates, tags, monitored_by: 1, proxyid };
+  const common = {
+    name: dev.name,
+    groups: [{ groupid }],
+    templates,
+    tags,
+    monitored_by: 1,
+    proxyid,
+  };
   const [h] = await zbx("host.get", { filter: { host: [dev.host] }, output: ["hostid"] });
   if (h) {
     await zbx("host.update", { hostid: h.hostid, ...common });
@@ -153,7 +185,12 @@ async function ensureHost(dev, proxyid, groupid) {
   const macros = [];
   if (dev.snmp) {
     interfaces.push({
-      type: 2, main: 1, useip: 1, ip: dev.snmp, dns: "", port: "1161",
+      type: 2,
+      main: 1,
+      useip: 1,
+      ip: dev.snmp,
+      dns: "",
+      port: "1161",
       details: { version: 2, bulk: 1, community: "{$SNMP_COMMUNITY}" },
     });
     macros.push({ macro: "{$SNMP_COMMUNITY}", value: "public" });
@@ -173,10 +210,18 @@ async function discoverNow(hostids) {
   const rules = (await zbx("discoveryrule.get", { hostids, output: ["itemid", "type"] })).filter(
     (r) => r.type === "20",
   );
-  const items = await zbx("item.get", { hostids, output: ["itemid"], filter: { type: [20] }, limit: 500 });
+  const items = await zbx("item.get", {
+    hostids,
+    output: ["itemid"],
+    filter: { type: [20] },
+    limit: 500,
+  });
   const ids = [...rules, ...items].map((r) => r.itemid);
   for (let i = 0; i < ids.length; i += 50) {
-    await zbx("task.create", ids.slice(i, i + 50).map((itemid) => ({ type: 6, request: { itemid } })));
+    await zbx(
+      "task.create",
+      ids.slice(i, i + 50).map((itemid) => ({ type: 6, request: { itemid } })),
+    );
   }
   log(`asked Zabbix to check ${ids.length} items/discovery rules now`);
 }
@@ -222,7 +267,7 @@ async function ensureCis() {
       ciType: dev.ci.ciType,
       manufacturer: dev.ci.manufacturer,
       model: dev.ci.model,
-      managementAddress: dev.snmp ? `${dev.snmp}:1161 (SNMP)` : dev.ping ?? undefined,
+      managementAddress: dev.snmp ? `${dev.snmp}:1161 (SNMP)` : (dev.ping ?? undefined),
       managedBy: "JSAN",
       criticality: dev.ci.criticality,
       lifecycleStatus: "ACTIVE",
@@ -256,4 +301,6 @@ await grantWebhookRead(groupid);
 // The proxy picks up its config within ProxyConfigFrequency (10 s).
 await new Promise((r) => setTimeout(r, 15000));
 await discoverNow(created);
-console.log("Done. Watch: Zabbix -> Data collection -> Proxies, and OpsDesk -> Monitoring -> Zabbix.");
+console.log(
+  "Done. Watch: Zabbix -> Data collection -> Proxies, and OpsDesk -> Monitoring -> Zabbix.",
+);

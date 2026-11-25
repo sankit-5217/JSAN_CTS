@@ -794,7 +794,10 @@ export class AlertsService {
   }
 
   /** Current state of each of a source's alerts, by external event id (for re-sync). */
-  async statesByExternalId(source: string, externalEventIds: string[]): Promise<Map<string, AlertState>> {
+  async statesByExternalId(
+    source: string,
+    externalEventIds: string[],
+  ): Promise<Map<string, AlertState>> {
     if (externalEventIds.length === 0) return new Map();
     const rows = await this.prisma.alert.findMany({
       where: { source, externalEventId: { in: externalEventIds } },

@@ -17,7 +17,8 @@ const log = (m) => console.log(`  ${m}`);
 const version = await zabbixVersion(cfg.zabbixUrl).catch((e) => {
   throw new Error(`Zabbix API not reachable at ${cfg.zabbixUrl}: ${e.message}`);
 });
-if (!String(version).startsWith("7.")) throw new Error(`Zabbix ${version} found; this kit is built for Zabbix 7.x`);
+if (!String(version).startsWith("7."))
+  throw new Error(`Zabbix ${version} found; this kit is built for Zabbix 7.x`);
 console.log(`Zabbix ${version} at ${cfg.zabbixUrl}`);
 
 const ops = await opsdeskClient(cfg.opsdeskApi, cfg.adminEmail, cfg.adminPassword);
@@ -30,7 +31,9 @@ if (!odk) {
   mkdirSync(SECRETS_DIR, { recursive: true });
   writeFileSync(join(SECRETS_DIR, "opsdesk-webhook-token"), created.token, { mode: 0o600 });
   odk = created.token;
-  log("OpsDesk machine token for the webhook created (secrets/opsdesk-webhook-token, valid 365 days)");
+  log(
+    "OpsDesk machine token for the webhook created (secrets/opsdesk-webhook-token, valid 365 days)",
+  );
 }
 
 const zbx = zabbixClient(cfg.zabbixUrl, cfg.zabbixToken);

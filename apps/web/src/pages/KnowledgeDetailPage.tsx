@@ -279,8 +279,7 @@ export function KnowledgeDetailPage() {
               </Typography>
               <Stack spacing={2}>
                 <Typography variant="body2" color="text.secondary">
-                  You'll be recorded as the reviewer. An article can't be approved by its own
-                  owner.
+                  You'll be recorded as the reviewer. An article can't be approved by its own owner.
                 </Typography>
                 <TextField
                   type="date"

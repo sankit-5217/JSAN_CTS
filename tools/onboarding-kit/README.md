@@ -12,12 +12,12 @@ setup-central.mjs  ──►  onboard-site.mjs --inventory devices.csv  ──�
                                  └──────────────  check-site.mjs --site SITE03  ◄──────────┘
 ```
 
-| File                    | Who runs it | What it does                                                                                   |
-| ----------------------- | ----------- | ---------------------------------------------------------------------------------------------- |
-| `setup-central.mjs`     | JSAN, once  | UPS-MIB template, OpsDesk webhook, dedicated webhook user, action. Re-runnable.                |
-| `onboard-site.mjs`      | JSAN        | Validates the inventory, then creates the site, CMDB items, proxy + key, hosts; writes the bundle |
-| `client/install-proxy.sh` | Client    | Installs and connects the proxy (and an agent for the proxy VM). Re-runnable.                 |
-| `check-site.mjs`        | JSAN        | Go-live checklist; exit code 0 only when everything passes                                     |
+| File                      | Who runs it | What it does                                                                                      |
+| ------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
+| `setup-central.mjs`       | JSAN, once  | UPS-MIB template, OpsDesk webhook, dedicated webhook user, action. Re-runnable.                   |
+| `onboard-site.mjs`        | JSAN        | Validates the inventory, then creates the site, CMDB items, proxy + key, hosts; writes the bundle |
+| `client/install-proxy.sh` | Client      | Installs and connects the proxy (and an agent for the proxy VM). Re-runnable.                     |
+| `check-site.mjs`          | JSAN        | Go-live checklist; exit code 0 only when everything passes                                        |
 
 ## Prerequisites (JSAN)
 
@@ -29,7 +29,7 @@ setup-central.mjs  ──►  onboard-site.mjs --inventory devices.csv  ──�
 - OpsDesk Super Admin credentials: `OPSDESK_ADMIN_EMAIL` (default
   `admin@example.com`) and `OPSDESK_ADMIN_PASSWORD` or `secrets/opsdesk-admin-password`.
 - Optional env: `ZABBIX_URL`, `OPSDESK_API`, `WEBHOOK_URL` (the URL the Zabbix
-  *server* uses to reach OpsDesk).
+  _server_ uses to reach OpsDesk).
 
 ## Onboard a client
 

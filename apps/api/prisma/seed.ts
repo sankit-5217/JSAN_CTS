@@ -82,7 +82,6 @@ async function seedZabbixConnection() {
   });
 }
 
-
 async function main() {
   const site1 = await prisma.site.upsert({
     where: { code: "SITE01" },

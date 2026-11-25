@@ -16,7 +16,9 @@ const t0 = Date.now();
 const secs = (from) => Math.round((Date.now() - from) / 1000);
 
 function lab(...args) {
-  return execFileSync("wsl", ["-d", DISTRO, "-u", "root", "--", "opsdesk-lab", ...args], { encoding: "utf8" }).trim();
+  return execFileSync("wsl", ["-d", DISTRO, "-u", "root", "--", "opsdesk-lab", ...args], {
+    encoding: "utf8",
+  }).trim();
 }
 
 async function login(email) {
@@ -32,7 +34,10 @@ async function login(email) {
 async function api(jwt, method, path, body) {
   const r = await fetch(`${API}${path}`, {
     method,
-    headers: { Authorization: `Bearer ${jwt}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+    headers: {
+      Authorization: `Bearer ${jwt}`,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await r.text();
@@ -73,11 +78,24 @@ await new Promise((r) => setTimeout(r, 45000)); // let any old faults recover
 {
   const eng = await api(ENG02, "GET", "/monitoring/zabbix/hosts");
   const site02 = (eng.body?.items ?? []).filter((h) => h.siteCode === "SITE02");
-  record("V1", "SITE02 engineer sees the 5 client devices", site02.length === 5, `${site02.length} hosts`);
+  record(
+    "V1",
+    "SITE02 engineer sees the 5 client devices",
+    site02.length === 5,
+    `${site02.length} hosts`,
+  );
   const noc = await api(NOC01, "GET", "/monitoring/zabbix/hosts");
   const leak = (noc.body?.items ?? []).filter((h) => h.siteCode === "SITE02");
-  record("V2", "SITE01 NOC cannot see SITE02 devices", noc.status === 200 && leak.length === 0, `${leak.length} SITE02 hosts`);
-  const up = site02.filter((h) => h.availability === "UP").map((h) => h.host).sort();
+  record(
+    "V2",
+    "SITE01 NOC cannot see SITE02 devices",
+    noc.status === 200 && leak.length === 0,
+    `${leak.length} SITE02 hosts`,
+  );
+  const up = site02
+    .filter((h) => h.availability === "UP")
+    .map((h) => h.host)
+    .sort();
   record("V3", "Proxy-monitored devices report UP", up.length >= 4, up.join(", "));
 }
 
@@ -85,10 +103,22 @@ await new Promise((r) => setTimeout(r, 45000)); // let any old faults recover
 let start = Date.now();
 lab("ups-on-battery");
 let w = await waitFor(
-  () => findAlert("SITE02-UPS-001", (a) => a.alertType === "ups.on_battery" && a.state === "OPEN" && Date.parse(a.lastSeenAt) >= start - 5000),
+  () =>
+    findAlert(
+      "SITE02-UPS-001",
+      (a) =>
+        a.alertType === "ups.on_battery" &&
+        a.state === "OPEN" &&
+        Date.parse(a.lastSeenAt) >= start - 5000,
+    ),
   150,
 );
-record("U1", "UPS on battery -> OpsDesk HIGH alert", w.value?.severity === "HIGH", w.value ? `after ${w.after}s, ${w.value.severity}` : `none after ${w.after}s`);
+record(
+  "U1",
+  "UPS on battery -> OpsDesk HIGH alert",
+  w.value?.severity === "HIGH",
+  w.value ? `after ${w.after}s, ${w.value.severity}` : `none after ${w.after}s`,
+);
 {
   // HIGH must not open a ticket. It may still be linked to an incident that was
   // already open on the UPS (alert correlation), e.g. one left by an earlier run.
@@ -107,26 +137,66 @@ record("U1", "UPS on battery -> OpsDesk HIGH alert", w.value?.severity === "HIGH
 start = Date.now();
 lab("ups-battery-low");
 w = await waitFor(
-  () => findAlert("SITE02-UPS-001", (a) => a.alertType === "ups.battery_low" && a.state === "OPEN" && a.correlatedIncidentId),
+  () =>
+    findAlert(
+      "SITE02-UPS-001",
+      (a) => a.alertType === "ups.battery_low" && a.state === "OPEN" && a.correlatedIncidentId,
+    ),
   150,
 );
-record("U3", "Battery low -> CRITICAL alert with an auto-created incident", w.value?.severity === "CRITICAL", w.value ? `after ${w.after}s` : `none after ${w.after}s`);
+record(
+  "U3",
+  "Battery low -> CRITICAL alert with an auto-created incident",
+  w.value?.severity === "CRITICAL",
+  w.value ? `after ${w.after}s` : `none after ${w.after}s`,
+);
 let incident = null;
 if (w.value) {
   incident = (await api(ADMIN, "GET", `/incidents/${w.value.correlatedIncidentId}`)).body;
-  record("U4", "Incident is P1 on SITE02-UPS-001", incident?.priority === "P1", `${incident?.incidentNo ?? incident?.id} ${incident?.priority} ${incident?.status}`);
+  record(
+    "U4",
+    "Incident is P1 on SITE02-UPS-001",
+    incident?.priority === "P1",
+    `${incident?.incidentNo ?? incident?.id} ${incident?.priority} ${incident?.status}`,
+  );
 }
 
 // --- Acknowledge from OpsDesk -> Zabbix -> back to the OpsDesk alert ---
 {
   const probs = await api(ENG02, "GET", "/monitoring/zabbix/problems");
-  const p = (probs.body?.items ?? []).find((x) => x.host?.host === "SITE02-UPS-001" && x.name.startsWith("UPS battery is low"));
-  record("A1", "Problem visible on the OpsDesk Zabbix page (SITE02 engineer)", Boolean(p), p ? `${p.severityLabel}: ${p.name}` : "missing");
+  const p = (probs.body?.items ?? []).find(
+    (x) => x.host?.host === "SITE02-UPS-001" && x.name.startsWith("UPS battery is low"),
+  );
+  record(
+    "A1",
+    "Problem visible on the OpsDesk Zabbix page (SITE02 engineer)",
+    Boolean(p),
+    p ? `${p.severityLabel}: ${p.name}` : "missing",
+  );
   if (p) {
-    const ack = await api(ENG02, "POST", `/monitoring/zabbix/problems/${p.eventId}/acknowledge`, { message: "Smoke test: engineer dispatched" });
-    record("A2", "SITE02 engineer acknowledges it from OpsDesk", ack.status === 201, `HTTP ${ack.status}`);
-    w = await waitFor(() => findAlert("SITE02-UPS-001", (a) => a.alertType === "ups.battery_low" && a.state === "ACKNOWLEDGED"), 90);
-    record("A3", "Zabbix echoes the ack back: OpsDesk alert ACKNOWLEDGED", Boolean(w.value), w.value ? `after ${w.after}s` : `not after ${w.after}s`);
+    const ack = await api(ENG02, "POST", `/monitoring/zabbix/problems/${p.eventId}/acknowledge`, {
+      message: "Smoke test: engineer dispatched",
+    });
+    record(
+      "A2",
+      "SITE02 engineer acknowledges it from OpsDesk",
+      ack.status === 201,
+      `HTTP ${ack.status}`,
+    );
+    w = await waitFor(
+      () =>
+        findAlert(
+          "SITE02-UPS-001",
+          (a) => a.alertType === "ups.battery_low" && a.state === "ACKNOWLEDGED",
+        ),
+      90,
+    );
+    record(
+      "A3",
+      "Zabbix echoes the ack back: OpsDesk alert ACKNOWLEDGED",
+      Boolean(w.value),
+      w.value ? `after ${w.after}s` : `not after ${w.after}s`,
+    );
   }
 }
 
@@ -144,14 +214,28 @@ record("U5", "Mains back -> both UPS alerts RECOVERED", Boolean(w.value), `after
 start = Date.now();
 lab("wan-down");
 w = await waitFor(
-  () => findAlert("SITE02-FW-001", (a) => /ifOperStatus\.1\]|link_down|wan1/i.test(`${a.alertType} ${a.summary ?? ""}`) && a.state === "OPEN"),
+  () =>
+    findAlert(
+      "SITE02-FW-001",
+      (a) =>
+        /ifOperStatus\.1\]|link_down|wan1/i.test(`${a.alertType} ${a.summary ?? ""}`) &&
+        a.state === "OPEN",
+    ),
   180,
 );
-record("F1", "Firewall wan1 down -> OpsDesk alert", Boolean(w.value), w.value ? `after ${w.after}s, ${w.value.severity}: ${w.value.summary}` : `none after ${w.after}s`);
+record(
+  "F1",
+  "Firewall wan1 down -> OpsDesk alert",
+  Boolean(w.value),
+  w.value ? `after ${w.after}s, ${w.value.severity}: ${w.value.summary}` : `none after ${w.after}s`,
+);
 lab("wan-up");
 if (w.value) {
   const id = w.value.id;
-  const r = await waitFor(async () => (await alerts("SITE02-FW-001")).find((a) => a.id === id && a.state === "RECOVERED"), 180);
+  const r = await waitFor(
+    async () => (await alerts("SITE02-FW-001")).find((a) => a.id === id && a.state === "RECOVERED"),
+    180,
+  );
   record("F2", "wan1 back up -> alert RECOVERED", Boolean(r.value), `after ${r.after}s`);
 }
 
@@ -159,16 +243,29 @@ if (w.value) {
 if (!QUICK) {
   lab("isp-down");
   w = await waitFor(() => findAlert("SITE02-ISP-001", (a) => a.state === "OPEN"), 330);
-  record("I1", "ISP gateway unreachable -> OpsDesk alert", Boolean(w.value), w.value ? `after ${w.after}s, ${w.value.severity}: ${w.value.summary}` : `none after ${w.after}s`);
+  record(
+    "I1",
+    "ISP gateway unreachable -> OpsDesk alert",
+    Boolean(w.value),
+    w.value
+      ? `after ${w.after}s, ${w.value.severity}: ${w.value.summary}`
+      : `none after ${w.after}s`,
+  );
   lab("isp-up");
   if (w.value) {
     const id = w.value.id;
-    const r = await waitFor(async () => (await alerts("SITE02-ISP-001")).find((a) => a.id === id && a.state === "RECOVERED"), 240);
+    const r = await waitFor(
+      async () =>
+        (await alerts("SITE02-ISP-001")).find((a) => a.id === id && a.state === "RECOVERED"),
+      240,
+    );
     record("I2", "ISP back -> alert RECOVERED", Boolean(r.value), `after ${r.after}s`);
   }
 }
 
 lab("reset");
 const failed = results.filter((r) => !r.ok).length;
-console.log(`\n${results.length - failed} passed, ${failed} failed, ${secs(t0)}s total${incident ? ` · test incident ${incident.incidentNo ?? incident.id} left open in OpsDesk` : ""}`);
+console.log(
+  `\n${results.length - failed} passed, ${failed} failed, ${secs(t0)}s total${incident ? ` · test incident ${incident.incidentNo ?? incident.id} left open in OpsDesk` : ""}`,
+);
 process.exit(failed ? 1 : 0);

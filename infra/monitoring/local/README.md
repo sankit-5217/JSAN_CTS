@@ -48,14 +48,14 @@ After editing `prometheus.yml` or `rules/*.yml`:
 Binaries, data and logs live outside the repo in `%USERPROFILE%\devtools\monitoring`
 (pass `-DevTools` to use another folder):
 
-| Download (windows-amd64)                 | Extract to                          |
-| ---------------------------------------- | ----------------------------------- |
-| Prometheus zip                           | `monitoring\prometheus-<version>\`  |
-| Alertmanager zip                         | `monitoring\alertmanager-<version>\` |
-| Grafana OSS zip                          | `monitoring\grafana-<version>\`     |
-| Loki `loki-windows-amd64.exe.zip`        | `monitoring\bin\`                   |
-| Alloy `alloy-windows-amd64.exe.zip`      | `monitoring\bin\`                   |
-| windows_exporter `...-amd64.exe`         | `monitoring\bin\windows_exporter.exe` |
+| Download (windows-amd64)            | Extract to                            |
+| ----------------------------------- | ------------------------------------- |
+| Prometheus zip                      | `monitoring\prometheus-<version>\`    |
+| Alertmanager zip                    | `monitoring\alertmanager-<version>\`  |
+| Grafana OSS zip                     | `monitoring\grafana-<version>\`       |
+| Loki `loki-windows-amd64.exe.zip`   | `monitoring\bin\`                     |
+| Alloy `alloy-windows-amd64.exe.zip` | `monitoring\bin\`                     |
+| windows_exporter `...-amd64.exe`    | `monitoring\bin\windows_exporter.exe` |
 
 Set up with Prometheus 3.15.0, Alertmanager 0.34.1, Loki 3.7.8, Alloy 1.20.1,
 Grafana 13.2.3 and windows_exporter 0.31.8.

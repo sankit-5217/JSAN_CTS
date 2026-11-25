@@ -1010,24 +1010,24 @@ export function IncidentDetailPage() {
           {buildConversation(comments, customerProgress, { statuses: false })
             .reverse()
             .map((item) =>
-            item.type === "edit" ? (
-              <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
-            ) : item.type === "comment" ? (
-              <MessageBubble
-                key={item.comment.id}
-                message={item.comment}
-                mine={item.comment.authorId === currentUserId}
-                tag={
-                  item.comment.authorId === incident.reportedByUserId
-                    ? { label: "Customer", color: "warning" }
-                    : item.comment.isInternal
-                      ? { label: "Internal" }
-                      : { label: "To customer", color: "info" }
-                }
-                onOpen={(attachmentId, disposition) => void openFile(attachmentId, disposition)}
-              />
-            ) : null,
-          )}
+              item.type === "edit" ? (
+                <ReportEditNote key={`e-${item.at}`} edit={item.edit} />
+              ) : item.type === "comment" ? (
+                <MessageBubble
+                  key={item.comment.id}
+                  message={item.comment}
+                  mine={item.comment.authorId === currentUserId}
+                  tag={
+                    item.comment.authorId === incident.reportedByUserId
+                      ? { label: "Customer", color: "warning" }
+                      : item.comment.isInternal
+                        ? { label: "Internal" }
+                        : { label: "To customer", color: "info" }
+                  }
+                  onOpen={(attachmentId, disposition) => void openFile(attachmentId, disposition)}
+                />
+              ) : null,
+            )}
           {comments.length === 0 && (
             <Typography variant="body2" color="text.secondary">
               No messages yet.
@@ -1140,8 +1140,8 @@ export function IncidentDetailPage() {
             {!canRoute && (
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 Reassigning ownership and overriding priority are a Service Desk/NOC or
-                elevated-role call — you can still update the classification, CC list and
-                Ref Bug ID.
+                elevated-role call — you can still update the classification, CC list and Ref Bug
+                ID.
               </Typography>
             )}
             {draft && catalog ? (

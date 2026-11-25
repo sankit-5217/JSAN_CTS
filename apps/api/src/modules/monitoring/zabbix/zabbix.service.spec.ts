@@ -399,9 +399,16 @@ describe("ZabbixService", () => {
     });
 
     it("creates a PSK-only, site-tagged host in Clients/<SITE> with the active template", async () => {
-      const zbx = fakeZabbix({ ...base, "host.get": () => [], "host.create": () => ({ hostids: ["10500"] }) });
+      const zbx = fakeZabbix({
+        ...base,
+        "host.get": () => [],
+        "host.create": () => ({ hostids: ["10500"] }),
+      });
       service.fetchFn = zbx.fetchFn as unknown as typeof fetch;
-      await expect(service.upsertAgentHost(INPUT)).resolves.toEqual({ hostId: "10500", created: true });
+      await expect(service.upsertAgentHost(INPUT)).resolves.toEqual({
+        hostId: "10500",
+        created: true,
+      });
       expect(zbx.calls.find((c) => c.method === "hostgroup.create")?.params).toEqual({
         name: "Clients/SITE04",
       });
@@ -422,18 +429,25 @@ describe("ZabbixService", () => {
     it("updates the same site's existing host (new PSK) instead of duplicating it", async () => {
       const zbx = fakeZabbix({
         ...base,
-        "host.get": () => [{ hostid: "10500", host: INPUT.host, tags: [{ tag: "site", value: "SITE04" }] }],
+        "host.get": () => [
+          { hostid: "10500", host: INPUT.host, tags: [{ tag: "site", value: "SITE04" }] },
+        ],
         "host.update": () => ({ hostids: ["10500"] }),
       });
       service.fetchFn = zbx.fetchFn as unknown as typeof fetch;
-      await expect(service.upsertAgentHost(INPUT)).resolves.toEqual({ hostId: "10500", created: false });
+      await expect(service.upsertAgentHost(INPUT)).resolves.toEqual({
+        hostId: "10500",
+        created: false,
+      });
       expect(zbx.calls.some((c) => c.method === "host.create")).toBe(false);
     });
 
     it("never takes over a host that belongs to another site", async () => {
       const zbx = fakeZabbix({
         ...base,
-        "host.get": () => [{ hostid: "10500", host: INPUT.host, tags: [{ tag: "site", value: "SITE01" }] }],
+        "host.get": () => [
+          { hostid: "10500", host: INPUT.host, tags: [{ tag: "site", value: "SITE01" }] },
+        ],
       });
       service.fetchFn = zbx.fetchFn as unknown as typeof fetch;
       await expect(service.upsertAgentHost(INPUT)).rejects.toBeInstanceOf(ConflictException);

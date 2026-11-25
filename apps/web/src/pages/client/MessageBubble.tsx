@@ -104,7 +104,11 @@ export function MessageRecord({
       >
         <Typography
           variant="caption"
-          sx={{ fontWeight: 700, color: mine ? "primary.main" : "text.primary", overflowWrap: "anywhere" }}
+          sx={{
+            fontWeight: 700,
+            color: mine ? "primary.main" : "text.primary",
+            overflowWrap: "anywhere",
+          }}
         >
           {senderLabel(message.author)}
         </Typography>
@@ -150,7 +154,11 @@ export function ConversationScroll({
     <Box
       ref={ref}
       sx={{
-        maxHeight: tall ? "clamp(300px, 52vh, 620px)" : compact ? "clamp(64px, 12vh, 120px)" : "40vh",
+        maxHeight: tall
+          ? "clamp(300px, 52vh, 620px)"
+          : compact
+            ? "clamp(64px, 12vh, 120px)"
+            : "40vh",
         overflowY: "auto",
         border: "1px solid",
         borderColor: "divider",

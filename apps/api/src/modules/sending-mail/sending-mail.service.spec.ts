@@ -488,12 +488,7 @@ describe("sending accounts", () => {
     const callback = jest.fn().mockResolvedValue("/client/home");
     const controller = new SendingMailController({ callback } as unknown as SendingMailService);
     const response = { setHeader: jest.fn(), redirect: jest.fn() };
-    await controller.callback(
-      "google",
-      "nonce.path",
-      "code",
-      response as unknown as Response,
-    );
+    await controller.callback("google", "nonce.path", "code", response as unknown as Response);
     expect(response.redirect).toHaveBeenCalledWith(
       expect.stringContaining("/client/home?result=connected"),
     );
@@ -504,14 +499,7 @@ describe("sending accounts", () => {
     const callback = jest.fn().mockRejectedValue(new Error("refused"));
     const controller = new SendingMailController({ callback } as unknown as SendingMailService);
     const response = { setHeader: jest.fn(), redirect: jest.fn() };
-    await controller.callback(
-      "google",
-      "nonce.path",
-      undefined,
-      response as unknown as Response,
-    );
-    expect(response.redirect).toHaveBeenCalledWith(
-      expect.stringContaining("result=failed"),
-    );
+    await controller.callback("google", "nonce.path", undefined, response as unknown as Response);
+    expect(response.redirect).toHaveBeenCalledWith(expect.stringContaining("result=failed"));
   });
 });

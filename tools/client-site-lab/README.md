@@ -46,14 +46,14 @@ node tools\client-site-lab\provision.mjs
 
 `provision.mjs` creates, idempotently:
 
-| Where   | What                                                                                 |
-| ------- | ------------------------------------------------------------------------------------ |
-| Zabbix  | Proxy `SITE02-PROXY` (active, PSK identity `SITE02-PROXY`)                            |
-| Zabbix  | Template `OpsDesk UPS-MIB by SNMP` (RFC 1628, vendor-neutral, 15 items, 6 triggers)   |
-| Zabbix  | 5 hosts in group `Client SITE02`, monitored by the proxy, tagged `site` and `ci`      |
-| Zabbix  | Media type `OpsDesk` (webhook) and action `Send problems to OpsDesk`                  |
-| Zabbix  | User `opsdesk-webhook` (read-only, no frontend) that receives the OpsDesk media       |
-| OpsDesk | 5 CMDB items in SITE02, and an `odk_` token for the webhook (`secrets/`)              |
+| Where   | What                                                                                |
+| ------- | ----------------------------------------------------------------------------------- |
+| Zabbix  | Proxy `SITE02-PROXY` (active, PSK identity `SITE02-PROXY`)                          |
+| Zabbix  | Template `OpsDesk UPS-MIB by SNMP` (RFC 1628, vendor-neutral, 15 items, 6 triggers) |
+| Zabbix  | 5 hosts in group `Client SITE02`, monitored by the proxy, tagged `site` and `ci`    |
+| Zabbix  | Media type `OpsDesk` (webhook) and action `Send problems to OpsDesk`                |
+| Zabbix  | User `opsdesk-webhook` (read-only, no frontend) that receives the OpsDesk media     |
+| OpsDesk | 5 CMDB items in SITE02, and an `odk_` token for the webhook (`secrets/`)            |
 
 The webhook sends problems, recoveries and acknowledgements for any event
 carrying a `site` tag to `POST /api/v1/alerts/sources/zabbix`.
@@ -70,18 +70,18 @@ powershell -File tools\client-site-lab\lab.ps1 status
 powershell -File tools\client-site-lab\lab.ps1 ups-on-battery
 ```
 
-| Command                        | What happens                         | Zabbix   | OpsDesk                         |
-| ------------------------------ | ------------------------------------ | -------- | ------------------------------- |
-| `ups-on-battery`               | Mains fails, UPS on battery          | High     | HIGH alert                      |
-| `ups-battery-low`              | 4 min of runtime left                | Disaster | CRITICAL alert + **P1 incident** |
-| `ups-overload`                 | Load 92 % (after 2 min)              | Warning  | WARNING alert                   |
-| `ups-normal`                   | Mains back                           | resolved | alerts RECOVERED                |
-| `wan-down` / `wan-up`          | Firewall wan1 (ISP-A) link           | Average  | HIGH alert                      |
-| `isp-down` / `isp-up`          | ISP gateway stops answering (~3 min) | High     | HIGH alert                      |
-| `fw-cpu-high` / `fw-cpu-normal` | Firewall CPU 97 % (after 5 min)     | Warning  | WARNING alert                   |
-| `port-down N` / `port-up N`    | Switch port Gi1/0/N                  | Average  | HIGH alert                      |
-| `offline fw\|sw\|ups` / `online …` | Device stops answering SNMP      | Warning  | WARNING alert                   |
-| `reset`                        | Everything back to normal            |          |                                 |
+| Command                            | What happens                         | Zabbix   | OpsDesk                          |
+| ---------------------------------- | ------------------------------------ | -------- | -------------------------------- |
+| `ups-on-battery`                   | Mains fails, UPS on battery          | High     | HIGH alert                       |
+| `ups-battery-low`                  | 4 min of runtime left                | Disaster | CRITICAL alert + **P1 incident** |
+| `ups-overload`                     | Load 92 % (after 2 min)              | Warning  | WARNING alert                    |
+| `ups-normal`                       | Mains back                           | resolved | alerts RECOVERED                 |
+| `wan-down` / `wan-up`              | Firewall wan1 (ISP-A) link           | Average  | HIGH alert                       |
+| `isp-down` / `isp-up`              | ISP gateway stops answering (~3 min) | High     | HIGH alert                       |
+| `fw-cpu-high` / `fw-cpu-normal`    | Firewall CPU 97 % (after 5 min)      | Warning  | WARNING alert                    |
+| `port-down N` / `port-up N`        | Switch port Gi1/0/N                  | Average  | HIGH alert                       |
+| `offline fw\|sw\|ups` / `online …` | Device stops answering SNMP          | Warning  | WARNING alert                    |
+| `reset`                            | Everything back to normal            |          |                                  |
 
 Then watch **OpsDesk → Monitoring → Zabbix** (live problems, acknowledge),
 **Alerts**, and **Incidents**. Acknowledging in OpsDesk writes to Zabbix, and
@@ -104,13 +104,13 @@ open in OpsDesk.
 
 ## Files
 
-| File               | Purpose                                                                         |
-| ------------------ | ------------------------------------------------------------------------------- |
-| `setup-wsl.sh`     | Installs and starts the proxy, snmpsim devices and second agent (systemd units) |
-| `gen-snmprec.mjs`  | Generates `snmprec/*.snmprec`, the simulated devices' SNMP data                 |
-| `provision.mjs`    | Registers proxy, template, hosts, webhook, action, CMDB items                   |
-| `lab.sh`, `lab.ps1` | Fault controls (`/usr/local/bin/opsdesk-lab` inside WSL)                       |
-| `smoke.mjs`        | End-to-end test                                                                  |
+| File                | Purpose                                                                         |
+| ------------------- | ------------------------------------------------------------------------------- |
+| `setup-wsl.sh`      | Installs and starts the proxy, snmpsim devices and second agent (systemd units) |
+| `gen-snmprec.mjs`   | Generates `snmprec/*.snmprec`, the simulated devices' SNMP data                 |
+| `provision.mjs`     | Registers proxy, template, hosts, webhook, action, CMDB items                   |
+| `lab.sh`, `lab.ps1` | Fault controls (`/usr/local/bin/opsdesk-lab` inside WSL)                        |
+| `smoke.mjs`         | End-to-end test                                                                 |
 
 ## Real client sites
 

@@ -30,9 +30,9 @@ describe("hasMatchingSendingEmail", () => {
   });
 
   it("rejects an account that was never connected", () => {
-    expect(
-      hasMatchingSendingEmail({ senderEmail: "client@example.com", account: null }),
-    ).toBe(false);
+    expect(hasMatchingSendingEmail({ senderEmail: "client@example.com", account: null })).toBe(
+      false,
+    );
   });
 });
 

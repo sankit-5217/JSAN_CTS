@@ -28,8 +28,7 @@ export function SlaBadge({ state, label }: { state: SlaClockState; label?: strin
         borderRadius: 2,
         fontWeight: 650,
         height: 26,
-        boxShadow:
-          state === "BREACHED" ? "0 0 0 1px rgba(179,38,30,0.05)" : "none",
+        boxShadow: state === "BREACHED" ? "0 0 0 1px rgba(179,38,30,0.05)" : "none",
         "& .MuiChip-icon": { color: "inherit", fontSize: 16 },
         "& .MuiChip-label": { px: 1 },
       }}

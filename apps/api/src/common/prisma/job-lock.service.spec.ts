@@ -26,8 +26,8 @@ describe("JobLockService", () => {
 
   it("never lets a failing job escape into the scheduler", async () => {
     const { service } = make(true);
-    await expect(
-      service.runExclusive("x", () => Promise.reject(new Error("boom"))),
-    ).resolves.toBe(false);
+    await expect(service.runExclusive("x", () => Promise.reject(new Error("boom")))).resolves.toBe(
+      false,
+    );
   });
 });
