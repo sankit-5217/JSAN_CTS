@@ -39,7 +39,13 @@ foreach ($k in $values.Keys) { $raw = $raw.Replace($k, $values[$k]) }
 $sim = $raw.Replace('$env:ProgramFiles', "'$pf'").Replace('$env:ProgramData', "'$pd'").Replace('$env:TEMP', "'$tmp'")
 $adminCheck = '$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)'
 Check 'harness: admin check found in script' ($sim.Contains($adminCheck))
+$principalInit = '$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())'
+Check 'harness: Windows principal initialization found in script' ($sim.Contains($principalInit))
+# WindowsIdentity is unavailable on the Linux CI runner. Simulate both role
+# outcomes without constructing a Windows principal on the host machine.
+$sim = $sim.Replace($principalInit, '$principal = $null')
 $simAdmin = $sim.Replace($adminCheck, '$true')
+$simDenied = $sim.Replace($adminCheck, '$false')
 
 # ---------------------------------------------------------------- fakes
 $script:Calls = New-Object System.Collections.Generic.List[string]
@@ -87,6 +93,20 @@ function Get-ChildItem {
 function Set-Service { param($Name, $StartupType) $script:Calls.Add("set-service $Name $StartupType") }
 function Restart-Service { param($Name, [switch]$Force) $script:Calls.Add("restart-service $Name") }
 function Get-Service { param($Name) [pscustomobject]@{ Status = 'Running' } }
+function Get-NetIPAddress {
+  param($AddressFamily, $ErrorAction)
+  [pscustomobject]@{ IPAddress = '192.0.2.10' }
+}
+function Get-CimInstance {
+  param($ClassName)
+  if ($ClassName -eq 'Win32_OperatingSystem') {
+    return [pscustomobject]@{ Caption = 'Simulated Windows'; OSArchitecture = '64-bit' }
+  }
+  if ($ClassName -eq 'Win32_BIOS') {
+    return [pscustomobject]@{ SerialNumber = 'SIM-SERIAL-001' }
+  }
+  throw "unexpected CIM class $ClassName"
+}
 function Start-Sleep { param($Seconds) }
 function icacls.exe { $script:Calls.Add("icacls $args") }
 function Invoke-RestMethod {
@@ -120,13 +140,10 @@ function Invoke-Installer([string]$Text) {
 function Get-ActiveKeys { (Get-Content $confFile) | Where-Object { $_ -match '^[A-Za-z]+=' } }
 
 try {
-  # 1. The real Administrator check, in this non-admin shell.
-  $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-  if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    $out = Invoke-Installer $sim
-    Check 'R3  refuses to run without Administrator and says how' ($out -match 'Run as administrator')
-    Check 'R3  nothing installed when refused' (-not (Test-Path $confFile))
-  }
+  # 1. Refuse a non-administrator on every host, including elevated test shells.
+  $out = Invoke-Installer $simDenied
+  Check 'R3  refuses to run without Administrator and says how' ($out -match 'Run as administrator')
+  Check 'R3  nothing installed when refused' (-not (Test-Path $confFile))
 
   # 2. First install.
   $script:Calls.Clear()

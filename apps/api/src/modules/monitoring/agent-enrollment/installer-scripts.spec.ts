@@ -234,6 +234,8 @@ describe("Windows installer simulation and lint", () => {
         encoding: "utf8",
         timeout: 120_000,
       });
+      expect(r.error).toBeUndefined();
+      expect(r.stderr).toBe("");
       expect(r.stdout).toContain("0 check(s) failed");
       expect(r.stdout).not.toMatch(/^FAIL/m);
       expect(r.status).toBe(0);
