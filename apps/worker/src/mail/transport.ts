@@ -1,5 +1,5 @@
 import type { RenderedEmail } from "@cts-dc-opsdesk/email-adapter";
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 
 /**
  * How a rendered email actually leaves the building. The queues only know
@@ -42,11 +42,11 @@ export interface SmtpConfig {
 
 /** Real delivery over SMTP (Microsoft 365, Google Workspace, SES, Postfix...). */
 export class SmtpMailTransport implements MailTransport {
-  private readonly transporter: nodemailer.Transporter;
+  private readonly transporter: Transporter;
 
   constructor(
     private readonly config: SmtpConfig,
-    transporter?: nodemailer.Transporter,
+    transporter?: Transporter,
   ) {
     this.transporter =
       transporter ??
