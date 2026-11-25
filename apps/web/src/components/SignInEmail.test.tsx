@@ -5,6 +5,7 @@ import { SignInCard } from "./SignInCard";
 import { SendingEmailSetup } from "./SendingEmailSetup";
 import { ChangePasswordPage } from "../pages/ChangePasswordPage";
 import { SetPasswordPage } from "../pages/SetPasswordPage";
+import { SendingEmailPage } from "../pages/SendingEmailPage";
 
 const mocks = vi.hoisted(() => ({
   token: "",
@@ -31,6 +32,8 @@ vi.mock("../api/jwt", () => ({
   landingPathFor: () => mocks.destination,
   passwordChangeRequired: () => mocks.required,
   decodeJwtPayload: () => ({ email: "client@example.com" }),
+  getCurrentUserRole: () =>
+    mocks.destination === "/client/home" ? "CLIENT_MANAGER_VIEWER" : "SUPER_ADMIN",
 }));
 vi.mock("react-router-dom", () => ({
   useNavigate: () => mocks.navigate,
@@ -70,7 +73,7 @@ const status = (email: string | null = null) => ({
   account: email ? { email, provider: "google", updatedAt: "2026-11-20" } : null,
   providers: [
     { provider: "google", configured: true },
-    { provider: "microsoft", configured: false },
+    { provider: "microsoft", configured: true },
   ],
 });
 let view: ReactTestRenderer;
@@ -135,6 +138,7 @@ describe("mailbox connection during sign-in", () => {
       mocks.get.mockResolvedValue(status("CLIENT@example.com"));
       await signIn();
       expect(mocks.navigate).toHaveBeenCalledWith(destination, { replace: true });
+      expect(JSON.stringify(view.toJSON())).not.toContain("Your sending email");
     },
   );
 
@@ -145,15 +149,16 @@ describe("mailbox connection during sign-in", () => {
     expect(JSON.stringify(view.toJSON())).toContain("Connect your registered mailbox");
   });
 
-  it("starts provider consent from the inline step and disables unavailable providers", async () => {
+  it("starts Microsoft consent from the inline step", async () => {
     await signIn();
-    expect(button("Microsoft").props.disabled).toBe(true);
-    mocks.post.mockResolvedValue({ url: "https://accounts.google.com/consent" });
+    expect(button("Microsoft").props.disabled).toBe(false);
+    expect(button("Gmail")).toBeUndefined();
+    mocks.post.mockResolvedValue({ url: "https://login.microsoftonline.com/consent" });
     await act(async () => {
-      button("Gmail").props.onClick();
+      button("Microsoft").props.onClick();
     });
-    expect(mocks.post).toHaveBeenLastCalledWith("/sending-mail/connect/google");
-    expect(mocks.assign).toHaveBeenCalledWith("https://accounts.google.com/consent");
+    expect(mocks.post).toHaveBeenLastCalledWith("/sending-mail/connect/microsoft");
+    expect(mocks.assign).toHaveBeenCalledWith("https://login.microsoftonline.com/consent");
   });
 
   it("allows continuing without connecting", async () => {
@@ -180,10 +185,10 @@ describe("mailbox connection during sign-in", () => {
     await signIn();
     mocks.post.mockRejectedValueOnce(new Error("provider offline"));
     await act(async () => {
-      button("Gmail").props.onClick();
+      button("Microsoft").props.onClick();
     });
     expect(mocks.assign).not.toHaveBeenCalled();
-    expect(button("Gmail").props.disabled).toBe(false);
+    expect(button("Microsoft").props.disabled).toBe(false);
     expect(JSON.stringify(view.toJSON())).toContain("Could not update your email connection");
   });
 
@@ -226,5 +231,29 @@ describe("mailbox connection during sign-in", () => {
     await submit();
     expect(mocks.post).toHaveBeenCalledWith("/auth/password/set", expect.any(Object));
     expect(view.root.findAllByType(SendingEmailSetup)).toHaveLength(1);
+  });
+
+  it.each(["/client/home", "/"])(
+    "leaves the setup URL for connected users at %s",
+    async (destination) => {
+      mocks.token = "session";
+      mocks.destination = destination;
+      mocks.get.mockResolvedValue(status("client@example.com"));
+      await mount(createElement(SendingEmailPage));
+      expect(mocks.navigate).toHaveBeenCalledWith(destination, { replace: true });
+      expect(JSON.stringify(view.toJSON())).not.toContain("Your sending email");
+    },
+  );
+
+  it("skips mailbox setup after changing a connected user's password", async () => {
+    mocks.token = "session";
+    mocks.get.mockResolvedValue(status("client@example.com"));
+    await mount(createElement(ChangePasswordPage));
+    await change("Current password", "current password");
+    await change("New password", "new password with enough length");
+    await change("Confirm new password", "new password with enough length");
+    await submit();
+    expect(mocks.navigate).toHaveBeenCalledWith("/client/home", { replace: true });
+    expect(JSON.stringify(view.toJSON())).not.toContain("Your sending email");
   });
 });

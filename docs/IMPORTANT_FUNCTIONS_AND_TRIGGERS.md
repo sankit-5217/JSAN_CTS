@@ -67,7 +67,7 @@ This document summarizes the important business functions and automated triggers
 | --- | --- | --- |
 | `create()` / `update()` | `apps/api/src/modules/cmdb/cmdb.service.ts` | Creates and updates configuration items. |
 | `createRelation()` | `apps/api/src/modules/cmdb/cmdb.service.ts` | Creates relationships between CIs. |
-| `suggestForIncident()` | `apps/api/src/modules/routing/routing.service.ts` | Produces ranked engineer suggestions. |
+| `rank()` | `apps/api/src/modules/routing/routing.service.ts` | Ranks eligible engineers for automatic assignment offers. |
 | `rank()` | `apps/api/src/modules/routing/routing.service.ts` | Scores engineers against routing criteria. |
 | `approve()` | `apps/api/src/modules/changes/changes.service.ts` | Approves a change request. |
 | `getActiveMaintenanceWindows()` | `apps/api/src/modules/changes/changes.service.ts` | Finds currently active maintenance windows. |

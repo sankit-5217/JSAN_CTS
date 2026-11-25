@@ -5,6 +5,7 @@
     "prisma.prisma",
     "eamodio.gitlens",
     "editorconfig.editorconfig",
-    "github.vscode-pull-request-github"
+    "github.vscode-pull-request-github",
+    "mattflower.aider"
   ]
 }

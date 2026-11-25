@@ -18,15 +18,9 @@ vi.mock("react-router-dom", () => ({
 // refs, and the real MUI would warn about them on every render.
 vi.mock("@mui/material", () =>
   Object.fromEntries(
-    [
-      "Alert",
-      "Box",
-      "Button",
-      "CircularProgress",
-      "Stack",
-      "TextField",
-      "Typography",
-    ].map((name) => [name, name.toLowerCase()]),
+    ["Alert", "Box", "Button", "CircularProgress", "Stack", "TextField", "Typography"].map(
+      (name) => [name, name.toLowerCase()],
+    ),
   ),
 );
 
@@ -63,15 +57,30 @@ describe("the shared mailbox step", () => {
       }),
     );
     const onContinue = vi.fn();
-    await mount(<SendingEmailSetup onContinue={onContinue} next="/client/home" />);
+    const view = await mount(<SendingEmailSetup onContinue={onContinue} next="/client/home" />);
     expect(onContinue).toHaveBeenCalled();
+    expect(view.toJSON()).toBeNull();
   });
 
-  it("offers app-password providers to a user who has not connected one yet", async () => {
-    api.get.mockResolvedValue(status());
+  it("only shows a loading indicator while checking an existing connection", async () => {
+    api.get.mockReturnValue(new Promise(() => {}));
+    const view = await mount(<SendingEmailSetup onContinue={vi.fn()} />);
+    expect(text(view)).toContain("Checking email connection");
+    expect(text(view)).not.toContain("Connect the mailbox");
+  });
+
+  it("removes app-password controls even when the API offers providers", async () => {
+    api.get.mockResolvedValue(
+      status({
+        smtpProviders: [{ provider: "yahoo" }, { provider: "icloud" }, { provider: "zoho" }],
+      }),
+    );
     const view = await mount(<SendingEmailSetup next="/client/home" />);
-    expect(text(view)).toContain("Connect with app password");
-    expect(text(view)).toContain("Yahoo");
+    expect(text(view)).not.toContain("app password");
+    expect(text(view)).not.toContain("App password");
+    expect(text(view)).not.toContain("Yahoo");
+    expect(text(view)).not.toContain("iCloud");
+    expect(text(view)).not.toContain("Zoho");
   });
 
   it("tells every role which address their emails will come from", async () => {
@@ -85,5 +94,38 @@ describe("the shared mailbox step", () => {
     const view = await mount(<SendingEmailSetup next="/" />);
     expect(text(view)).toContain("client@example.com");
     expect(text(view)).not.toContain("Connect with app password");
+  });
+
+  it.each([false, true])(
+    "hides the Google connection option when configured=%s",
+    async (configured) => {
+      api.get.mockResolvedValue(
+        status({
+          providers: [
+            { provider: "google", configured },
+            { provider: "microsoft", configured: true },
+          ],
+        }),
+      );
+      const view = await mount(<SendingEmailSetup />);
+      const buttons = view.root.findAllByType("button");
+      expect(buttons.some((b) => JSON.stringify(b.props.children).includes("Gmail"))).toBe(false);
+      const microsoft = buttons.find((b) => JSON.stringify(b.props.children).includes("Outlook"));
+      expect(microsoft).toBeDefined();
+      expect(microsoft?.props.disabled).toBe(false);
+    },
+  );
+
+  it("labels a connected Google mailbox as Gmail", async () => {
+    api.get.mockResolvedValue(
+      status({
+        senderEmail: "person@gmail.com",
+        account: { email: "person@gmail.com", provider: "google", updatedAt: "2026-11-20" },
+      }),
+    );
+    const view = await mount(<SendingEmailSetup />);
+    const connected = view.root.findByProps({ severity: "success" });
+    expect(JSON.stringify(connected.props.children)).toContain("Gmail / Google Workspace");
+    expect(JSON.stringify(connected.props.children)).not.toContain("Microsoft");
   });
 });

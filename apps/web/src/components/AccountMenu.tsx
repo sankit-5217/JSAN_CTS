@@ -1,4 +1,3 @@
-import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
 import { useState } from "react";
 import { Avatar, Box, Divider, Menu, MenuItem, Stack, Tooltip, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
@@ -132,16 +131,6 @@ export function AccountMenu({ email, roleLabel, roleColor, onLogout }: AccountMe
         >
           <KeyOutlinedIcon fontSize="small" />
           Change password
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setAnchorEl(null);
-            navigate("/account/email");
-          }}
-          sx={{ gap: 1 }}
-        >
-          <EmailOutlinedIcon fontSize="small" />
-          Sending email
         </MenuItem>
         <MenuItem onClick={onLogout} sx={{ color: "error.main", gap: 1 }}>
           <LogoutOutlinedIcon fontSize="small" />

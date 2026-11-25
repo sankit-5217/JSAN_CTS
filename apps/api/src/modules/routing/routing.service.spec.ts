@@ -1,5 +1,5 @@
 import { ForbiddenException, NotFoundException } from "@nestjs/common";
-import { UserRole } from "@prisma/client";
+import { Incident, UserRole } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthzService } from "../auth/authz.service";
@@ -16,7 +16,7 @@ const NOW = new Date("2026-09-23T08:00:00Z");
 const STORAGE = { id: "skill-storage", name: "Storage" };
 const BACKUP = { id: "skill-backup", name: "Backup" };
 
-function incident(overrides: Partial<Record<string, unknown>> = {}) {
+function incident(overrides: Partial<Incident> = {}): Incident {
   return {
     id: "inc-1",
     siteId: "site-1",
@@ -24,7 +24,7 @@ function incident(overrides: Partial<Record<string, unknown>> = {}) {
     status: "NEW",
     ownerUserId: null,
     ...overrides,
-  };
+  } as Incident;
 }
 
 function rosterEntry(userId: string, overrides: Partial<RosterEntry> = {}): RosterEntry {
@@ -43,7 +43,6 @@ function rosterEntry(userId: string, overrides: Partial<RosterEntry> = {}): Rost
 
 function makeService(opts: {
   incident?: ReturnType<typeof incident>;
-  findOneScoped?: jest.Mock;
   required?: { id: string; name: string }[];
   working?: RosterEntry[];
   onCall?: RosterEntry[];
@@ -95,8 +94,6 @@ function makeService(opts: {
     ),
   } as unknown as AuthzService;
   const incidentsService = {
-    findOne: jest.fn().mockResolvedValue(opts.incident ?? incident()),
-    findOneScoped: opts.findOneScoped ?? jest.fn().mockResolvedValue(opts.incident ?? incident()),
     countOpenOwnedByPriority: jest
       .fn()
       .mockResolvedValue(new Map(Object.entries(opts.workload ?? {}))),
@@ -134,6 +131,7 @@ function makeService(opts: {
       skillsService,
       categoryTeams,
     ),
+    rankedIncident: opts.incident ?? incident(),
     categoryTeams,
     prisma,
     auditService,
@@ -144,19 +142,12 @@ function makeService(opts: {
   };
 }
 
-describe("RoutingService.suggestForIncident", () => {
-  it("propagates the scoped fetch's access denial", async () => {
-    const { service } = makeService({
-      findOneScoped: jest.fn().mockRejectedValue(new ForbiddenException()),
-    });
-    await expect(service.suggestForIncident("inc-1", USER, NOW)).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
-  });
-
+describe("RoutingService.rank", () => {
   it("returns INCIDENT_NOT_OPEN for a closed incident", async () => {
-    const { service, shiftsService } = makeService({ incident: incident({ status: "CLOSED" }) });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const { service, shiftsService, rankedIncident } = makeService({
+      incident: incident({ status: "CLOSED" }),
+    });
+    const result = await service.rank(rankedIncident, NOW);
 
     expect(result.reason).toBe("INCIDENT_NOT_OPEN");
     expect(result.candidates).toEqual([]);
@@ -164,50 +155,50 @@ describe("RoutingService.suggestForIncident", () => {
   });
 
   it("returns NO_SKILL_REQUIREMENTS when the category has none configured", async () => {
-    const { service } = makeService({ required: [] });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const { service, rankedIncident } = makeService({ required: [] });
+    const result = await service.rank(rankedIncident, NOW);
     expect(result.reason).toBe("NO_SKILL_REQUIREMENTS");
   });
 
   it("reads the live roster for the incident's own site only", async () => {
-    const { service, shiftsService } = makeService({});
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const { service, shiftsService, rankedIncident } = makeService({});
+    const result = await service.rank(rankedIncident, NOW);
 
     expect(shiftsService.getLiveRoster).toHaveBeenCalledWith({ siteId: "site-1" }, null, NOW);
     expect(result.reason).toBe("NO_ENGINEERS_ON_SHIFT");
   });
 
   it("leaves out rostered engineers who have no access to the incident's site", async () => {
-    const { service, authzService } = makeService({
+    const { service, authzService, rankedIncident } = makeService({
       working: [rosterEntry("eng-a"), rosterEntry("eng-b")],
       skills: { "eng-a": [STORAGE.id], "eng-b": [STORAGE.id] },
       noSiteAccess: ["eng-b"],
     });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const result = await service.rank(rankedIncident, NOW);
 
     expect(authzService.usersWithSiteAccess).toHaveBeenCalledWith(["eng-a", "eng-b"], "site-1");
     expect(result.candidates.map((c) => c.userId)).toEqual(["eng-a"]);
   });
 
   it("reports nobody on shift when no rostered engineer has access to the site", async () => {
-    const { service } = makeService({
+    const { service, rankedIncident } = makeService({
       working: [rosterEntry("eng-a")],
       skills: { "eng-a": [STORAGE.id] },
       noSiteAccess: ["eng-a"],
     });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const result = await service.rank(rankedIncident, NOW);
 
     expect(result.reason).toBe("NO_ENGINEERS_ON_SHIFT");
     expect(result.candidates).toEqual([]);
   });
 
   it("requires every skill and lists the ones nobody on shift holds", async () => {
-    const { service } = makeService({
+    const { service, rankedIncident } = makeService({
       required: [STORAGE, BACKUP],
       working: [rosterEntry("eng-a"), rosterEntry("eng-b")],
       skills: { "eng-a": [STORAGE.id], "eng-b": [] },
     });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const result = await service.rank(rankedIncident, NOW);
 
     expect(result.reason).toBe("NO_QUALIFIED_ENGINEER");
     expect(result.candidates).toEqual([]);
@@ -215,7 +206,7 @@ describe("RoutingService.suggestForIncident", () => {
   });
 
   it("ranks qualified engineers by open workload, then name", async () => {
-    const { service } = makeService({
+    const { service, rankedIncident } = makeService({
       working: [
         rosterEntry("zed"),
         rosterEntry("amy"),
@@ -225,7 +216,7 @@ describe("RoutingService.suggestForIncident", () => {
       skills: { zed: [STORAGE.id], amy: [STORAGE.id], bob: [STORAGE.id] },
       workload: { amy: { P3: 3 } },
     });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const result = await service.rank(rankedIncident, NOW);
 
     expect(result.reason).toBeNull();
     expect(result.candidates.map((c) => [c.userId, c.openIncidentCount, c.workloadScore])).toEqual([
@@ -236,12 +227,12 @@ describe("RoutingService.suggestForIncident", () => {
   });
 
   it("weights workload by priority: one P1 outweighs two P4s", async () => {
-    const { service } = makeService({
+    const { service, rankedIncident } = makeService({
       working: [rosterEntry("holds-p1"), rosterEntry("holds-p4s")],
       skills: { "holds-p1": [STORAGE.id], "holds-p4s": [STORAGE.id] },
       workload: { "holds-p1": { P1: 1 }, "holds-p4s": { P4: 2 } },
     });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const result = await service.rank(rankedIncident, NOW);
     expect(result.candidates.map((c) => [c.userId, c.workloadScore])).toEqual([
       ["holds-p4s", 2],
       ["holds-p1", 4],
@@ -249,13 +240,13 @@ describe("RoutingService.suggestForIncident", () => {
   });
 
   it("uses the site's own workload weights", async () => {
-    const { service } = makeService({
+    const { service, rankedIncident } = makeService({
       settings: { workloadWeightP1: 1, workloadWeightP4: 5 },
       working: [rosterEntry("holds-p1"), rosterEntry("holds-p4s")],
       skills: { "holds-p1": [STORAGE.id], "holds-p4s": [STORAGE.id] },
       workload: { "holds-p1": { P1: 1 }, "holds-p4s": { P4: 2 } },
     });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const result = await service.rank(rankedIncident, NOW);
     expect(result.candidates.map((c) => [c.userId, c.workloadScore])).toEqual([
       ["holds-p1", 1],
       ["holds-p4s", 10],
@@ -263,14 +254,14 @@ describe("RoutingService.suggestForIncident", () => {
   });
 
   it("includes on-call engineers from the start for a P1, after the working shift", async () => {
-    const { service } = makeService({
+    const { service, rankedIncident } = makeService({
       incident: incident({ priority: "P1" }),
       working: [rosterEntry("worker")],
       onCall: [rosterEntry("pager", { isOnCall: true })],
       skills: { worker: [STORAGE.id], pager: [STORAGE.id] },
       workload: { worker: { P2: 3 } },
     });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const result = await service.rank(rankedIncident, NOW);
     expect(result.candidates.map((c) => [c.userId, c.isOnCall])).toEqual([
       ["worker", false],
       ["pager", true],
@@ -278,23 +269,23 @@ describe("RoutingService.suggestForIncident", () => {
   });
 
   it("prefers working-shift engineers over on-call ones", async () => {
-    const { service } = makeService({
+    const { service, rankedIncident } = makeService({
       working: [rosterEntry("worker")],
       onCall: [rosterEntry("pager", { isOnCall: true })],
       skills: { worker: [STORAGE.id], pager: [STORAGE.id] },
       workload: { worker: { P3: 9 } },
     });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const result = await service.rank(rankedIncident, NOW);
     expect(result.candidates.map((c) => c.userId)).toEqual(["worker"]);
   });
 
   it("falls back to on-call engineers when no working engineer qualifies", async () => {
-    const { service } = makeService({
+    const { service, rankedIncident } = makeService({
       working: [rosterEntry("worker")],
       onCall: [rosterEntry("pager", { isOnCall: true })],
       skills: { pager: [STORAGE.id] },
     });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const result = await service.rank(rankedIncident, NOW);
 
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]).toMatchObject({ userId: "pager", isOnCall: true });
@@ -304,62 +295,62 @@ describe("RoutingService.suggestForIncident", () => {
     const STORAGE_TEAM = { id: "grp-storage", name: "Storage team", memberIds: ["member"] };
 
     it("only offers the category's team members when one is on shift and qualified", async () => {
-      const { service } = makeService({
+      const { service, rankedIncident } = makeService({
         categoryTeam: STORAGE_TEAM,
         working: [rosterEntry("member"), rosterEntry("outsider")],
         skills: { member: [STORAGE.id], outsider: [STORAGE.id] },
         workload: { member: { P1: 3 } },
       });
-      const result = await service.suggestForIncident("inc-1", USER, NOW);
+      const result = await service.rank(rankedIncident, NOW);
       expect(result.team).toEqual({ id: "grp-storage", name: "Storage team" });
       expect(result.teamFallback).toBe(false);
       expect(result.candidates.map((c) => [c.userId, c.inTeam])).toEqual([["member", true]]);
     });
 
     it("falls back to every qualified engineer, and says so, when the team has nobody", async () => {
-      const { service } = makeService({
+      const { service, rankedIncident } = makeService({
         categoryTeam: STORAGE_TEAM,
         working: [rosterEntry("outsider"), rosterEntry("member")],
         skills: { outsider: [STORAGE.id] }, // the member lacks the skill
       });
-      const result = await service.suggestForIncident("inc-1", USER, NOW);
+      const result = await service.rank(rankedIncident, NOW);
       expect(result.teamFallback).toBe(true);
       expect(result.candidates.map((c) => [c.userId, c.inTeam])).toEqual([["outsider", false]]);
     });
 
     it("uses the group already on the incident before the category's team", async () => {
-      const { service, categoryTeams } = makeService({
+      const { service, categoryTeams, rankedIncident } = makeService({
         incident: incident({ ownerGroupId: "grp-net" }),
         groups: { "grp-net": { id: "grp-net", name: "Network team", memberIds: ["netop"] } },
         categoryTeam: STORAGE_TEAM,
         working: [rosterEntry("netop"), rosterEntry("member")],
         skills: { netop: [STORAGE.id], member: [STORAGE.id] },
       });
-      const result = await service.suggestForIncident("inc-1", USER, NOW);
+      const result = await service.rank(rankedIncident, NOW);
       expect(result.team).toEqual({ id: "grp-net", name: "Network team" });
       expect(result.candidates.map((c) => c.userId)).toEqual(["netop"]);
       expect(categoryTeams.teamForCategory).not.toHaveBeenCalled();
     });
 
     it("doesn't filter a category with no team", async () => {
-      const { service } = makeService({
+      const { service, rankedIncident } = makeService({
         working: [rosterEntry("a"), rosterEntry("b")],
         skills: { a: [STORAGE.id], b: [STORAGE.id] },
       });
-      const result = await service.suggestForIncident("inc-1", USER, NOW);
+      const result = await service.rank(rankedIncident, NOW);
       expect(result.team).toBeNull();
       expect(result.candidates).toHaveLength(2);
     });
   });
 
   it("dedupes an engineer with overlapping shifts and flags the current owner", async () => {
-    const { service } = makeService({
+    const { service, rankedIncident } = makeService({
       incident: incident({ ownerUserId: "eng-a" }),
       working: [rosterEntry("eng-a", { label: "Day" })],
       onCall: [rosterEntry("eng-a", { label: "Pager", isOnCall: true })],
       skills: { "eng-a": [STORAGE.id] },
     });
-    const result = await service.suggestForIncident("inc-1", USER, NOW);
+    const result = await service.rank(rankedIncident, NOW);
 
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]).toMatchObject({

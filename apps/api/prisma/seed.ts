@@ -306,7 +306,7 @@ async function main() {
   });
 
   // Skill-based routing demo (skills Phases 1-2 + routing Phase 3). A second
-  // SITE01 engineer so GET /incidents/:id/routing-suggestions has something
+  // SITE01 engineer so automatic routing offers have candidates
   // to rank: on INC-SEED-001 (HARDWARE_FAILURE, owned by siteEngineer1) the
   // new engineer comes first with 0 open incidents and siteEngineer1 shows
   // as current owner. Rahul and Vikas (below) cover the rest of the

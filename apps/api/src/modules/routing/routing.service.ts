@@ -111,7 +111,7 @@ function settingsOf(row: RoutingPolicy | null): RoutingSettings {
 }
 
 /**
- * Skill-based routing. Rules (shared by suggestions and auto-assign):
+ * Skill-based routing. Rules for automatic assignment offers:
  *  1. Pool = engineers whose shift is live right now at the incident's site
  *     (shifts module's live roster, same timezone logic as GET /shifts/live)
  *     and who have access to that site — a roster entry alone isn't access.
@@ -146,16 +146,6 @@ export class RoutingService {
     private readonly skillsService: SkillsService,
     private readonly categoryTeams: CategoryTeamsService,
   ) {}
-
-  async suggestForIncident(
-    incidentId: string,
-    user: AuthenticatedUser,
-    now: Date = new Date(),
-  ): Promise<RoutingSuggestions> {
-    // Scoped fetch — enforces the caller's site access (403 otherwise).
-    const incident = await this.incidentsService.findOneScoped(incidentId, user);
-    return this.rank(incident, now);
-  }
 
   async getPolicy(siteId: string, user: AuthenticatedUser): Promise<RoutingPolicyView> {
     await this.assertSiteAccess(user, siteId);

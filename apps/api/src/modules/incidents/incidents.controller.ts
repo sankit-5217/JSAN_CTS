@@ -1,10 +1,7 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
-  HttpCode,
-  HttpStatus,
   Param,
   ParseEnumPipe,
   ParseUUIDPipe,
@@ -303,22 +300,5 @@ export class IncidentsController {
     disposition?: AttachmentDisposition,
   ) {
     return this.incidentsService.getAttachmentDownloadUrl(id, attachmentId, user, disposition);
-  }
-
-  @Delete(":id/attachments/:attachmentId")
-  @Roles(...INCIDENT_ATTACHMENT_ROLES)
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteAttachment(
-    @Param("id") id: string,
-    @Param("attachmentId") attachmentId: string,
-    @CurrentUser() user: AuthenticatedUser,
-    @CorrelationId() correlationId?: string,
-  ) {
-    await this.incidentsService.deleteAttachment(
-      id,
-      attachmentId,
-      { actorId: user.id, correlationId },
-      user,
-    );
   }
 }

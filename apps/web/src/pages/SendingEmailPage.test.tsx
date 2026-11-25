@@ -22,6 +22,7 @@ vi.mock("react-router-dom", () => ({
     </a>
   ),
   useSearchParams: () => [new URLSearchParams()],
+  useNavigate: () => vi.fn(),
 }));
 
 describe("personal sender setup access", () => {
@@ -34,8 +35,8 @@ describe("personal sender setup access", () => {
     (role) => {
       auth.role = role;
       const html = renderToStaticMarkup(<SendingEmailPage />);
-      expect(html).toContain("Your sending email");
-      expect(html).toContain("Each user connects their own mailbox.");
+      expect(html).toContain("Checking email connection");
+      expect(html).not.toContain("Connect the mailbox");
       expect(html).not.toContain("data-redirect=");
     },
   );

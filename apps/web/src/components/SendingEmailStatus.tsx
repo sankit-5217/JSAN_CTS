@@ -1,40 +1,40 @@
 import { useEffect, useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
-import { Alert, Button, Stack, Typography } from "@mui/material";
-import MailOutlineIcon from "@mui/icons-material/MailOutline";
+import { Alert, Button } from "@mui/material";
 import { apiGet } from "../api/client";
 import { hasMatchingSendingEmail, type SendingMailStatus } from "../api/sendingMail";
 
 /**
- * The confirmation a user lands on after the mail provider answers: green when
- * the mailbox is connected, red with a way straight back to it when it isn't.
- * Rendered on the home page of every role, so the outcome of the connection
- * is visible wherever they end up.
+ * Successful connections need no further UI. Failed provider callbacks keep
+ * a retry action on the user's home page.
  */
 export function SendingEmailResult() {
   const [params, setParams] = useSearchParams();
   const result = params.get("result");
-  if (result !== "connected" && result !== "failed") return null;
+  useEffect(() => {
+    if (result === "connected") {
+      const next = new URLSearchParams(params);
+      next.delete("result");
+      setParams(next, { replace: true });
+    }
+  }, [params, result, setParams]);
+  if (result !== "failed") return null;
   const clear = () => {
     params.delete("result");
     setParams(params, { replace: true });
   };
   return (
     <Alert
-      severity={result === "connected" ? "success" : "error"}
+      severity="error"
       onClose={clear}
       sx={{ mb: 2 }}
       action={
-        result === "failed" ? (
-          <Button color="inherit" component={RouterLink} to="/account/email" size="small">
-            Retry
-          </Button>
-        ) : undefined
+        <Button color="inherit" component={RouterLink} to="/account/email" size="small">
+          Retry
+        </Button>
       }
     >
-      {result === "connected"
-        ? "Your sending email is connected. Emails you trigger will now come from your address."
-        : "Your mailbox could not be connected. Nothing else is blocked — retry whenever you are ready."}
+      Your mailbox could not be connected. Nothing else is blocked — retry whenever you are ready.
     </Alert>
   );
 }
@@ -60,16 +60,7 @@ export function SendingEmailStatus({ compact = false }: { compact?: boolean }) {
       live = false;
     };
   }, []);
-  if (!status) return null;
-  if (hasMatchingSendingEmail(status))
-    return (
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
-        <MailOutlineIcon fontSize="small" color="success" />
-        <Typography variant="body2" color="text.secondary">
-          Sending email connected as {status.account?.email}
-        </Typography>
-      </Stack>
-    );
+  if (!status || hasMatchingSendingEmail(status)) return null;
   return (
     <Alert
       severity="info"

@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
-import {
-  Alert,
-  Box,
-  Button,
-  CircularProgress,
-  Stack,
-  TextField,
-  Typography,
-} from "@mui/material";
+import { Alert, Box, Button, CircularProgress, Stack, Typography } from "@mui/material";
 import { apiDelete, apiGet, apiPost, getStoredToken, ApiError } from "../api/client";
 import {
   hasMatchingSendingEmail,
@@ -34,8 +26,6 @@ export function SendingEmailSetup({ onContinue, next }: SendingEmailSetupProps) 
   const [status, setStatus] = useState<SendingMailStatus | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [smtpProvider, setSmtpProvider] = useState("");
-  const [smtpPassword, setSmtpPassword] = useState("");
   const [query] = useSearchParams();
   const token = getStoredToken();
   const failure = (err: unknown) => {
@@ -74,9 +64,13 @@ export function SendingEmailSetup({ onContinue, next }: SendingEmailSetupProps) 
   const connectUrl = (provider: string) =>
     `/sending-mail/connect/${provider}${next ? `?next=${encodeURIComponent(next)}` : ""}`;
   const labels = MAIL_PROVIDER_LABELS;
-  // An older API answer simply has no app-password providers; the step still
-  // works with the OAuth ones.
-  const smtpProviders = status?.smtpProviders ?? [];
+  const oauthProviders = status?.providers.filter((p) => p.provider === "microsoft") ?? [];
+  // Check the saved connection before showing setup. Connected users leave
+  // through onContinue without briefly seeing the connection form again.
+  if (onContinue && !error) {
+    if (!status) return <CircularProgress aria-label="Checking email connection" />;
+    if (hasMatchingSendingEmail(status)) return null;
+  }
   return (
     <Box>
       {onContinue && (
@@ -126,7 +120,7 @@ export function SendingEmailSetup({ onContinue, next }: SendingEmailSetupProps) 
               it.
             </Alert>
           )}
-          {status.providers.map((p) => (
+          {oauthProviders.map((p) => (
             <Box key={p.provider}>
               <Button
                 variant="outlined"
@@ -142,57 +136,12 @@ export function SendingEmailSetup({ onContinue, next }: SendingEmailSetupProps) 
               </Button>
               {!p.configured && (
                 <Typography variant="caption" display="block">
-                  An administrator needs to enable this provider first.
+                  {labels[p.provider]} is not enabled yet. An administrator needs to configure
+                  Microsoft email sending first.
                 </Typography>
               )}
             </Box>
           ))}
-          {smtpProviders.length > 0 && (
-            <Box>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                Or connect with an app password
-              </Typography>
-              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
-                {smtpProviders.map((p) => (
-                  <Button
-                    key={p.provider}
-                    size="small"
-                    variant={smtpProvider === p.provider ? "contained" : "outlined"}
-                    disabled={busy}
-                    onClick={() => setSmtpProvider(p.provider)}
-                  >
-                    {labels[p.provider] ?? p.provider}
-                  </Button>
-                ))}
-              </Stack>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <TextField
-                  size="small"
-                  type="password"
-                  label="App password"
-                  value={smtpPassword}
-                  onChange={(e) => setSmtpPassword(e.target.value)}
-                  helperText="Your provider's app password, not your account password."
-                />
-                <Button
-                  variant="outlined"
-                  disabled={busy || !smtpProvider || !smtpPassword}
-                  onClick={() =>
-                    void run(async () => {
-                      await apiPost("/sending-mail/smtp", {
-                        provider: smtpProvider,
-                        password: smtpPassword,
-                      });
-                      setSmtpPassword("");
-                      await load();
-                    })
-                  }
-                >
-                  Connect with app password
-                </Button>
-              </Stack>
-            </Box>
-          )}
           {status.account && (
             <Button
               color="error"

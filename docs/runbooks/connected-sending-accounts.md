@@ -4,7 +4,9 @@ Emails triggered by a user's ticket or record update are sent from that
 authenticated user's registered OpsDesk email. The user must authorize a mailbox
 whose verified email exactly matches their OpsDesk account. Clients, engineers,
 service desk staff and other active users manage only their own connection from
-the sign-in screen immediately after authentication, or from Account > Sending email later.
+the sign-in screen immediately after authentication, or from the home-page Connect
+action when a connection is missing. The account menu contains only Change password
+and Log out.
 Users with a matching connected mailbox continue directly to their role-specific home.
 Required password changes happen first; invite/reset and password-change flows
 then offer the same mailbox step. Users may continue without connecting, with
@@ -48,10 +50,13 @@ worker's configured service sender (`MAIL_FROM` and SMTP settings).
    `MAIL_FROM` should be a service address, not a person's mailbox.
 6. Each user signs in and connects their mailbox directly in the sign-in flow,
    granting send permission. Google and Microsoft use OAuth; Yahoo, iCloud and
-   Zoho use an app password and need no administrator setup. Account > Sending
-   email remains available for later connections and reconnections. The
-   connected provider address must match the email registered in OpsDesk. A
-   successful connection is shown on that page and on the user's home.
+   Zoho use an app password and need no administrator setup. The home-page
+   Connect action remains available for missing or mismatched connections. The
+   connected provider address must match the email registered in OpsDesk.
+   Connected users skip setup on later logins and password changes; visiting
+   `/account/email` also returns them to their home. No sending-email menu item,
+   connected status line or success banner remains after connection. Failed
+   provider callbacks retain their retry action.
 7. Test a ticket update using a permitted recipient and verify its actual
    `From` address is the triggering user's registered email. Also test a
    system-generated email and verify it uses `MAIL_FROM`.
