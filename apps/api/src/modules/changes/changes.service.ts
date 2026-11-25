@@ -156,6 +156,7 @@ export class ChangesService {
       id,
       change.reason,
       updated.approverId,
+      actor.actorId,
       change.windowStart,
       change.windowEnd,
     );
@@ -167,6 +168,7 @@ export class ChangesService {
     id: string,
     reason: string,
     approverId: string | null,
+    senderUserId: string,
     windowStart: Date,
     windowEnd: Date,
   ): Promise<void> {
@@ -189,6 +191,7 @@ export class ChangesService {
             windowEnd: windowEnd.toISOString(),
           },
           recipients: { to: [party] },
+          senderUserId,
         },
         `CHANGE_APPROVED:${id}`,
       );

@@ -20,6 +20,8 @@ import {
 } from "@mui/material";
 import AltRouteOutlinedIcon from "@mui/icons-material/AltRouteOutlined";
 import { apiGet, apiPatch, apiPost } from "../api/client";
+import { ZABBIX_ADMIN_ROLES } from "../api/zabbix";
+import { AgentEnrollmentCard } from "../components/AgentEnrollmentCard";
 import { getCurrentUserRole } from "../api/jwt";
 
 // Mirrors SitesController's SITE_MASTER_WRITE_ROLES — UI-only gate (plan
@@ -433,6 +435,10 @@ export function SiteDetailPage() {
       )}
 
       <RoutingPolicyCard siteId={site.id} canWrite={canWrite} />
+
+      {ZABBIX_ADMIN_ROLES.includes(getCurrentUserRole() ?? "") && (
+        <AgentEnrollmentCard siteId={site.id} siteCode={site.code} />
+      )}
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>

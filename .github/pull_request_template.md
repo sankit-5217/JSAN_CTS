@@ -20,7 +20,7 @@
 
 ## Touches shared files?
 
-<!-- schema.prisma, app.module.ts, packages/shared-types, package.json, docker-compose.yml, CI -->
+<!-- schema.prisma, app.module.ts, packages/shared-types, package.json, deploy/railway, CI -->
 
 - [ ] No
 - [ ] Yes — the other developer was pinged before I changed this, and both are tagged as reviewers

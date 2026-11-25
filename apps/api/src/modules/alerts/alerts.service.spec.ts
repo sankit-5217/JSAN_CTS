@@ -21,6 +21,7 @@ type PrismaMock = {
     findMany: jest.Mock;
     create: jest.Mock;
     update: jest.Mock;
+    updateMany: jest.Mock;
     count: jest.Mock;
   };
   $transaction: jest.Mock;
@@ -33,9 +34,10 @@ function createPrismaMock(): PrismaMock {
     user: { findMany: jest.fn() },
     alert: {
       findUnique: jest.fn(),
-      findMany: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
       count: jest.fn(),
     },
     $transaction: jest.fn(),
@@ -726,6 +728,256 @@ describe("AlertsService", () => {
   it("throws NotFoundException for an unknown alert id", async () => {
     prisma.alert.findUnique.mockResolvedValue(null);
     await expect(service.findOne("missing")).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  describe("diagnostic detail", () => {
+    it("persists summary, componentKey and the source metadata on first sighting", async () => {
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-1", state: "OPEN" });
+
+      await service.ingest(
+        baseDto({
+          attributes: { trapOid: "1.3.6.1.4.1.674", varbinds: { alertFQDD: "Disk.Bay.3" } },
+        }),
+        ACTOR,
+      );
+
+      expect(prisma.alert.create.mock.calls[0][0].data).toMatchObject({
+        summary: "Predictive failure on physical disk 2:1",
+        componentKey: "PhysicalDisk-2:1",
+        details: { trapOid: "1.3.6.1.4.1.674", varbinds: { alertFQDD: "Disk.Bay.3" } },
+      });
+    });
+
+    it("keeps only the top-level keys of an oversized metadata payload", async () => {
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-1", state: "OPEN" });
+
+      await service.ingest(baseDto({ attributes: { blob: "x".repeat(10_000), host: "h" } }), ACTOR);
+
+      expect(prisma.alert.create.mock.calls[0][0].data.details).toEqual({
+        truncated: true,
+        keys: ["blob", "host"],
+      });
+    });
+
+    it("refreshes summary and details on a re-delivery", async () => {
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-1",
+        state: "OPEN",
+        severity: "WARNING",
+        lastSeenAt: new Date("2026-09-02T10:00:00.000Z"),
+        siteId: "site-1",
+        ciId: "ci-1",
+        componentKey: "PhysicalDisk-2:1",
+        correlatedIncidentId: null,
+      });
+      prisma.alert.update.mockResolvedValue({ id: "alert-1" });
+
+      await service.ingest(baseDto({ severity: "CRITICAL", summary: "Disk 2:1 failed" }), ACTOR);
+
+      expect(prisma.alert.update.mock.calls[0][0].data).toMatchObject({
+        severity: "CRITICAL",
+        summary: "Disk 2:1 failed",
+        componentKey: "PhysicalDisk-2:1",
+      });
+    });
+
+    it("passes summary and componentKey into the incident timeline link", async () => {
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-1", state: "OPEN" });
+      incidents.findOpenByCi.mockResolvedValue({ id: "inc-1", incidentNo: "INC-000001" });
+
+      await service.ingest(baseDto(), ACTOR);
+
+      expect(incidents.linkAlert).toHaveBeenCalledWith(
+        "inc-1",
+        expect.objectContaining({
+          id: "alert-1",
+          summary: "Predictive failure on physical disk 2:1",
+          componentKey: "PhysicalDisk-2:1",
+        }),
+        ACTOR,
+      );
+    });
+  });
+
+  describe("clear events paired by fingerprint", () => {
+    const fault = {
+      id: "alert-fault",
+      state: "OPEN",
+      severity: "CRITICAL",
+      lastSeenAt: new Date("2026-09-02T09:00:00.000Z"),
+      correlatedIncidentId: "inc-1",
+    };
+
+    it("recovers the open fault with the same source + fingerprint and audits it", async () => {
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-clear", state: "RECOVERED" });
+      prisma.alert.findMany.mockResolvedValue([fault]);
+
+      await service.ingest(
+        baseDto({ source: "SNMP", eventId: "snmp-clear-1", state: "RECOVERED", severity: "INFO" }),
+        ACTOR,
+      );
+
+      const where = prisma.alert.findMany.mock.calls[0][0].where;
+      expect(where).toMatchObject({
+        id: { not: "alert-clear" },
+        source: "SNMP",
+        state: { in: ["OPEN", "ACKNOWLEDGED"] },
+      });
+      expect(where.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+      expect(prisma.alert.update).toHaveBeenCalledWith({
+        where: { id: "alert-fault" },
+        data: { state: "RECOVERED", lastSeenAt: new Date("2026-09-02T10:15:00.000Z") },
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entityId: "alert-fault",
+          action: "ALERT_STATE_CHANGED",
+          after: expect.objectContaining({ state: "RECOVERED", clearedBy: "snmp-clear-1" }),
+        }),
+        prisma,
+      );
+      expect(incidents.notifyAlertRecovered).toHaveBeenCalledWith(
+        "inc-1",
+        expect.objectContaining({ id: "alert-fault" }),
+        ACTOR,
+      );
+    });
+
+    it("does not look for a pair on an OPEN event or a re-delivered clear", async () => {
+      prisma.alert.findUnique.mockResolvedValue(null);
+      prisma.alert.create.mockResolvedValue({ id: "alert-1", state: "OPEN" });
+      await service.ingest(baseDto(), ACTOR);
+
+      prisma.alert.findUnique.mockResolvedValue({
+        id: "alert-clear",
+        state: "RECOVERED",
+        severity: "INFO",
+        lastSeenAt: new Date("2026-09-02T10:15:00.000Z"),
+        siteId: "site-1",
+        ciId: "ci-1",
+        componentKey: null,
+        correlatedIncidentId: null,
+      });
+      prisma.alert.update.mockResolvedValue({ id: "alert-clear" });
+      await service.ingest(baseDto({ state: "RECOVERED" }), ACTOR);
+
+      expect(prisma.alert.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("back-linking open alerts when an incident gets a CI", () => {
+    const openAlert = {
+      id: "alert-7",
+      siteId: "site-1",
+      alertType: "disk.predictive_failure",
+      severity: "WARNING",
+      source: "SNMP",
+      fingerprint: "fp-7",
+      summary: "Physical disk failure on Disk.Bay.3",
+      componentKey: "Disk.Bay.3",
+    };
+
+    it("links the CI's open, uncorrelated alerts to a newly created incident", async () => {
+      prisma.alert.findMany.mockResolvedValue([openAlert]);
+      prisma.alert.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.onIncidentCreated({
+        incidentId: "inc-9",
+        siteId: "site-1",
+        ciId: "ci-1",
+        actorId: "desk-1",
+        correlationId: "corr-9",
+      });
+
+      expect(prisma.alert.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            ciId: "ci-1",
+            correlatedIncidentId: null,
+            state: { in: ["OPEN", "ACKNOWLEDGED"] },
+          },
+        }),
+      );
+      expect(prisma.alert.updateMany).toHaveBeenCalledWith({
+        where: { id: "alert-7", correlatedIncidentId: null },
+        data: { correlatedIncidentId: "inc-9" },
+      });
+      expect(incidents.linkAlert).toHaveBeenCalledWith(
+        "inc-9",
+        expect.objectContaining({ id: "alert-7", componentKey: "Disk.Bay.3" }),
+        { actorId: "desk-1", correlationId: "corr-9" },
+      );
+    });
+
+    it("links when Service Desk sets the CI on an open client-reported ticket", async () => {
+      prisma.alert.findMany.mockResolvedValue([openAlert]);
+      prisma.alert.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.onIncidentUpdated({
+        incidentId: "inc-9",
+        status: "NEW",
+        ownerUserId: null,
+        ownerGroupId: null,
+        ciId: "ci-1",
+        actorId: "desk-1",
+      });
+
+      expect(incidents.linkAlert).toHaveBeenCalledTimes(1);
+    });
+
+    it("does nothing for an incident without a CI or one that is no longer open", async () => {
+      await service.onIncidentCreated({
+        incidentId: "inc-9",
+        siteId: "site-1",
+        ciId: null,
+        actorId: "desk-1",
+      });
+      await service.onIncidentUpdated({
+        incidentId: "inc-9",
+        status: "RESOLVED",
+        ownerUserId: "eng-1",
+        ownerGroupId: null,
+        ciId: "ci-1",
+        actorId: "eng-1",
+      });
+
+      expect(prisma.alert.findMany).not.toHaveBeenCalled();
+    });
+
+    it("skips an alert another incident claimed first, and alerts whose rule disables correlation", async () => {
+      prisma.alert.findMany.mockResolvedValue([openAlert, { ...openAlert, id: "alert-8" }]);
+      prisma.alert.updateMany.mockResolvedValue({ count: 0 });
+      alertRules.resolveRule
+        .mockResolvedValueOnce({ ...DEFAULT_ALERT_RULE, autoCorrelateIncidents: false })
+        .mockResolvedValueOnce({ ...DEFAULT_ALERT_RULE });
+
+      await service.onIncidentCreated({
+        incidentId: "inc-9",
+        siteId: "site-1",
+        ciId: "ci-1",
+        actorId: "desk-1",
+      });
+
+      expect(prisma.alert.updateMany).toHaveBeenCalledTimes(1);
+      expect(incidents.linkAlert).not.toHaveBeenCalled();
+    });
+
+    it("never throws into the incident write", async () => {
+      prisma.alert.findMany.mockRejectedValue(new Error("db down"));
+
+      await expect(
+        service.onIncidentCreated({
+          incidentId: "inc-9",
+          siteId: "site-1",
+          ciId: "ci-1",
+          actorId: "desk-1",
+        }),
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe("ingestFromZabbix", () => {

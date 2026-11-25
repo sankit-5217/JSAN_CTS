@@ -1,35 +1,14 @@
-import { useState, type FormEvent } from "react";
-import {
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Grid,
-  Snackbar,
-  Stack,
-  TextField,
-  Typography,
-} from "@mui/material";
-import { alpha, darken, keyframes } from "@mui/material/styles";
+import { Box, Button, Card, CardContent, Grid, Stack, Typography } from "@mui/material";
+import { alpha, keyframes } from "@mui/material/styles";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import DnsOutlinedIcon from "@mui/icons-material/DnsOutlined";
-import GroupOutlinedIcon from "@mui/icons-material/GroupOutlined";
 import HistoryOutlinedIcon from "@mui/icons-material/HistoryOutlined";
-import MailOutlineIcon from "@mui/icons-material/MailOutline";
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
-import SecurityOutlinedIcon from "@mui/icons-material/SecurityOutlined";
 import VerifiedUserOutlinedIcon from "@mui/icons-material/VerifiedUserOutlined";
 import { SignInCard } from "../components/SignInCard";
 import { severityColors, theme } from "../theme/theme";
-
-// Same dark-navy-derived-from-primary palette as the app shell's sidebar
-// (App.tsx) — each page derives its own tokens from theme/theme.ts rather
-// than importing another page's private constants (CommandCenterPage's
-// HEALTH_COLOR follows the same pattern).
-const PANEL_BG = darken(theme.palette.primary.main, 0.45);
-const ACCENT = theme.palette.secondary.light;
 
 // What the left brand panel advertises — module ownership pulled straight
 // from CLAUDE.md's Dev A/Dev B split, same icon set as the sidebar nav.
@@ -125,24 +104,6 @@ const FEATURES = [
   },
 ];
 
-const CONTACT_ROWS = [
-  {
-    icon: <MailOutlineIcon fontSize="small" />,
-    label: "General enquiries",
-    value: "sankit@jsanconsulting.com",
-  },
-  {
-    icon: <GroupOutlinedIcon fontSize="small" />,
-    label: "Access requests",
-    value: "Talk to your site's Delivery / Operations Manager",
-  },
-  {
-    icon: <SecurityOutlinedIcon fontSize="small" />,
-    label: "Security & incidents",
-    value: "security@jsan.example",
-  },
-];
-
 const bob = keyframes`
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-7px); }
@@ -164,25 +125,10 @@ function BrandMark({ height = 24, on = "dark" }: { height?: number; on?: "dark" 
 }
 
 /**
- * Sign-in page (signed-out landing site). The sign-in itself — password,
- * Google / Microsoft / GitHub, password reset — lives in SignInCard.
+ * Sign-in page (signed-out landing site). The sign-in itself — email +
+ * password, password reset — lives in SignInCard.
  */
 export function LoginPage() {
-  // Contact form is decorative — nothing on a real page should look
-  // functional and silently do nothing.
-  const [contactName, setContactName] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
-  const [contactMessage, setContactMessage] = useState("");
-  const [snackbar, setSnackbar] = useState<string | null>(null);
-
-  const submitContact = (e: FormEvent) => {
-    e.preventDefault();
-    setSnackbar("Thanks — this demo doesn't send anywhere yet.");
-    setContactName("");
-    setContactEmail("");
-    setContactMessage("");
-  };
-
   const scrollToHero = () => {
     document.getElementById("hero")?.scrollIntoView({ behavior: "smooth" });
   };
@@ -255,20 +201,6 @@ export function LoginPage() {
               }}
             >
               Features
-            </Typography>
-            <Typography
-              component="a"
-              href="#contact"
-              sx={{
-                display: { xs: "none", sm: "block" },
-                fontSize: 14.5,
-                fontWeight: 700,
-                color: "text.secondary",
-                textDecoration: "none",
-                "&:hover": { color: "text.primary" },
-              }}
-            >
-              Contact
             </Typography>
             <Button
               size="small"
@@ -364,7 +296,7 @@ export function LoginPage() {
           </Stack>
 
           <Typography sx={{ mt: 4, fontSize: 12, color: "text.disabled" }}>
-            Sign in with your password, or with Google, Microsoft or GitHub.
+            Sign in with the email and password from your OpsDesk administrator.
           </Typography>
         </Box>
 
@@ -567,149 +499,6 @@ export function LoginPage() {
         </Grid>
       </Box>
 
-      {/* Contact */}
-      <Box
-        component="section"
-        id="contact"
-        sx={{ maxWidth: 1180, mx: "auto", px: { xs: 2, sm: 3 }, py: { xs: 5, md: 7 } }}
-      >
-        <Box
-          sx={{
-            bgcolor: PANEL_BG,
-            backgroundImage: `radial-gradient(circle at 85% 15%, ${alpha(ACCENT, 0.18)}, transparent 50%)`,
-            color: "#fff",
-            borderRadius: 4,
-            p: { xs: 3, sm: 5 },
-          }}
-        >
-          <Grid container spacing={5}>
-            <Grid item xs={12} md={6}>
-              <Typography variant="h4" sx={{ fontWeight: 700, mb: 1.5 }}>
-                Talk to the team
-              </Typography>
-              <Typography sx={{ color: alpha("#ffffff", 0.65), maxWidth: 400, mb: 3 }}>
-                Access is granted per role and site — reach out and we'll get you scoped correctly
-                the first time.
-              </Typography>
-              <Stack spacing={2}>
-                {CONTACT_ROWS.map((row) => (
-                  <Stack key={row.label} direction="row" spacing={1.75} alignItems="flex-start">
-                    <Box
-                      sx={{
-                        width: 30,
-                        height: 30,
-                        borderRadius: "8px",
-                        bgcolor: alpha("#ffffff", 0.08),
-                        color: ACCENT,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {row.icon}
-                    </Box>
-                    <Box>
-                      <Typography sx={{ fontWeight: 600, fontSize: 13 }}>{row.label}</Typography>
-                      <Typography sx={{ color: alpha("#ffffff", 0.55), fontSize: 12.5 }}>
-                        {row.value}
-                      </Typography>
-                    </Box>
-                  </Stack>
-                ))}
-              </Stack>
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <Box
-                component="form"
-                onSubmit={submitContact}
-                sx={{
-                  bgcolor: alpha("#ffffff", 0.04),
-                  border: "1px solid",
-                  borderColor: alpha("#ffffff", 0.1),
-                  borderRadius: 3,
-                  p: 2.5,
-                }}
-              >
-                <Stack spacing={1.75}>
-                  <TextField
-                    id="contact-name"
-                    label="Name"
-                    size="small"
-                    required
-                    value={contactName}
-                    onChange={(e) => setContactName(e.target.value)}
-                    InputLabelProps={{ sx: { color: alpha("#ffffff", 0.6) } }}
-                    sx={{
-                      "& .MuiOutlinedInput-root": {
-                        color: "#fff",
-                        bgcolor: alpha("#ffffff", 0.05),
-                        borderRadius: 1.5,
-                        "& fieldset": { borderColor: alpha("#ffffff", 0.18) },
-                      },
-                    }}
-                  />
-                  <TextField
-                    id="contact-email"
-                    type="email"
-                    label="Email"
-                    size="small"
-                    required
-                    value={contactEmail}
-                    onChange={(e) => setContactEmail(e.target.value)}
-                    InputLabelProps={{ sx: { color: alpha("#ffffff", 0.6) } }}
-                    sx={{
-                      "& .MuiOutlinedInput-root": {
-                        color: "#fff",
-                        bgcolor: alpha("#ffffff", 0.05),
-                        borderRadius: 1.5,
-                        "& fieldset": { borderColor: alpha("#ffffff", 0.18) },
-                      },
-                    }}
-                  />
-                  <TextField
-                    id="contact-message"
-                    label="Message"
-                    size="small"
-                    required
-                    multiline
-                    minRows={3}
-                    value={contactMessage}
-                    onChange={(e) => setContactMessage(e.target.value)}
-                    placeholder="Which site, and what you need access to..."
-                    InputLabelProps={{ sx: { color: alpha("#ffffff", 0.6) } }}
-                    sx={{
-                      "& .MuiOutlinedInput-root": {
-                        color: "#fff",
-                        bgcolor: alpha("#ffffff", 0.05),
-                        borderRadius: 1.5,
-                        "& fieldset": { borderColor: alpha("#ffffff", 0.18) },
-                      },
-                    }}
-                  />
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    sx={{
-                      bgcolor: "#fff",
-                      color: PANEL_BG,
-                      fontWeight: 700,
-                      textTransform: "none",
-                      borderRadius: 2,
-                      boxShadow: "none",
-                      "&:hover": { bgcolor: ACCENT, color: "#fff" },
-                    }}
-                  >
-                    Send message
-                  </Button>
-                </Stack>
-              </Box>
-            </Grid>
-          </Grid>
-        </Box>
-      </Box>
-
       {/* Footer */}
       <Box
         component="footer"
@@ -745,18 +534,10 @@ export function LoginPage() {
             </Typography>
           </Stack>
           <Typography sx={{ fontSize: 11.5, color: "text.secondary", maxWidth: 420 }}>
-            The contact form above is illustrative and doesn't send anywhere yet.
+            Backend-enforced access · every change audited.
           </Typography>
         </Stack>
       </Box>
-
-      <Snackbar
-        open={snackbar !== null}
-        autoHideDuration={3200}
-        onClose={() => setSnackbar(null)}
-        message={snackbar}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      />
     </Box>
   );
 }

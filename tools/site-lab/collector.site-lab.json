@@ -1,0 +1,30 @@
+{
+  "siteCode": "SITE01",
+  "apiBaseUrl": "https://127.0.0.1:8443/api/v1",
+  "apiToken": "__FROM_secrets/opsdesk-api-token__",
+  "pollIntervalSeconds": 30,
+  "heartbeatIntervalSeconds": 30,
+  "bufferMaxItems": 1000,
+  "bufferFile": "__RUN_DIR__/collector-buffer.json",
+  "endpointTlsInsecure": true,
+  "endpoints": [
+    {
+      "ciCode": "SITE01-R01-SRV-001",
+      "kind": "REDFISH",
+      "address": "https://127.0.0.1:8601",
+      "credentialRef": "site-lab-bmc"
+    },
+    {
+      "ciCode": "SITE01-R01-DB-001",
+      "kind": "HPE_ILO",
+      "address": "https://127.0.0.1:8602",
+      "credentialRef": "site-lab-bmc"
+    }
+  ],
+  "snmpTrapPort": 1162,
+  "snmpCommunity": "public",
+  "snmpSources": [
+    { "address": "127.0.0.11", "ciCode": "SITE01-R01-SRV-001" },
+    { "address": "127.0.0.12", "ciCode": "SITE01-R01-DB-001" }
+  ]
+}

@@ -106,4 +106,12 @@ describe("stripQuotedReply", () => {
   it("keeps the body when there is nothing to strip", () => {
     expect(stripQuotedReply("Line one\nLine two")).toBe("Line one\nLine two");
   });
+
+  it("finds the ticket in a reply to the INC-00002[Bug][P3,S3] subject format", () => {
+    const parsed = parseInboundEmail(
+      inbound({ subject: "Re: INC-00002[Bug][P3,S3] Uploads are slow" }),
+    );
+    expect(parsed.entityKey).toBe("INC-00002");
+    expect(parsed.isReply).toBe(true);
+  });
 });

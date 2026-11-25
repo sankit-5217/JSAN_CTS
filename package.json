@@ -10,7 +10,8 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "integrations/*"
+    "integrations/*",
+    "tools/*"
   ],
   "scripts": {
     "dev:api": "pnpm --filter @cts-dc-opsdesk/api start:dev",
@@ -18,6 +19,7 @@
     "dev:worker": "pnpm --filter @cts-dc-opsdesk/worker start:dev",
     "dev:collector": "pnpm --filter @cts-dc-opsdesk/collector start:dev",
     "dev:tls-proxy": "node scripts/dev-tls-proxy.mjs",
+    "dev:site-lab": "pnpm --filter @cts-dc-opsdesk/site-lab build && pnpm --filter @cts-dc-opsdesk/site-lab start",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
@@ -34,11 +36,20 @@
   "pnpm": {
     "overrides": {
       "glob@<10.5.0": "^10.5.0",
-      "multer@<2.4.0": "^2.4.0",
+      "multer@<2.5.0": "^2.5.0",
       "picomatch@<4.0.4": "^4.0.7",
       "lodash@<4.18.0": "^4.18.1",
       "tmp@<0.2.6": "^0.2.7",
-      "js-yaml@<4.3.2": "^4.3.2"
+      "js-yaml@<4.3.2": "^4.3.2",
+      "fast-uri@>=3.0.0 <3.1.7": "^3.1.7",
+      "brace-expansion@<2.0.0": "^1.1.20",
+      "brace-expansion@>=2.0.0 <3.0.0": "^2.1.6",
+      "brace-expansion@>=5.0.0 <5.0.11": "^5.0.11",
+      "source-map-js@<1.2.2": "^1.2.2",
+      "proxy-addr@<2.0.8": "^2.0.8",
+      "tinypool@<2.1.2": "^2.1.2",
+      "handlebars@<4.7.10": "^4.7.10",
+      "body-parser@<1.20.9": "^1.20.9"
     }
   }
 }

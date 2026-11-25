@@ -3,6 +3,13 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "deleteOutDir": false
+    "deleteOutDir": true,
+    "tsConfigPath": "tsconfig.build.json",
+    "assets": [
+      {
+        "include": "modules/monitoring/agent-enrollment/scripts/*",
+        "watchAssets": true
+      }
+    ]
   }
 }

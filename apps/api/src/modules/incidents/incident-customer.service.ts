@@ -1,0 +1,262 @@
+import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import { InAppNotificationKind, IncidentStatus, Prisma, UserRole } from "@prisma/client";
+import { ActorContext } from "../../common/types/actor-context.type";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
+import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { InboxService } from "../inbox/inbox.service";
+import { levelForPriority } from "../inbox/notification-sound-rules.service";
+import { CustomerFeedbackDto, CustomerFeedbackOutcome } from "./dto/customer-feedback.dto";
+import { currentCustomerFeedback } from "./customer-feedback";
+import { IncidentsService } from "./incidents.service";
+import { REPORT_FIELDS } from "./report-changes";
+
+export interface IncidentProgress {
+  status: IncidentStatus;
+  /** Names only, for "who's handling this". Null until assigned. */
+  handledBy: { engineer: string | null; team: string | null };
+  /** Every status the ticket has been in, oldest first, starting at NEW. */
+  milestones: { status: IncidentStatus; at: Date }[];
+  /** When the ticket last went to PENDING_CUSTOMER, while it's still there. */
+  waitingOnCustomerSince: Date | null;
+  /** The reporter has replied since the ticket started waiting on them. */
+  customerRepliedWhileWaiting: boolean;
+  /** The reporter's answer to "is this fixed?" for the latest resolution. */
+  feedback: { outcome: CustomerFeedbackOutcome; at: Date } | null;
+  /**
+   * Every edit the reporter made to their report after raising it, oldest
+   * first, for the conversation both portals show: who, when, and each
+   * field's old → new value. Edits saved before values were recorded list
+   * the changed fields only (from/to null, `detailed: false`).
+   */
+  reportEdits: ReportEdit[];
+}
+
+export interface ReportEdit {
+  at: Date;
+  by: { name: string; email: string | null; role: UserRole | null } | null;
+  detailed: boolean;
+  changes: { label: string; from: string | null; to: string | null }[];
+}
+
+/**
+ * The customer side of a ticket's conversation: a plain progress summary
+ * both the client portal and the staff incident page read, and the
+ * customer's "is this fixed?" answer on a resolved ticket.
+ *
+ * Feedback is a signal, not a status change. The transition table (spec
+ * §15) doesn't give CLIENT_MANAGER_VIEWER any transition, so a confirmed
+ * fix still needs Service Desk to close it, and "not fixed" needs someone
+ * to reopen it. What this adds is that they're told, loudly, and the
+ * incident page shows it.
+ */
+@Injectable()
+export class IncidentCustomerService {
+  private readonly logger = new Logger(IncidentCustomerService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+    private readonly inbox: InboxService,
+    private readonly incidents: IncidentsService,
+  ) {}
+
+  async getProgress(incidentId: string, user: AuthenticatedUser): Promise<IncidentProgress> {
+    const incident = await this.incidents.findOneScoped(incidentId, user);
+    const [events, owner, group] = await Promise.all([
+      this.prisma.incidentEvent.findMany({
+        where: {
+          incidentId,
+          eventType: { in: ["STATUS_CHANGE", "CUSTOMER_FEEDBACK", "REPORT_EDITED"] },
+        },
+        orderBy: { createdAt: "asc" },
+      }),
+      incident.ownerUserId
+        ? this.prisma.user.findUnique({
+            where: { id: incident.ownerUserId },
+            select: { displayName: true },
+          })
+        : null,
+      incident.ownerGroupId
+        ? this.prisma.supportGroup.findUnique({
+            where: { id: incident.ownerGroupId },
+            select: { name: true },
+          })
+        : null,
+    ]);
+
+    const milestones: IncidentProgress["milestones"] = [
+      { status: IncidentStatus.NEW, at: incident.createdAt },
+    ];
+    const editEvents: typeof events = [];
+    for (const e of events) {
+      const payload = (e.payload ?? {}) as Record<string, unknown>;
+      if (e.eventType === "STATUS_CHANGE" && typeof payload.to === "string") {
+        milestones.push({ status: payload.to as IncidentStatus, at: e.createdAt });
+      } else if (e.eventType === "REPORT_EDITED") {
+        editEvents.push(e);
+      }
+    }
+    // The customer's answer, and whether it still applies — the same rule
+    // the client's ticket list uses (a re-resolve needs a fresh answer).
+    const feedback: IncidentProgress["feedback"] = currentCustomerFeedback(events);
+    const reportEdits = await this.describeReportEdits(editEvents);
+
+    const last = milestones[milestones.length - 1];
+    const waitingOnCustomerSince =
+      incident.status === IncidentStatus.PENDING_CUSTOMER && last.status === incident.status
+        ? last.at
+        : null;
+    let customerRepliedWhileWaiting = false;
+    if (waitingOnCustomerSince && incident.reportedByUserId) {
+      const replies = await this.prisma.incidentComment.count({
+        where: {
+          incidentId,
+          authorId: incident.reportedByUserId,
+          isInternal: false,
+          createdAt: { gt: waitingOnCustomerSince },
+        },
+      });
+      customerRepliedWhileWaiting = replies > 0;
+    }
+
+    return {
+      status: incident.status,
+      handledBy: { engineer: owner?.displayName ?? null, team: group?.name ?? null },
+      milestones,
+      waitingOnCustomerSince,
+      customerRepliedWhileWaiting,
+      feedback,
+      reportEdits,
+    };
+  }
+
+  /** REPORT_EDITED timeline entries → who/when/what for the conversation. */
+  private async describeReportEdits(
+    events: { actorId: string | null; createdAt: Date; payload: Prisma.JsonValue }[],
+  ): Promise<ReportEdit[]> {
+    if (events.length === 0) return [];
+    const actorIds = [...new Set(events.map((e) => e.actorId).filter((v): v is string => !!v))];
+    const actors = actorIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: actorIds } },
+          select: { id: true, displayName: true, email: true, role: true },
+        })
+      : [];
+    const byId = new Map(actors.map((a) => [a.id, a]));
+    const labelOf = new Map(REPORT_FIELDS.map((f) => [f.field as string, f.label]));
+    return events.map((e) => {
+      const payload = (e.payload ?? {}) as { changes?: unknown; fields?: unknown };
+      const actor = e.actorId ? byId.get(e.actorId) : undefined;
+      const by = actor ? { name: actor.displayName, email: actor.email, role: actor.role } : null;
+      if (Array.isArray(payload.changes)) {
+        const changes = (payload.changes as { label?: unknown; from?: unknown; to?: unknown }[])
+          .filter((c) => typeof c?.label === "string")
+          .map((c) => ({
+            label: c.label as string,
+            from: typeof c.from === "string" ? c.from : null,
+            to: typeof c.to === "string" ? c.to : null,
+          }));
+        return { at: e.createdAt, by, detailed: true, changes };
+      }
+      const fields = Array.isArray(payload.fields) ? (payload.fields as unknown[]) : [];
+      const changes = fields
+        .map((f) => labelOf.get(String(f)))
+        .filter((l): l is string => !!l)
+        .map((label) => ({ label, from: null, to: null }));
+      return { at: e.createdAt, by, detailed: false, changes };
+    });
+  }
+
+  /**
+   * The reporter tells us whether a RESOLVED ticket is really fixed. Posts
+   * a customer-visible comment with their words, records a CUSTOMER_FEEDBACK
+   * timeline event and an audit record in one transaction, then tells the
+   * people who can act on it: whoever handles the ticket plus the service
+   * desk.
+   */
+  async submitFeedback(
+    incidentId: string,
+    dto: CustomerFeedbackDto,
+    actor: ActorContext,
+    user: AuthenticatedUser,
+  ) {
+    const incident = await this.incidents.findOneScoped(incidentId, user);
+    if (incident.status !== IncidentStatus.RESOLVED) {
+      throw new BadRequestException(
+        "You can confirm a fix only while the ticket is marked resolved",
+      );
+    }
+    const note = dto.comment?.trim();
+    if (dto.outcome === "NOT_FIXED" && !note) {
+      throw new BadRequestException("Tell us what's still wrong so we can pick it back up");
+    }
+    const body =
+      dto.outcome === "FIXED"
+        ? `Confirmed: the issue is fixed.${note ? `\n\n${note}` : ""}`
+        : `Not fixed yet: ${note}`;
+
+    const { comment, event } = await this.prisma.$transaction(async (tx) => {
+      const comment = await tx.incidentComment.create({
+        data: { incidentId, authorId: actor.actorId, body, isInternal: false },
+      });
+      await tx.incidentEvent.create({
+        data: {
+          incidentId,
+          eventType: "COMMENT",
+          actorId: actor.actorId,
+          payload: { commentId: comment.id, isInternal: false } as Prisma.InputJsonValue,
+        },
+      });
+      const event = await tx.incidentEvent.create({
+        data: {
+          incidentId,
+          eventType: "CUSTOMER_FEEDBACK",
+          actorId: actor.actorId,
+          payload: { outcome: dto.outcome, commentId: comment.id } as Prisma.InputJsonValue,
+        },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Incident",
+          entityId: incidentId,
+          action: "CUSTOMER_FEEDBACK",
+          after: { outcome: dto.outcome, commentId: comment.id },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return { comment, event };
+    });
+
+    try {
+      await this.inbox.notifyUsers({
+        userIds: await this.incidents.supportRecipientIds(incident, true),
+        actorUserId: user.id,
+        kind: InAppNotificationKind.CUSTOMER_RESPONDED,
+        title:
+          dto.outcome === "FIXED"
+            ? `${incident.incidentNo}: customer confirmed the fix, ready to close`
+            : `${incident.incidentNo}: customer says it's not fixed`,
+        body: note ?? incident.shortDescription,
+        entityType: "INCIDENT",
+        entityId: incident.id,
+        level: levelForPriority(incident.priority),
+        dedupeKey: `feedback:${event.id}`,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `customer-feedback notification skipped for incident ${incident.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    return { outcome: dto.outcome, at: event.createdAt, comment };
+  }
+}
+
+/** Only the reporter answers "is this fixed?" (the service enforces the
+ *  ownership through findOneScoped). */
+export const CUSTOMER_FEEDBACK_ROLES = [UserRole.CLIENT_MANAGER_VIEWER] as const;

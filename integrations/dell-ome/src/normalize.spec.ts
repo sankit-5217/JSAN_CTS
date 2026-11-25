@@ -107,7 +107,7 @@ describe("normalizeDellOmeDevice", () => {
     expect(snapshot.overallHealth).toBe("CRITICAL");
     expect(snapshot.degraded).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "SYSTEM", health: "CRITICAL" }),
+        expect.objectContaining({ kind: "SYSTEM", health: "CRITICAL", rollup: true }),
         expect.objectContaining({
           kind: "TEMPERATURE_SENSOR",
           name: "Temperature",
@@ -123,6 +123,8 @@ describe("normalizeDellOmeDevice", () => {
       ]),
     );
     expect(snapshot.summary.powerSupplies).toEqual({ total: 2, healthy: 1 });
+    // the Voltage sub-system is a real part even though its kind is SYSTEM
+    expect(snapshot.degraded.filter((d) => d.rollup)).toHaveLength(1);
   });
 
   it("understands the legacy OMSA status scale (3 = OK, 5 = Critical)", () => {
@@ -167,7 +169,7 @@ describe("normalizeDellOmeDevice", () => {
     expect(snapshot.overallHealth).toBe("UNKNOWN");
     expect(snapshot.firmware).toBeUndefined();
     expect(snapshot.degraded).toEqual([
-      { kind: "SYSTEM", name: "T", health: "UNKNOWN", detail: undefined },
+      { kind: "SYSTEM", name: "T", health: "UNKNOWN", detail: undefined, rollup: true },
     ]);
     expect(snapshot.attributes).toMatchObject({ connected: false });
   });

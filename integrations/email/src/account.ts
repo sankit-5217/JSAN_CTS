@@ -1,5 +1,6 @@
 import type { Party, RenderedEmail } from "./types";
 import { EmailRenderError } from "./render";
+import { formatUtc } from "./time";
 
 /**
  * Account emails (sign-in invite, password reset). Deliberately separate from
@@ -13,9 +14,11 @@ export type AccountEmail =
       /** Single-use link to set a password; carries the token in its fragment. */
       link: string;
       expiresAt: string;
+      /** How long the link lasts, e.g. "3 days" — readable in any time zone. */
+      validFor?: string;
       invitedBy?: Party;
     }
-  | { kind: "PASSWORD_RESET"; to: Party; link: string; expiresAt: string };
+  | { kind: "PASSWORD_RESET"; to: Party; link: string; expiresAt: string; validFor?: string };
 
 export type AccountEmailKind = AccountEmail["kind"];
 
@@ -37,7 +40,9 @@ export function renderAccountEmail(mail: AccountEmail): RenderedEmail {
   if (!mail.link) throw new EmailRenderError(`${mail.kind} has no link`, "link");
 
   const greeting = `Hello ${mail.to.name ?? mail.to.email},`;
-  const expiry = `This link works once and expires at ${mail.expiresAt} (UTC).`;
+  const expiry = mail.validFor
+    ? `This link works once and is valid for ${mail.validFor} (until ${formatUtc(mail.expiresAt)}).`
+    : `This link works once and expires at ${formatUtc(mail.expiresAt)}.`;
   const lines =
     mail.kind === "ACCOUNT_INVITE"
       ? {

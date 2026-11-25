@@ -181,6 +181,10 @@ export function normalizeDellOmeDevice(bundle: DellOmeDeviceBundle): HealthSnaps
     device.DeviceName ?? device.DeviceServiceTag ?? "Device",
     device.Status,
   );
+  if (degraded.length > 0) {
+    // the device's own status rolls up its subsystems — not a separate fault
+    degraded[0].rollup = true;
+  }
 
   subSystems.forEach((sub, i) => {
     pushIfDegraded(degraded, subsystemKind(sub.Name), sub.Name ?? `SubSystem ${i}`, sub.Status);

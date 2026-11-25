@@ -111,9 +111,10 @@ function settingsOf(row: RoutingPolicy | null): RoutingSettings {
 }
 
 /**
- * Skill-based routing. Rules (shared by suggestions and auto-assign):
+ * Skill-based routing. Rules for automatic assignment offers:
  *  1. Pool = engineers whose shift is live right now at the incident's site
- *     (shifts module's live roster, same timezone logic as GET /shifts/live).
+ *     (shifts module's live roster, same timezone logic as GET /shifts/live)
+ *     and who have access to that site — a roster entry alone isn't access.
  *  2. A candidate must hold EVERY active skill the incident's category
  *     requires (skills module's category requirements).
  *  3. Working-shift engineers are preferred; on-call engineers are only
@@ -145,16 +146,6 @@ export class RoutingService {
     private readonly skillsService: SkillsService,
     private readonly categoryTeams: CategoryTeamsService,
   ) {}
-
-  async suggestForIncident(
-    incidentId: string,
-    user: AuthenticatedUser,
-    now: Date = new Date(),
-  ): Promise<RoutingSuggestions> {
-    // Scoped fetch — enforces the caller's site access (403 otherwise).
-    const incident = await this.incidentsService.findOneScoped(incidentId, user);
-    return this.rank(incident, now);
-  }
 
   async getPolicy(siteId: string, user: AuthenticatedUser): Promise<RoutingPolicyView> {
     await this.assertSiteAccess(user, siteId);
@@ -240,7 +231,14 @@ export class RoutingService {
     // fetch, or the system event path), so the roster read itself runs
     // unrestricted, narrowed to just this incident's site.
     const roster = await this.shiftsService.getLiveRoster({ siteId: incident.siteId }, null, now);
-    const onShift = this.dedupeByEngineer([...roster.working, ...roster.onCall]);
+    // Being on the site's roster isn't access to it: only engineers who may
+    // work at the site (a grant, or an all-sites role) can be assigned.
+    const rostered = this.dedupeByEngineer([...roster.working, ...roster.onCall]);
+    const withAccess = await this.authzService.usersWithSiteAccess(
+      rostered.map((e) => e.userId),
+      incident.siteId,
+    );
+    const onShift = rostered.filter((e) => withAccess.has(e.userId));
     if (onShift.length === 0) {
       return this.empty(result, "NO_ENGINEERS_ON_SHIFT");
     }

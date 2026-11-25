@@ -102,10 +102,27 @@ describe("Dev B authorization contract", () => {
         for (const r of roles ?? []) {
           expect(VALID_ROLES.has(r)).toBe(true);
         }
-      } else {
-        // read route — open to any authenticated user
-        expect(roles).toBeUndefined();
+      } else if (roles !== undefined) {
+        // read route narrowed to some roles (e.g. vendor data is staff-only)
+        expect(roles.length).toBeGreaterThan(0);
+        for (const r of roles) {
+          expect(VALID_ROLES.has(r)).toBe(true);
+        }
       }
+      // otherwise: a read open to any authenticated user, scoped in the service
     });
   });
+});
+
+describe("client logins never read vendor data", () => {
+  it.each([VendorsController, VendorCasesController].map((c) => [c.name, c] as const))(
+    "%s read routes exclude CLIENT_MANAGER_VIEWER",
+    (_name, controller) => {
+      for (const h of routeHandlers(controller).filter((x) => !WRITE_METHODS.has(x.httpMethod))) {
+        const roles = Reflect.getMetadata(ROLES_KEY, h.fn) as UserRole[] | undefined;
+        expect(roles).toBeDefined();
+        expect(roles).not.toContain(UserRole.CLIENT_MANAGER_VIEWER);
+      }
+    },
+  );
 });

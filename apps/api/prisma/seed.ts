@@ -7,12 +7,12 @@ import {
   Prisma,
   PrismaClient,
   Priority,
-  SlaPolicy,
   SupportCalendar,
   UserRole,
   WorklogActivityType,
 } from "@prisma/client";
 import { hashPassword, passwordPolicyProblem } from "../src/modules/auth/password-hasher";
+import { seedConfiguration } from "./seed-config";
 
 const prisma = new PrismaClient();
 
@@ -36,20 +36,10 @@ const DEMO_PASSWORD = process.env.SEED_DEMO_PASSWORD ?? "OpsDesk-Demo-2026!";
  */
 
 /**
- * SlaPolicy/SupportCalendar have no natural unique key to `upsert()`
- * against (only `id`), so this is a manual find-or-create — same
- * "guarded, not upserted" idempotency approach as the seeded incident
- * below, just for a table where the guard is a name lookup instead of a
- * findUnique on a real unique column.
+ * SupportCalendar has no natural unique key to `upsert()` against (only
+ * `id`), so this is a manual find-or-create guarded on site + name — same
+ * "guarded, not upserted" idempotency approach as the seeded incident below.
  */
-async function findOrCreateSlaPolicy(data: Prisma.SlaPolicyCreateInput): Promise<SlaPolicy> {
-  const existing = await prisma.slaPolicy.findFirst({ where: { name: data.name } });
-  if (existing) {
-    return existing;
-  }
-  return prisma.slaPolicy.create({ data });
-}
-
 async function findOrCreateSupportCalendar(
   data: Prisma.SupportCalendarUncheckedCreateInput,
 ): Promise<SupportCalendar> {
@@ -71,6 +61,25 @@ async function findOrCreateShift(data: Prisma.EngineerShiftUncheckedCreateInput)
   if (!existing) {
     await prisma.engineerShift.create({ data });
   }
+}
+
+/**
+ * Zabbix connection, pre-filled with the local Zabbix-in-WSL URL so the
+ * settings page opens ready to edit. No token is seeded (it is a secret and is
+ * entered on the page). Upsert with `update: {}` never overwrites an admin's
+ * edits on re-seed. ZABBIX_API_URL overrides the default for other machines.
+ */
+async function seedZabbixConnection() {
+  await prisma.zabbixConnection.upsert({
+    where: { name: "default" },
+    update: {},
+    create: {
+      name: "default",
+      apiUrl: process.env.ZABBIX_API_URL ?? "http://127.0.0.1/zabbix/api_jsonrpc.php",
+      enabled: true,
+      requestTimeoutMs: 10000,
+    },
+  });
 }
 
 async function main() {
@@ -106,8 +115,8 @@ async function main() {
     },
   });
 
-  // Service desk: scoped to SITE01 only — exercises the "assigned sites"
-  // path in AuthzService rather than the "all sites" admin path.
+  // Service desk: an all-sites role (AuthzService.ALL_SITES_ROLES), so it
+  // needs no UserSiteAccess rows.
   const serviceDesk = await prisma.user.upsert({
     where: { email: "servicedesk@example.com" },
     update: {},
@@ -145,7 +154,7 @@ async function main() {
 
   // Client viewer: the customer's own read-only account (CLIENT_MANAGER_VIEWER
   // isn't in AuthzService's ALL_SITES_ROLES, so it needs a UserSiteAccess row
-  // just like the scoped internal roles below). Scoped to SITE01 so logging
+  // just like the scoped internal roles below). Scoped to SITE01 so
   // in as this user actually shows something — the seeded incident lives
   // there.
   const clientViewer = await prisma.user.upsert({
@@ -162,12 +171,6 @@ async function main() {
     where: { userId_siteId: { userId: clientViewer.id, siteId: site1.id } },
     update: {},
     create: { userId: clientViewer.id, siteId: site1.id },
-  });
-
-  await prisma.userSiteAccess.upsert({
-    where: { userId_siteId: { userId: serviceDesk.id, siteId: site1.id } },
-    update: {},
-    create: { userId: serviceDesk.id, siteId: site1.id },
   });
 
   await prisma.userSiteAccess.upsert({
@@ -271,44 +274,17 @@ async function main() {
     create: { ciId: server2.id, overallHealth: "HEALTHY", lastHeartbeatAt: new Date() },
   });
 
-  // SLA policies (spec §10.8's illustrative P1-P4 table) and one support
-  // calendar per site. SITE01 stays is247 (matching the site's own flag)
-  // so its P1/P2 incidents resolve as a flat 24x7 clock; SITE02 is a real
-  // 09:00-18:00 Mon-Fri calendar, so a P3/P4 incident there exercises the
-  // business-hours math end to end.
-  const p1Policy = await findOrCreateSlaPolicy({
-    name: "P1 Critical (24x7)",
-    priority: Priority.P1,
-    ackTargetMinutes: 15,
-    resolveTargetMinutes: 4 * 60,
-    usesBusinessCalendar: false,
-    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
-  });
-  await findOrCreateSlaPolicy({
-    name: "P2 High",
-    priority: Priority.P2,
-    ackTargetMinutes: 30,
-    resolveTargetMinutes: 8 * 60,
-    usesBusinessCalendar: false,
-    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
-  });
-  await findOrCreateSlaPolicy({
-    name: "P3 Medium (business hours)",
-    priority: Priority.P3,
-    ackTargetMinutes: 4 * 60, // 4 business hours
-    resolveTargetMinutes: 2 * 9 * 60, // 2 business days at 9h/day
-    usesBusinessCalendar: true,
-    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
-  });
-  await findOrCreateSlaPolicy({
-    name: "P4 Low (business hours)",
-    priority: Priority.P4,
-    ackTargetMinutes: 9 * 60, // 1 business day
-    resolveTargetMinutes: 5 * 9 * 60, // 5 business days at 9h/day
-    usesBusinessCalendar: true,
-    effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+  // Reference configuration shared with production (seed-config.ts): SLA
+  // policies, the default alert rule, Assignee Groups and issue pick-lists.
+  await seedConfiguration(prisma);
+  const p1Policy = await prisma.slaPolicy.findFirstOrThrow({
+    where: { name: "P1 Critical (24x7)" },
   });
 
+  // One support calendar per site. SITE01 stays is247 (matching the site's
+  // own flag) so its P1/P2 incidents resolve as a flat 24x7 clock; SITE02 is
+  // a real 09:00-18:00 Mon-Fri calendar, so a P3/P4 incident there exercises
+  // the business-hours math end to end.
   await findOrCreateSupportCalendar({
     siteId: site1.id,
     name: "Standard",
@@ -328,16 +304,8 @@ async function main() {
     is247: false,
   });
 
-  // Default alert ingestion policy (spec §10.10). Values match the Prisma
-  // column defaults / AlertsService code fallback — seeded so operators have a
-  // row to tune via PATCH /alert-rules/:id instead of a migration.
-  const existingAlertRule = await prisma.alertRule.findFirst({ where: { name: "default" } });
-  if (!existingAlertRule) {
-    await prisma.alertRule.create({ data: { name: "default" } });
-  }
-
   // Skill-based routing demo (skills Phases 1-2 + routing Phase 3). A second
-  // SITE01 engineer so GET /incidents/:id/routing-suggestions has something
+  // SITE01 engineer so automatic routing offers have candidates
   // to rank: on INC-SEED-001 (HARDWARE_FAILURE, owned by siteEngineer1) the
   // new engineer comes first with 0 open incidents and siteEngineer1 shows
   // as current owner. Rahul and Vikas (below) cover the rest of the
@@ -432,10 +400,9 @@ async function main() {
   });
 
   // Omnichannel routing demo: two named SITE01 engineers with distinct
-  // skills, each owning a team, so an alert or ticket routes to the right
-  // person end to end:
-  //   Rahul: Windows + Servers    -> Windows & Servers team
-  //   Vikas: Storage + Backup     -> Storage & Backup team
+  // skills, so an alert or ticket routes to the right person by skill:
+  //   Rahul: Windows + Servers
+  //   Vikas: Storage + Backup
   // A "database.down" alert on the demo database server opens a DATABASE
   // incident (the database.down alert rule below), which needs Storage +
   // Backup, so it's offered to Vikas once SITE01's auto-routing is
@@ -501,36 +468,20 @@ async function main() {
     });
   }
 
-  const [serversTeam, storageTeam] = await Promise.all(
-    ["Windows & Servers team", "Storage & Backup team"].map((name) =>
-      prisma.supportGroup.upsert({ where: { name }, update: {}, create: { name } }),
-    ),
-  );
-  const teamMembers: [string, string][] = [
-    [serversTeam.id, rahul.id],
-    [storageTeam.id, vikas.id],
-  ];
-  for (const [groupId, userId] of teamMembers) {
-    await prisma.supportGroupMember.upsert({
-      where: { groupId_userId: { groupId, userId } },
-      update: {},
-      create: { groupId, userId },
-    });
-  }
-  const categoryTeams: [string, string][] = [
-    ["SERVER_FAILURE", serversTeam.id],
-    ["WINDOWS_OS", serversTeam.id],
-    ["DATABASE", storageTeam.id],
-    ["BACKUP_FAILURE", storageTeam.id],
-    ["STORAGE_FAILURE", storageTeam.id],
-  ];
-  for (const [category, groupId] of categoryTeams) {
-    await prisma.categoryTeam.upsert({
-      where: { category },
-      update: {},
-      create: { category, groupId },
-    });
-  }
+  // Only two support groups exist: JSAN ServiceDesk and Infra team (both
+  // in seed-config.ts). The user removed every other group on
+  // 2026-10-13, so no demo category teams are seeded.
+
+  // The demo service-desk user works the default Assignee Group.
+  const serviceDeskGroup = await prisma.supportGroup.findUniqueOrThrow({
+    where: { name: "JSAN ServiceDesk" },
+  });
+  await prisma.supportGroupMember.upsert({
+    where: { groupId_userId: { groupId: serviceDeskGroup.id, userId: serviceDesk.id } },
+    update: {},
+    create: { groupId: serviceDeskGroup.id, userId: serviceDesk.id },
+  });
+  await seedZabbixConnection();
 
   for (const engineer of [rahul, vikas]) {
     await findOrCreateShift({
@@ -710,17 +661,17 @@ async function main() {
 
   console.log(
     `Seeded sites ${site1.code}/${site2.code}, users ${admin.email} (SUPER_ADMIN, all sites), ` +
-      `${serviceDesk.email} (SERVICE_DESK_NOC, ${site1.code} only), ` +
+      `${serviceDesk.email} (SERVICE_DESK_NOC, all sites), ` +
       `${siteEngineer.email} (SITE_ENGINEER, ${site2.code} only), ` +
       `${siteEngineer1.email} (SITE_ENGINEER, ${site1.code} only), ` +
       `${siteEngineer2.email} (SITE_ENGINEER, ${site1.code} only), ` +
       `${rahul.email} (Windows + Servers) and ${vikas.email} (Storage + Backup) ` +
-      `(SITE_ENGINEER, ${site1.code}, each owning a team), ` +
+      `(SITE_ENGINEER, ${site1.code}), ` +
       `${clientViewer.email} (CLIENT_MANAGER_VIEWER, ${site1.code} only), ` +
       `1 rack and 4 CIs (1 CI-to-CI relation, 3 health snapshots), ` +
       `4 SLA policies (P1-P4) and 1 support calendar per site, ` +
       `6 skills, 8 engineer-skill assignments, 9 category requirements, 10 demo shifts, ` +
-      `2 demo teams with 5 category -> team mappings, a database.down alert rule, ` +
+      `2 support groups (JSAN ServiceDesk, Infra team), a database.down alert rule, ` +
       `1 incident (INC-SEED-001, IN_PROGRESS, 5 timeline events, 1 comment, 1 worklog, 1 SLA instance).`,
   );
 }

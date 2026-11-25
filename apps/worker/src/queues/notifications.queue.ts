@@ -16,6 +16,7 @@ export interface NotificationJob {
   event: NotificationEvent;
   recipients: { to: Party[]; cc?: Party[] };
   options?: RenderOptions;
+  senderUserId?: string;
 }
 
 /**
@@ -45,7 +46,9 @@ export async function processNotificationJob(
   transport: MailTransport,
 ): Promise<void> {
   const email = renderNotification(data.event, data.recipients, data.options ?? {});
-  await transport.send(email);
+  const senderUserId = data.senderUserId ?? data.event.entity.ticket?.updatedBy?.userId;
+  if (senderUserId) await transport.send(email, senderUserId);
+  else await transport.send(email);
 }
 
 export function createNotificationsWorker(

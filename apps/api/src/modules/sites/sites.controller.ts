@@ -1,5 +1,15 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
-import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
+import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { AuthzService } from "../auth/authz.service";
@@ -43,7 +53,9 @@ export class SitesController {
   @Get()
   async findAll(@Query() query: ListSitesQueryDto, @CurrentUser() user: AuthenticatedUser) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
-    return this.sitesService.findAll(query, accessibleSiteIds);
+    // Only the Super Admin's Sites page lists archived ("deleted") sites.
+    const includeArchived = query.includeArchived === true && user.role === UserRole.SUPER_ADMIN;
+    return this.sitesService.findAll({ ...query, includeArchived }, accessibleSiteIds);
   }
 
   @Get(":id")
@@ -63,6 +75,33 @@ export class SitesController {
     @CorrelationId() correlationId?: string,
   ) {
     return this.sitesService.create(dto, { actorId: user.id, correlationId });
+  }
+
+  @Post(":id/archive")
+  @HttpCode(200)
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({
+    summary:
+      "Delete a site: archives it (hidden, no new work, history kept, restorable); refused while it has open tickets",
+  })
+  archive(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.sitesService.archive(id, { actorId: user.id, correlationId });
+  }
+
+  @Post(":id/restore")
+  @HttpCode(200)
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: "Restore an archived (deleted) site" })
+  restore(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.sitesService.restore(id, { actorId: user.id, correlationId });
   }
 
   @Get(":siteId/contacts")

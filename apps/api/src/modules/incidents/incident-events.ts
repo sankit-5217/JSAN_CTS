@@ -13,6 +13,11 @@ export const INCIDENT_CREATED_EVENT = "incident.created";
 export interface IncidentCreatedEvent {
   incidentId: string;
   siteId: string;
+  /** The incident's CI, if any. The alerts module back-links that CI's
+   *  still-open, uncorrelated alerts to the new incident. */
+  ciId: string | null;
+  /** Who created it (a monitoring service account for an alert-opened one). */
+  actorId: string;
   correlationId?: string;
 }
 
@@ -28,6 +33,9 @@ export interface IncidentUpdatedEvent {
   status: string;
   ownerUserId: string | null;
   ownerGroupId: string | null;
+  /** Current CI — set on a client-reported ticket once Service Desk triages
+   *  it, which is when the CI's open alerts get back-linked. */
+  ciId: string | null;
   actorId: string | null;
   correlationId?: string;
 }

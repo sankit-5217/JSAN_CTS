@@ -1,20 +1,21 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
-  HttpCode,
-  HttpStatus,
   Param,
+  ParseEnumPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { ApiBearerAuth, ApiConsumes, ApiTags } from "@nestjs/swagger";
+import { tmpdir } from "os";
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { AuthzService } from "../auth/authz.service";
@@ -26,10 +27,18 @@ import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
 import { CreateIncidentAsCustomerDto } from "./dto/create-incident-as-customer.dto";
 import { CreateIncidentCommentDto } from "./dto/create-incident-comment.dto";
 import { CreateIncidentDto } from "./dto/create-incident.dto";
+import { CustomerFeedbackDto } from "./dto/customer-feedback.dto";
 import { ListIncidentsQueryDto } from "./dto/list-incidents-query.dto";
-import { TransitionIncidentDto } from "./dto/transition-incident.dto";
-import { UpdateIncidentDto } from "./dto/update-incident.dto";
+import { SetTemplateStatusDto, TransitionIncidentDto } from "./dto/transition-incident.dto";
+import { UpdateCcListDto } from "./dto/update-cc-list.dto";
+import { UpdateCustomerReportDto, UpdateIncidentDto } from "./dto/update-incident.dto";
+import { CUSTOMER_FEEDBACK_ROLES, IncidentCustomerService } from "./incident-customer.service";
 import { IncidentsService, UploadedAttachmentFile } from "./incidents.service";
+import {
+  ATTACHMENT_DISPOSITIONS,
+  type AttachmentDisposition,
+  MAX_ATTACHMENT_SIZE_BYTES,
+} from "./attachment.constants";
 
 // Wider than CMDB's write set by exactly SERVICE_DESK_NOC — spec §4 gives
 // that role "Triage, acknowledge, route, update incidents" as its primary
@@ -49,13 +58,18 @@ export const INCIDENT_WRITE_ROLES = [
 const INCIDENT_COMMENT_ROLES = [...INCIDENT_WRITE_ROLES, UserRole.CLIENT_MANAGER_VIEWER] as const;
 
 // The second customer write: attaching evidence (a photo of a fault light,
-// a screenshot) to their own report. Upload only — deleting an attachment
-// stays internal-only (INCIDENT_WRITE_ROLES), same reasoning as comments
-// never letting the customer mark something internal.
-const INCIDENT_ATTACHMENT_UPLOAD_ROLES = [
+// a screenshot) to their own report — and taking it back. A customer may
+// remove only files they uploaded themselves (the service enforces the
+// uploader check); staff may remove any attachment on the ticket.
+const INCIDENT_ATTACHMENT_ROLES = [
   ...INCIDENT_WRITE_ROLES,
   UserRole.CLIENT_MANAGER_VIEWER,
 ] as const;
+
+// The third customer write: the CC List on their own ticket ("added by
+// either reporter / assignee"). The service's findOneScoped keeps a customer
+// on their own reports only.
+const INCIDENT_CC_LIST_ROLES = [...INCIDENT_WRITE_ROLES, UserRole.CLIENT_MANAGER_VIEWER] as const;
 
 @ApiTags("incidents")
 @ApiBearerAuth()
@@ -65,6 +79,7 @@ export class IncidentsController {
   constructor(
     private readonly incidentsService: IncidentsService,
     private readonly authzService: AuthzService,
+    private readonly customerService: IncidentCustomerService,
   ) {}
 
   @Get()
@@ -109,9 +124,73 @@ export class IncidentsController {
     return this.incidentsService.update(id, dto, user, { actorId: user.id, correlationId });
   }
 
+  @Patch(":id/report")
+  @Roles(UserRole.CLIENT_MANAGER_VIEWER)
+  @ApiOperation({
+    summary: "Reporter edits their own ticket (every template field but Description and Status)",
+  })
+  updateAsCustomer(
+    @Param("id") id: string,
+    @Body() dto: UpdateCustomerReportDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.incidentsService.updateFromCustomer(
+      id,
+      dto,
+      { actorId: user.id, correlationId },
+      user,
+    );
+  }
+
+  @Put(":id/cc-list")
+  @Roles(...INCIDENT_CC_LIST_ROLES)
+  @ApiOperation({ summary: "Replace the ticket's CC List (reporter or staff)" })
+  updateCcList(
+    @Param("id") id: string,
+    @Body() dto: UpdateCcListDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.incidentsService.updateCcList(id, dto, { actorId: user.id, correlationId }, user);
+  }
+
+  @Get(":id/possible-duplicates")
+  @ApiOperation({
+    summary: "Other open incidents on the same CI (advisory duplicate warning)",
+  })
+  findPossibleDuplicates(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.incidentsService.findPossibleDuplicates(id, user);
+  }
+
   @Get(":id/transitions")
   listAvailableTransitions(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.incidentsService.getAvailableTransitions(id, user);
+  }
+
+  @Get(":id/status-options")
+  @ApiOperation({ summary: "The issue template's Status list, with what this caller can pick" })
+  listTemplateStatusOptions(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.incidentsService.getTemplateStatusOptions(id, user);
+  }
+
+  @Post(":id/status")
+  @Roles(...INCIDENT_WRITE_ROLES)
+  @ApiOperation({
+    summary: "Pick an issue-template status; runs the matching transition(s)",
+  })
+  setTemplateStatus(
+    @Param("id") id: string,
+    @Body() dto: SetTemplateStatusDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.incidentsService.setTemplateStatus(
+      id,
+      dto,
+      { actorId: user.id, correlationId },
+      user,
+    );
   }
 
   @Post(":id/transition")
@@ -151,19 +230,49 @@ export class IncidentsController {
     return this.incidentsService.listEvents(id, user);
   }
 
+  @Get(":id/progress")
+  @ApiOperation({
+    summary:
+      "Plain progress summary: who's handling it, status history, waiting-on-you, fix feedback",
+  })
+  getProgress(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.customerService.getProgress(id, user);
+  }
+
+  @Post(":id/customer-feedback")
+  @Roles(...CUSTOMER_FEEDBACK_ROLES)
+  @ApiOperation({ summary: "Reporter confirms a resolved ticket is fixed, or says it isn't" })
+  submitCustomerFeedback(
+    @Param("id") id: string,
+    @Body() dto: CustomerFeedbackDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId?: string,
+  ) {
+    return this.customerService.submitFeedback(id, dto, { actorId: user.id, correlationId }, user);
+  }
+
   @Get(":id/sla")
   findSlaState(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.incidentsService.findSlaState(id, user);
   }
 
   @Post(":id/attachments")
-  @Roles(...INCIDENT_ATTACHMENT_UPLOAD_ROLES)
+  @Roles(...INCIDENT_ATTACHMENT_ROLES)
   @ApiConsumes("multipart/form-data")
-  @UseInterceptors(FileInterceptor("file"))
+  // Streamed to a temp file, never held in memory; multer stops reading at
+  // the size limit (413) instead of buffering a huge body first.
+  @UseInterceptors(
+    FileInterceptor("file", {
+      dest: tmpdir(),
+      limits: { fileSize: MAX_ATTACHMENT_SIZE_BYTES, files: 1 },
+    }),
+  )
   uploadAttachment(
     @Param("id") id: string,
     @UploadedFile() file: UploadedAttachmentFile,
     @CurrentUser() user: AuthenticatedUser,
+    // Optional multipart field: the message this file was sent with.
+    @Body("commentId", new ParseUUIDPipe({ optional: true })) commentId?: string,
     @CorrelationId() correlationId?: string,
   ) {
     return this.incidentsService.uploadAttachment(
@@ -171,6 +280,7 @@ export class IncidentsController {
       file,
       { actorId: user.id, correlationId },
       user,
+      commentId,
     );
   }
 
@@ -180,28 +290,15 @@ export class IncidentsController {
   }
 
   @Get(":id/attachments/:attachmentId/download")
+  @ApiQuery({ name: "disposition", enum: ATTACHMENT_DISPOSITIONS, required: false })
   getAttachmentDownloadUrl(
     @Param("id") id: string,
     @Param("attachmentId") attachmentId: string,
     @CurrentUser() user: AuthenticatedUser,
+    // inline = View in the browser, attachment (default) = Download.
+    @Query("disposition", new ParseEnumPipe(ATTACHMENT_DISPOSITIONS, { optional: true }))
+    disposition?: AttachmentDisposition,
   ) {
-    return this.incidentsService.getAttachmentDownloadUrl(id, attachmentId, user);
-  }
-
-  @Delete(":id/attachments/:attachmentId")
-  @Roles(...INCIDENT_WRITE_ROLES)
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteAttachment(
-    @Param("id") id: string,
-    @Param("attachmentId") attachmentId: string,
-    @CurrentUser() user: AuthenticatedUser,
-    @CorrelationId() correlationId?: string,
-  ) {
-    await this.incidentsService.deleteAttachment(
-      id,
-      attachmentId,
-      { actorId: user.id, correlationId },
-      user,
-    );
+    return this.incidentsService.getAttachmentDownloadUrl(id, attachmentId, user, disposition);
   }
 }

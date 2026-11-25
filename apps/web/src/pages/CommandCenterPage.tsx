@@ -20,6 +20,7 @@ import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import { BarChart } from "@mui/x-charts/BarChart";
 import { PieChart } from "@mui/x-charts/PieChart";
 import { apiDownload, apiGet } from "../api/client";
+import { SendingEmailResult, SendingEmailStatus } from "../components/SendingEmailStatus";
 
 type HealthLevel = "HEALTHY" | "WARNING" | "CRITICAL" | "UNKNOWN";
 
@@ -384,10 +385,7 @@ export function CommandCenterPage() {
     setDownloadError(null);
     try {
       const date = new Date().toISOString().slice(0, 10);
-      await apiDownload(
-        "/reports/operational-health.csv",
-        `operational-health-report-${date}.csv`,
-      );
+      await apiDownload("/reports/operational-health.csv", `operational-health-report-${date}.csv`);
     } catch (err) {
       setDownloadError((err as Error).message);
     } finally {
@@ -397,6 +395,8 @@ export function CommandCenterPage() {
 
   return (
     <>
+      <SendingEmailResult />
+      <SendingEmailStatus />
       <Stack
         direction={{ xs: "column", sm: "row" }}
         justifyContent="space-between"

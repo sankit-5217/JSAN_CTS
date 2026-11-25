@@ -18,12 +18,6 @@ const KNOWN_WEAK_SECRETS = new Set([
 ]);
 const MIN_JWT_SECRET_LENGTH = 32;
 
-const PROVIDER_SECRETS = [
-  "GOOGLE_CLIENT_SECRET",
-  "MICROSOFT_CLIENT_SECRET",
-  "GITHUB_CLIENT_SECRET",
-];
-
 export interface AuthConfigProblems {
   /** Unsafe to run: the API must not start. */
   errors: string[];
@@ -50,8 +44,8 @@ export function findProductionAuthConfigProblems(env: Env): AuthConfigProblems {
     );
   }
 
-  // WEB_APP_URL goes into every invite/reset email; API_PUBLIC_URL is where
-  // Google/Microsoft/GitHub send people back to. Both must be real https.
+  // WEB_APP_URL goes into every invite/reset email; API_PUBLIC_URL goes into
+  // the agent installer one-liners clients run. Both must be real https.
   for (const key of ["WEB_APP_URL", "API_PUBLIC_URL"] as const) {
     const value = env[key] ?? "";
     if (!value) {
@@ -60,13 +54,6 @@ export function findProductionAuthConfigProblems(env: Env): AuthConfigProblems {
       errors.push(`${key} must use https:// in production (got ${value})`);
     } else if (/^https:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(value)) {
       errors.push(`${key} points at localhost (${value}) — use the real production address`);
-    }
-  }
-
-  for (const key of PROVIDER_SECRETS) {
-    const value = env[key];
-    if (value && KNOWN_WEAK_SECRETS.has(value.toLowerCase())) {
-      errors.push(`${key} is a placeholder — use the secret from the provider's developer console`);
     }
   }
 

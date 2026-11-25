@@ -17,6 +17,7 @@ import {
   Typography,
 } from "@mui/material";
 import { apiGet, apiPatch, apiPost } from "../api/client";
+import { formatDateTime } from "../time/clock";
 
 const DISPATCH_STATUSES = [
   "REQUESTED",
@@ -140,12 +141,12 @@ export function VendorCaseDetailPage() {
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Part: {vc.replacementPart ?? "—"} · Vendor ETA:{" "}
-            {vc.vendorEta ? new Date(vc.vendorEta).toLocaleString() : "—"}
+            {vc.vendorEta ? formatDateTime(vc.vendorEta) : "—"}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Opened {new Date(vc.openedAt).toLocaleString()}
-            {vc.acknowledgedAt && ` · acknowledged ${new Date(vc.acknowledgedAt).toLocaleString()}`}
-            {vc.closedAt && ` · closed ${new Date(vc.closedAt).toLocaleString()}`}
+            Opened {formatDateTime(vc.openedAt)}
+            {vc.acknowledgedAt && ` · acknowledged ${formatDateTime(vc.acknowledgedAt)}`}
+            {vc.closedAt && ` · closed ${formatDateTime(vc.closedAt)}`}
           </Typography>
           {vc.outcome && (
             <Typography variant="body2" sx={{ mt: 1 }}>
@@ -294,7 +295,7 @@ export function VendorCaseDetailPage() {
                 <Box key={u.id}>
                   <Typography variant="body2">{u.note}</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {new Date(u.createdAt).toLocaleString()}
+                    {formatDateTime(u.createdAt)}
                   </Typography>
                   <Divider sx={{ mt: 1 }} />
                 </Box>

@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
-import { sha256 } from "./social/social-identity.service";
+import { sha256 } from "./token-hash";
 import { AuthenticatedUser } from "./types/jwt-payload.type";
 
 /** Every API token starts with this, so the auth guard can tell it from a JWT. */

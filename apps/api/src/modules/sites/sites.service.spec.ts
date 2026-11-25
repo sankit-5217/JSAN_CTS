@@ -28,7 +28,14 @@ function makeService(prismaOverrides: Record<string, unknown> = {}) {
   const auditService = {
     record: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
-  return { service: new SitesService(prisma, auditService), prisma, auditService, tx };
+  return {
+    service: new SitesService(prisma, auditService, {
+      emitAsync: jest.fn().mockResolvedValue([]),
+    } as never),
+    prisma,
+    auditService,
+    tx,
+  };
 }
 
 describe("SitesService.create", () => {
@@ -48,7 +55,9 @@ describe("SitesService.create", () => {
       record: jest.fn().mockResolvedValue(undefined),
     } as unknown as AuditService;
 
-    const service = new SitesService(prisma, auditService);
+    const service = new SitesService(prisma, auditService, {
+      emitAsync: jest.fn().mockResolvedValue([]),
+    } as never);
     const result = await service.create(
       { code: "SITE01", name: "Demo", timezone: "UTC", is247: false },
       { actorId: "user-1", correlationId: "corr-1" },
@@ -245,5 +254,64 @@ describe("SitesService support group membership", () => {
         tx,
       );
     });
+  });
+});
+
+describe("SitesService.setDefaultSupportGroup", () => {
+  const groupId = "grp-desk";
+
+  it("clears the previous default and flags the new one in one audited transaction", async () => {
+    const txGroup = {
+      update: jest
+        .fn()
+        .mockImplementation(({ where, data }) => Promise.resolve({ id: where.id, ...data })),
+      findFirst: jest.fn().mockResolvedValue({ id: "grp-old", isDefaultAssignee: true }),
+    };
+    const { service, auditService } = makeService({
+      $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn({ supportGroup: txGroup })),
+      supportGroup: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: groupId, name: "JSAN ServiceDesk", isDefaultAssignee: null }),
+      },
+    });
+    const after = await service.setDefaultSupportGroup(groupId, { actorId: "admin-1" });
+    expect(txGroup.update).toHaveBeenNthCalledWith(1, {
+      where: { id: "grp-old" },
+      data: { isDefaultAssignee: null },
+    });
+    expect(txGroup.update).toHaveBeenNthCalledWith(2, {
+      where: { id: groupId },
+      data: { isDefaultAssignee: true },
+    });
+    expect(after).toMatchObject({ id: groupId, isDefaultAssignee: true });
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityType: "SupportGroup",
+        entityId: groupId,
+        action: "SET_DEFAULT_ASSIGNEE",
+        before: { previousDefaultGroupId: "grp-old" },
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("is a no-op when the group is already the default", async () => {
+    const { service, prisma } = makeService({
+      supportGroup: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: groupId, name: "JSAN ServiceDesk", isDefaultAssignee: true }),
+      },
+    });
+    await service.setDefaultSupportGroup(groupId, { actorId: "admin-1" });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("404s an unknown group", async () => {
+    const { service } = makeService();
+    await expect(
+      service.setDefaultSupportGroup("nope", { actorId: "admin-1" }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

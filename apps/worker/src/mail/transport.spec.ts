@@ -1,5 +1,5 @@
 import type { RenderedEmail } from "@cts-dc-opsdesk/email-adapter";
-import type nodemailer from "nodemailer";
+import type { Transporter } from "nodemailer";
 import { ConsoleMailTransport, createMailTransportFromEnv, SmtpMailTransport } from "./transport";
 
 const EMAIL: RenderedEmail = {
@@ -10,8 +10,7 @@ const EMAIL: RenderedEmail = {
   headers: { "X-OpsDesk-Event": "PASSWORD_RESET" },
 };
 
-const fakeTransporter = (sendMail: jest.Mock) =>
-  ({ sendMail }) as unknown as nodemailer.Transporter;
+const fakeTransporter = (sendMail: jest.Mock) => ({ sendMail }) as unknown as Transporter;
 
 describe("mail transports", () => {
   beforeEach(() => jest.spyOn(console, "warn").mockImplementation(() => undefined));

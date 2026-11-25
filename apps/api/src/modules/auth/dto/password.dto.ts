@@ -40,3 +40,25 @@ export class SetPasswordDto extends PasswordTokenDto {
   @Length(1, 128)
   password!: string;
 }
+
+export class ChangePasswordDto {
+  @ApiProperty()
+  @IsString()
+  @Length(1, 128)
+  currentPassword!: string;
+
+  @ApiProperty({ description: "At least 12 characters, different from the current one" })
+  @IsString()
+  @Length(1, 128)
+  newPassword!: string;
+}
+
+export class AdminSetPasswordDto {
+  @ApiProperty({
+    description:
+      "Starting password (at least 12 characters); the user must change it at first sign-in",
+  })
+  @IsString()
+  @Length(1, 128)
+  password!: string;
+}

@@ -97,6 +97,64 @@ export class CmdbService {
     return { items, total, limit, offset };
   }
 
+  /** Exact CMDB code lookup for other modules (e.g. agent enrollment); null when absent. */
+  findByCode(ciCode: string) {
+    return this.prisma.configurationItem.findUnique({
+      where: { ciCode },
+      select: { id: true, siteId: true, metadata: true },
+    });
+  }
+
+  /**
+   * The CI an enrolled monitoring agent belongs to: the one named after its
+   * agent host, or an imported asset it was matched to by serial (which
+   * keeps its own code and records the host in `metadata.agentHost`).
+   */
+  findByAgentHost(host: string) {
+    return this.prisma.configurationItem.findFirst({
+      where: { OR: [{ ciCode: host }, { metadata: { path: ["agentHost"], equals: host } }] },
+      select: { id: true, ciCode: true, siteId: true, metadata: true },
+    });
+  }
+
+  /** CIs whose serial / service tag matches, ignoring case, at any site. */
+  findBySerial(serial: string) {
+    return this.prisma.configurationItem.findMany({
+      where: { serialOrServiceTag: { equals: serial, mode: "insensitive" } },
+      select: { id: true, ciCode: true, siteId: true, metadata: true },
+      take: 5,
+    });
+  }
+
+  /**
+   * A system write for agent enrollment: merges `patch` into the CI's
+   * metadata (other keys are kept), audited as `actor`. Not user-scoped —
+   * the caller has already tied the CI to its enrollment link's site.
+   */
+  async mergeMetadata(id: string, patch: Record<string, unknown>, actor: ActorContext) {
+    return this.prisma.$transaction(async (tx) => {
+      const before = await tx.configurationItem.findUniqueOrThrow({ where: { id } });
+      const metadata = { ...((before.metadata as Record<string, unknown> | null) ?? {}), ...patch };
+      const after = await tx.configurationItem.update({
+        where: { id },
+        data: { metadata: metadata as Prisma.InputJsonValue },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "ConfigurationItem",
+          entityId: id,
+          action: "UPDATE",
+          before,
+          after,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return after;
+    });
+  }
+
   async findOne(id: string) {
     const ci = await this.prisma.configurationItem.findUnique({ where: { id } });
     if (!ci) {

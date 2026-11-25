@@ -1,3 +1,4 @@
+import { SendingEmailPage } from "./pages/SendingEmailPage";
 import { useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route, Routes, Link, useLocation } from "react-router-dom";
 import {
@@ -35,13 +36,17 @@ import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
 import VolumeUpOutlinedIcon from "@mui/icons-material/VolumeUpOutlined";
+import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
+import SettingsInputComponentOutlinedIcon from "@mui/icons-material/SettingsInputComponentOutlined";
 import { AccountMenu, roleMeta } from "./components/AccountMenu";
 import { NotificationBell } from "./components/NotificationBell";
 import { SoundControl } from "./notifications/SoundControl";
 import { getStoredToken, signOut } from "./api/client";
-import { decodeJwtPayload, getCurrentUserRole } from "./api/jwt";
+import { decodeJwtPayload, getCurrentUserRole, passwordChangeRequired } from "./api/jwt";
 import { theme } from "./theme/theme";
+import { ClientHomePage } from "./pages/client/ClientHomePage";
 import { ClientLayout } from "./pages/client/ClientLayout";
+import { ClientReportsPage } from "./pages/client/ClientReportsPage";
 import { MyTicketsPage } from "./pages/client/MyTicketsPage";
 import { ReportIssuePage } from "./pages/client/ReportIssuePage";
 import { TicketDetailPage } from "./pages/client/TicketDetailPage";
@@ -62,7 +67,7 @@ import { KnowledgeDetailPage } from "./pages/KnowledgeDetailPage";
 import { KnowledgePage } from "./pages/KnowledgePage";
 import { LoginPage } from "./pages/LoginPage";
 import { SetPasswordPage } from "./pages/SetPasswordPage";
-import { SocialCallbackPage } from "./pages/SocialCallbackPage";
+import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { UsersPage } from "./pages/UsersPage";
 import { MonitoringPage } from "./pages/MonitoringPage";
 import { NotificationSoundsPage } from "./pages/NotificationSoundsPage";
@@ -75,8 +80,13 @@ import { SiteDetailPage } from "./pages/SiteDetailPage";
 import { SitesPage } from "./pages/SitesPage";
 import { SlaPoliciesPage } from "./pages/SlaPoliciesPage";
 import { SupportGroupsPage } from "./pages/SupportGroupsPage";
+import { IssueReportingPage } from "./pages/IssueReportingPage";
 import { VendorCaseDetailPage } from "./pages/VendorCaseDetailPage";
 import { VendorsPage } from "./pages/VendorsPage";
+import { ZabbixHostPage } from "./pages/ZabbixHostPage";
+import { ZabbixPage } from "./pages/ZabbixPage";
+import { ZabbixSettingsPage } from "./pages/ZabbixSettingsPage";
+import { ZABBIX_ADMIN_ROLES, ZABBIX_VIEW_ROLES } from "./api/zabbix";
 
 const DRAWER_WIDTH = 248;
 
@@ -96,6 +106,8 @@ interface NavItem {
   label: string;
   to: string;
   icon: ReactNode;
+  /** Only shown to these roles (display only — the API enforces access). */
+  roles?: string[];
 }
 
 interface NavGroup {
@@ -137,6 +149,14 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <GroupsOutlinedIcon fontSize="small" />,
       },
       {
+        label: "Issue reporting",
+        to: "/issue-reporting",
+        icon: <ReportProblemOutlinedIcon fontSize="small" />,
+        // Mirrors ISSUE_REPORTING_VIEW_ROLES on the API: admins and the
+        // service desk configure the client's report form; engineers don't.
+        roles: ["SUPER_ADMIN", "DELIVERY_OPS_MANAGER", "SERVICE_DESK_NOC"],
+      },
+      {
         label: "Team & Shifts",
         to: "/shifts",
         icon: <AccessTimeOutlinedIcon fontSize="small" />,
@@ -147,6 +167,12 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Monitoring",
     items: [
       {
+        label: "Zabbix",
+        to: "/zabbix",
+        icon: <MonitorHeartOutlinedIcon fontSize="small" />,
+        roles: ZABBIX_VIEW_ROLES,
+      },
+      {
         label: "Alerts",
         to: "/alerts",
         icon: <NotificationsActiveOutlinedIcon fontSize="small" />,
@@ -156,6 +182,12 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Alert insights",
         to: "/alert-insights",
         icon: <InsightsOutlinedIcon fontSize="small" />,
+      },
+      {
+        label: "Zabbix settings",
+        to: "/zabbix/settings",
+        icon: <SettingsInputComponentOutlinedIcon fontSize="small" />,
+        roles: ZABBIX_ADMIN_ROLES,
       },
     ],
   },
@@ -181,7 +213,10 @@ const NAV_GROUPS: NavGroup[] = [
 
 function visibleNavGroups(): NavGroup[] {
   const role = getCurrentUserRole();
-  return NAV_GROUPS.filter((g) => !g.roles || (role !== null && g.roles.includes(role)));
+  const allowed = (roles?: string[]) => !roles || (role !== null && roles.includes(role));
+  return NAV_GROUPS.filter((g) => allowed(g.roles))
+    .map((g) => ({ ...g, items: g.items.filter((item) => allowed(item.roles)) }))
+    .filter((g) => g.items.length > 0);
 }
 
 /** Exact match for "/" (else every route would highlight it too); prefix match otherwise. */
@@ -385,10 +420,14 @@ function AuthenticatedLayout() {
   if (!getStoredToken()) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
+  // An admin-set password must be replaced first (the API enforces it too).
+  if (passwordChangeRequired()) {
+    return <Navigate to="/auth/change-password" replace />;
+  }
   // The client role gets a purpose-built portal (ClientLayout), not the
   // internal ops console — none of the fourteen modules below are theirs.
   if (getCurrentUserRole() === "CLIENT_MANAGER_VIEWER") {
-    return <Navigate to="/client/report" replace />;
+    return <Navigate to="/client/home" replace />;
   }
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
@@ -406,11 +445,15 @@ function AuthenticatedLayout() {
 export function App() {
   return (
     <Routes>
+      <Route path="/account/email" element={<SendingEmailPage />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/auth/callback" element={<SocialCallbackPage />} />
+      <Route path="/auth/change-password" element={<ChangePasswordPage />} />
       <Route path="/auth/set-password" element={<SetPasswordPage />} />
       <Route element={<ClientLayout />}>
+        <Route path="/client" element={<Navigate to="/client/home" replace />} />
+        <Route path="/client/home" element={<ClientHomePage />} />
         <Route path="/client/report" element={<ReportIssuePage />} />
+        <Route path="/client/reports" element={<ClientReportsPage />} />
         <Route path="/client/tickets" element={<MyTicketsPage />} />
         <Route path="/client/tickets/:id" element={<TicketDetailPage />} />
       </Route>
@@ -426,11 +469,15 @@ export function App() {
         <Route path="/sla-policies" element={<SlaPoliciesPage />} />
         <Route path="/notification-sounds" element={<NotificationSoundsPage />} />
         <Route path="/support-groups" element={<SupportGroupsPage />} />
+        <Route path="/issue-reporting" element={<IssueReportingPage />} />
         <Route path="/shifts" element={<ShiftsPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/alerts/:id" element={<AlertDetailPage />} />
         <Route path="/alert-rules" element={<AlertRulesPage />} />
         <Route path="/alert-insights" element={<MonitoringPage />} />
+        <Route path="/zabbix" element={<ZabbixPage />} />
+        <Route path="/zabbix/settings" element={<ZabbixSettingsPage />} />
+        <Route path="/zabbix/hosts/:hostId" element={<ZabbixHostPage />} />
         <Route path="/changes" element={<ChangesPage />} />
         <Route path="/changes/:id" element={<ChangeDetailPage />} />
         <Route path="/vendors" element={<VendorsPage />} />

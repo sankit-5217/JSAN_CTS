@@ -1,6 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { Type } from "class-transformer";
-import { IsInt, IsOptional, Max, Min } from "class-validator";
+import { Transform, Type } from "class-transformer";
+import { IsBoolean, IsInt, IsOptional, Max, Min } from "class-validator";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -22,4 +22,14 @@ export class ListSitesQueryDto {
   @IsInt()
   @Min(0)
   offset?: number = 0;
+
+  @ApiProperty({
+    required: false,
+    default: false,
+    description: "Include archived (deleted) sites — honoured for Super Admin only",
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === "true")
+  @IsBoolean()
+  includeArchived?: boolean;
 }

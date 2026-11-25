@@ -18,6 +18,7 @@ import {
   Typography,
 } from "@mui/material";
 import { apiGet } from "../api/client";
+import { formatDateTime } from "../time/clock";
 
 // Literal unions mirroring the Prisma enums — see IncidentsPage.tsx for why
 // these aren't imported from shared-types.
@@ -33,6 +34,8 @@ interface AlertRow {
   severity: string;
   state: string;
   fingerprint: string;
+  summary: string | null;
+  componentKey: string | null;
   lastSeenAt: string;
   correlatedIncidentId: string | null;
 }
@@ -165,6 +168,12 @@ export function AlertsPage() {
                   <Link component={RouterLink} to={`/alerts/${a.id}`}>
                     {a.alertType}
                   </Link>
+                  {(a.componentKey || a.summary) && (
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      {a.componentKey ? `${a.componentKey} · ` : ""}
+                      {a.summary}
+                    </Typography>
+                  )}
                 </TableCell>
                 <TableCell>{a.source}</TableCell>
                 <TableCell>
@@ -176,7 +185,7 @@ export function AlertsPage() {
                 </TableCell>
                 <TableCell>{a.state}</TableCell>
                 <TableCell>{a.ciId ? (cisById[a.ciId] ?? a.ciId) : "—"}</TableCell>
-                <TableCell>{new Date(a.lastSeenAt).toLocaleString()}</TableCell>
+                <TableCell>{formatDateTime(a.lastSeenAt)}</TableCell>
                 <TableCell>
                   {a.correlatedIncidentId ? (
                     <Link component={RouterLink} to={`/incidents/${a.correlatedIncidentId}`}>

@@ -11,6 +11,7 @@ import {
   Typography,
 } from "@mui/material";
 import { apiGet } from "../api/client";
+import { formatDateTime } from "../time/clock";
 
 interface AlertRecord {
   id: string;
@@ -25,6 +26,9 @@ interface AlertRecord {
   firstSeenAt: string;
   lastSeenAt: string;
   rawReference: string | null;
+  summary: string | null;
+  componentKey: string | null;
+  details: Record<string, unknown> | null;
   correlatedIncidentId: string | null;
 }
 
@@ -85,12 +89,18 @@ export function AlertDetailPage() {
             />
             <Chip size="small" label={alert.state} />
           </Stack>
+          {alert.summary && (
+            <Typography variant="body1" sx={{ mb: 1 }}>
+              {alert.summary}
+            </Typography>
+          )}
+          {row("Failing component", alert.componentKey ?? "—")}
           {row("Source", `${alert.source} · ${alert.externalEventId}`)}
           {row("Site", alert.siteId ?? "unresolved")}
           {row("CI", alert.ciId ?? "unresolved")}
           {row("Fingerprint", <code>{alert.fingerprint}</code>)}
-          {row("First seen", new Date(alert.firstSeenAt).toLocaleString())}
-          {row("Last seen", new Date(alert.lastSeenAt).toLocaleString())}
+          {row("First seen", formatDateTime(alert.firstSeenAt))}
+          {row("Last seen", formatDateTime(alert.lastSeenAt))}
           {row("Raw reference", alert.rawReference ?? "—")}
           {row(
             "Correlated incident",
@@ -104,6 +114,32 @@ export function AlertDetailPage() {
           )}
         </CardContent>
       </Card>
+      {alert.details && (
+        <Card sx={{ mt: 2 }}>
+          <CardContent>
+            <Typography variant="subtitle1" gutterBottom>
+              Source details
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              What the monitoring source reported (labels, trap fields, component status). Metrics
+              and logs stay in the monitoring tool.
+            </Typography>
+            <Box
+              component="pre"
+              sx={{
+                m: 0,
+                p: 1.5,
+                bgcolor: "action.hover",
+                borderRadius: 1,
+                overflowX: "auto",
+                fontSize: 12,
+              }}
+            >
+              {JSON.stringify(alert.details, null, 2)}
+            </Box>
+          </CardContent>
+        </Card>
+      )}
     </Box>
   );
 }

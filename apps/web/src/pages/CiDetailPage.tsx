@@ -18,6 +18,7 @@ import {
 } from "@mui/material";
 import { apiGet, apiPatch, apiPost } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
+import { formatDateTime } from "../time/clock";
 
 // Mirrors CisController's CMDB_WRITE_ROLES — UI-only gate (plan Decision 1),
 // same list as CisPage.tsx.
@@ -311,7 +312,7 @@ export function CiDetailPage() {
                 )}
                 {health.lastHeartbeatAt && (
                   <Typography variant="body2" color="text.secondary">
-                    Last reported {new Date(health.lastHeartbeatAt).toLocaleString()}
+                    Last reported {formatDateTime(health.lastHeartbeatAt)}
                   </Typography>
                 )}
               </Stack>

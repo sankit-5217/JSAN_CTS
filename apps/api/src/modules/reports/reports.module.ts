@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
+import { ClientPerformanceService } from "./client-performance.service";
+import { ClientPortalService } from "./client-portal.service";
 import { ReportsController } from "./reports.controller";
 import { ReportsService } from "./reports.service";
 
@@ -16,7 +18,7 @@ import { ReportsService } from "./reports.service";
 @Module({
   imports: [AuthModule],
   controllers: [ReportsController],
-  providers: [ReportsService],
+  providers: [ReportsService, ClientPortalService, ClientPerformanceService],
   exports: [ReportsService],
 })
 export class ReportsModule {}

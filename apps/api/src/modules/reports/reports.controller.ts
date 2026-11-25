@@ -1,14 +1,20 @@
 import { Controller, Get, Header, Query, UseGuards } from "@nestjs/common";
-import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { UserRole } from "@prisma/client";
 import { AuthzService } from "../auth/authz.service";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
+import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { ownIncidentsFilter } from "../incidents/incident-visibility";
+import { ClientPerformanceService } from "./client-performance.service";
+import { ClientPortalService } from "./client-portal.service";
 import { QueryResponseTrendDto } from "./dto/query-response-trend.dto";
 import { ReportsService } from "./reports.service";
 
-// Read-only for every authenticated role — no @Roles restriction, matching
+// Read-only for every authenticated role — no @Roles restriction (bar
+// client-portal at the bottom), matching
 // AUDITOR_READ_ONLY/CLIENT_MANAGER_VIEWER's need to see operational health
 // too (spec §4). Site-scoped the same way as incidents/cmdb.
 @ApiTags("reports")
@@ -19,12 +25,14 @@ export class ReportsController {
   constructor(
     private readonly reportsService: ReportsService,
     private readonly authzService: AuthzService,
+    private readonly clientPortalService: ClientPortalService,
+    private readonly clientPerformanceService: ClientPerformanceService,
   ) {}
 
   @Get("command-center")
   async getCommandCenter(@CurrentUser() user: AuthenticatedUser) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
-    return this.reportsService.getCommandCenterSummary(accessibleSiteIds);
+    return this.reportsService.getCommandCenterSummary(accessibleSiteIds, ownIncidentsFilter(user));
   }
 
   // Same audience/scope as command-center above — a downloadable snapshot
@@ -34,7 +42,10 @@ export class ReportsController {
   @Header("Content-Disposition", 'attachment; filename="operational-health-report.csv"')
   async downloadOperationalHealthCsv(@CurrentUser() user: AuthenticatedUser): Promise<string> {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
-    return this.reportsService.generateOperationalHealthCsv(accessibleSiteIds);
+    return this.reportsService.generateOperationalHealthCsv(
+      accessibleSiteIds,
+      ownIncidentsFilter(user),
+    );
   }
 
   // Same audience/scope as the other reports above.
@@ -44,7 +55,11 @@ export class ReportsController {
     @Query() query: QueryResponseTrendDto,
   ) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
-    return this.reportsService.getResponseTrend(accessibleSiteIds, query.windowDays ?? 30);
+    return this.reportsService.getResponseTrend(
+      accessibleSiteIds,
+      query.windowDays ?? 30,
+      ownIncidentsFilter(user),
+    );
   }
 
   // Same audience/scope as the other reports above. Reuses
@@ -57,5 +72,33 @@ export class ReportsController {
   ) {
     const accessibleSiteIds = await this.authzService.getAccessibleSiteIds(user);
     return this.reportsService.getAlertInsights(accessibleSiteIds, query.windowDays ?? 30);
+  }
+
+  // The one role-restricted report: it's built around "tickets I reported",
+  // which only a customer has. A customer always has an explicit site list;
+  // if that ever came back as "all sites" this fails closed to none.
+  @Get("client-portal")
+  @Roles(UserRole.CLIENT_MANAGER_VIEWER)
+  @ApiOperation({
+    summary:
+      "Client portal overview: service desk contacts, on-duty team and state per site, SLA status and live activity per reported ticket",
+  })
+  async getClientPortal(@CurrentUser() user: AuthenticatedUser) {
+    const accessibleSiteIds = (await this.authzService.getAccessibleSiteIds(user)) ?? [];
+    return this.clientPortalService.getOverview(user, accessibleSiteIds);
+  }
+
+  // The customer-facing performance report: how the tickets *they* raised
+  // have been handled — counts, whether we hit our targets, and how long
+  // it took. Scoped to their own reports, like every other client view.
+  @Get("client-performance")
+  @Roles(UserRole.CLIENT_MANAGER_VIEWER)
+  @ApiOperation({
+    summary:
+      "Client performance report over the tickets the caller reported: totals, SLA outcomes, average acknowledge and resolve times, monthly trend",
+  })
+  async getClientPerformance(@CurrentUser() user: AuthenticatedUser) {
+    const accessibleSiteIds = (await this.authzService.getAccessibleSiteIds(user)) ?? [];
+    return this.clientPerformanceService.getReport(user, accessibleSiteIds);
   }
 }

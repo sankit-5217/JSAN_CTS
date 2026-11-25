@@ -7,11 +7,12 @@ import {
   Param,
   Post,
   Query,
+  Type,
   UseGuards,
-  UsePipes,
   ValidationPipe,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { SkipThrottle } from "@nestjs/throttler";
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
@@ -19,6 +20,7 @@ import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
+import { AuthzService } from "../auth/authz.service";
 import { AlertsService } from "./alerts.service";
 import { AlertmanagerWebhookDto } from "./dto/alertmanager-webhook.dto";
 import { IngestAlertDto } from "./dto/ingest-alert.dto";
@@ -32,9 +34,18 @@ import { ZabbixWebhookBatchDto } from "./dto/zabbix-webhook.dto";
 // the ingest roles; the authenticated principal is the audit actor. Read
 // endpoints are open to any authenticated user.
 //
-// The `sources/*` routes relax `forbidNonWhitelisted` (via a route-scoped pipe)
-// because Zabbix media-type payloads and Alertmanager webhooks carry extra
-// fields we deliberately ignore rather than 400 on.
+// The `sources/*` routes strip unknown fields instead of rejecting them:
+// Zabbix media-type payloads and Alertmanager webhooks carry extra fields (and
+// grow new ones between releases) that we deliberately ignore rather than 400 on.
+//
+// The global ValidationPipe (main.ts) forbids unknown fields and runs before any
+// route pipe, so it cannot be relaxed after the fact. These bodies are therefore
+// declared as `Lenient<Dto>` — a non-class type, which the global pipe leaves
+// alone — and validated against the DTO by `lenientBody` on the parameter.
+type Lenient<T> = { [K in keyof T]: T[K] };
+
+const lenientBody = (dto: Type<unknown>) =>
+  new ValidationPipe({ whitelist: true, transform: true, expectedType: dto });
 const ALERT_INGEST_ROLES = [
   UserRole.SUPER_ADMIN,
   UserRole.SERVICE_DESK_NOC,
@@ -47,9 +58,14 @@ const ALERT_INGEST_ROLES = [
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("alerts")
 export class AlertsController {
-  constructor(private readonly alertsService: AlertsService) {}
+  constructor(
+    private readonly alertsService: AlertsService,
+    private readonly authz: AuthzService,
+  ) {}
 
   @Post("ingest")
+  // Machine intake: never 429 a monitoring source (it would drop the event).
+  @SkipThrottle()
   @Roles(...ALERT_INGEST_ROLES)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -64,12 +80,14 @@ export class AlertsController {
   }
 
   @Post("sources/zabbix")
+  // Machine intake: never 429 a monitoring source (it would drop the event).
+  @SkipThrottle()
   @Roles(...ALERT_INGEST_ROLES)
   @HttpCode(HttpStatus.OK)
-  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  @ApiBody({ type: ZabbixWebhookBatchDto })
   @ApiOperation({ summary: "Normalize + ingest a batch of raw Zabbix webhook events" })
   ingestZabbix(
-    @Body() body: ZabbixWebhookBatchDto,
+    @Body(lenientBody(ZabbixWebhookBatchDto)) body: Lenient<ZabbixWebhookBatchDto>,
     @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId?: string,
   ) {
@@ -77,12 +95,14 @@ export class AlertsController {
   }
 
   @Post("sources/alertmanager")
+  // Machine intake: never 429 a monitoring source (it would drop the event).
+  @SkipThrottle()
   @Roles(...ALERT_INGEST_ROLES)
   @HttpCode(HttpStatus.OK)
-  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  @ApiBody({ type: AlertmanagerWebhookDto })
   @ApiOperation({ summary: "Normalize + ingest a Prometheus Alertmanager webhook delivery" })
   ingestAlertmanager(
-    @Body() body: AlertmanagerWebhookDto,
+    @Body(lenientBody(AlertmanagerWebhookDto)) body: Lenient<AlertmanagerWebhookDto>,
     @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId?: string,
   ) {
@@ -90,25 +110,30 @@ export class AlertsController {
   }
 
   @Post("sources/snmp")
+  // Machine intake: never 429 a monitoring source (it would drop the event).
+  @SkipThrottle()
   @Roles(...ALERT_INGEST_ROLES)
   @HttpCode(HttpStatus.OK)
-  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  @ApiBody({ type: SnmpTrapBatchDto })
   @ApiOperation({ summary: "Normalize + ingest a batch of parsed SNMP traps from the collector" })
   ingestSnmp(
-    @Body() body: SnmpTrapBatchDto,
+    @Body(lenientBody(SnmpTrapBatchDto)) body: Lenient<SnmpTrapBatchDto>,
     @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId?: string,
   ) {
     return this.alertsService.ingestFromSnmp(body.traps, { actorId: user.id, correlationId });
   }
 
+  // Reads follow site access: a site-limited user (a client included) sees
+  // only alerts on their sites; alerts not yet matched to a site are for
+  // all-sites roles only.
   @Get()
-  findAll(@Query() query: QueryAlertsDto) {
-    return this.alertsService.findAll(query);
+  async findAll(@Query() query: QueryAlertsDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.alertsService.findAll(query, await this.authz.getAccessibleSiteIds(user));
   }
 
   @Get(":id")
-  findOne(@Param("id") id: string) {
-    return this.alertsService.findOne(id);
+  async findOne(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.alertsService.findOneScoped(id, await this.authz.getAccessibleSiteIds(user));
   }
 }

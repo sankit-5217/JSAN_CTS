@@ -3,7 +3,6 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
 import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
 import { ApiTokensService } from "./api-tokens.service";
-import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { AuthzService } from "./authz.service";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
@@ -11,9 +10,6 @@ import { RolesGuard } from "./guards/roles.guard";
 import { SiteScopeGuard } from "./guards/site-scope.guard";
 import { PasswordAuthController } from "./password-auth.controller";
 import { PasswordAuthService } from "./password-auth.service";
-import { SocialAuthController } from "./social/social-auth.controller";
-import { SocialIdentityService } from "./social/social-identity.service";
-import { SocialProvidersService } from "./social/social-providers.service";
 import { ApiTokenStrategy } from "./strategies/api-token.strategy";
 import { JwtStrategy } from "./strategies/jwt.strategy";
 import { UserAdminController } from "./user-admin.controller";
@@ -26,11 +22,11 @@ import { UsersService } from "./users.service";
  * Owns: identity mapping, sessions/tokens, roles (spec §12).
  * Must not own: incident business rules.
  *
- * People sign in with email + password (PasswordAuthService: scrypt,
- * lockout, emailed invite/reset links) or Google / Microsoft / GitHub
- * (SocialAuthController; existing users only, matched by verified email and
- * then by linked identity). Both end in the same app JWT. Machines use
- * admin-issued API tokens (ApiTokensService). JwtAuthGuard accepts either.
+ * People sign in with email + password only (PasswordAuthService: scrypt,
+ * lockout). A Super Admin adds a user either with a starting password (the
+ * user must change it at first sign-in) or with an emailed invite link.
+ * Machines use admin-issued API tokens (ApiTokensService). JwtAuthGuard
+ * accepts either.
  *
  * Site-scope authorization: AuthzService resolves which sites a user can
  * see (spec §4's per-role "Typical Access" column); SiteScopeGuard
@@ -48,19 +44,11 @@ import { UsersService } from "./users.service";
       }),
     }),
   ],
-  controllers: [
-    AuthController,
-    PasswordAuthController,
-    SocialAuthController,
-    UsersController,
-    UserAdminController,
-  ],
+  controllers: [PasswordAuthController, UsersController, UserAdminController],
   providers: [
     AuthService,
     AuthzService,
     PasswordAuthService,
-    SocialProvidersService,
-    SocialIdentityService,
     ApiTokensService,
     UsersService,
     UserAdminService,

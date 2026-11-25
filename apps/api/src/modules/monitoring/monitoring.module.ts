@@ -1,8 +1,17 @@
 import { Module } from "@nestjs/common";
 import { AlertsModule } from "../alerts/alerts.module";
 import { AuthModule } from "../auth/auth.module";
+import { CmdbModule } from "../cmdb/cmdb.module";
+import {
+  AgentEnrollmentController,
+  AgentEnrollmentPublicController,
+} from "./agent-enrollment/agent-enrollment.controller";
+import { AgentEnrollmentService } from "./agent-enrollment/agent-enrollment.service";
 import { MonitoringController } from "./monitoring.controller";
 import { MonitoringService } from "./monitoring.service";
+import { ZabbixController } from "./zabbix/zabbix.controller";
+import { ZabbixResyncService } from "./zabbix/zabbix-resync.service";
+import { ZabbixService } from "./zabbix/zabbix.service";
 
 /**
  * Owner: Dev B (Integrations, Hardware & Governance).
@@ -13,10 +22,21 @@ import { MonitoringService } from "./monitoring.service";
  * platform); ticket state.
  *
  * POST /monitoring/health-snapshots — batch upsert (unknown CI rejected
- * per-item), service-account JWT + an ingest role; audit event per snapshot.
+ * per-item), service-account JWT + an ingest role; audited when the health
+ * changes (not on every unchanged poll).
  * GET /monitoring/health-snapshots/:ciCode — current snapshot for a CI.
  * POST /monitoring/collector-heartbeat — site collector liveness ping (spec §26),
- * stored as an append-only COLLECTOR_HEARTBEAT audit event per site.
+ * kept as the last ping per site (collector_heartbeats), not in the audit log.
+ * Zabbix re-sync (zabbix/zabbix-resync.service.ts): every 2 minutes, brings
+ * OpsDesk's Zabbix alerts back in step with Zabbix's open problems, so a
+ * missed webhook delivery never loses a problem or leaves a stale alert.
+ * Agent enrollment (agent-enrollment/): per-site links for the one-line
+ * installer (curl | sudo bash, or PowerShell). Each machine that registers
+ * gets its own Zabbix host + PSK (via ZabbixService) and a CMDB record (via
+ * CmdbService); links expire, can be revoked and are audited.
+ * Zabbix (zabbix/): admin-editable connection (ZabbixConnection, token
+ * encrypted at rest) plus live, site-scoped reads of hosts / problems / latest
+ * values / history and an audited problem acknowledge — proxied, never stored.
  * TODO: if Dev A treats HealthSnapshot as cmdb's to write, the upsert moves
  * behind CmdbService — the ingest contract stays.
  *
@@ -30,9 +50,14 @@ import { MonitoringService } from "./monitoring.service";
  * a failure here never fails the health-snapshot write itself.
  */
 @Module({
-  imports: [AuthModule, AlertsModule],
-  controllers: [MonitoringController],
-  providers: [MonitoringService],
+  imports: [AuthModule, AlertsModule, CmdbModule],
+  controllers: [
+    MonitoringController,
+    ZabbixController,
+    AgentEnrollmentController,
+    AgentEnrollmentPublicController,
+  ],
+  providers: [MonitoringService, ZabbixService, ZabbixResyncService, AgentEnrollmentService],
   exports: [MonitoringService],
 })
 export class MonitoringModule {}

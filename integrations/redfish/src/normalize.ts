@@ -132,6 +132,11 @@ export function normalizeRedfishSystem(bundle: RedfishSystemBundle): HealthSnaps
   const degraded: DegradedComponent[] = [];
 
   pushIfDegraded(degraded, "SYSTEM", system.Name ?? system.Id ?? "System", system.Status);
+  if (degraded.length > 0) {
+    // the ComputerSystem's own Health reflects its children (a failed drive
+    // turns it Critical too) — flag it as the rollup, not a separate fault
+    degraded[0].rollup = true;
+  }
   pushIfDegraded(degraded, "PROCESSOR", "ProcessorSummary", system.ProcessorSummary?.Status);
   pushIfDegraded(degraded, "MEMORY", "MemorySummary", system.MemorySummary?.Status);
 

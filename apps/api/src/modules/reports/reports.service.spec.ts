@@ -404,3 +404,31 @@ describe("ReportsService.getCommandCenterSummary — site scoping", () => {
     );
   });
 });
+
+describe("ReportsService — own-incidents scope", () => {
+  const scope = { OR: [{ ownerUserId: "engineer-1" }] };
+
+  it("counts every incident the own-work caller owns or is offered, at any site", async () => {
+    const { service, prisma } = makeService();
+    await service.getCommandCenterSummary(["site-a"], scope);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { AND: scope } }),
+    );
+  });
+
+  it("narrows the response-trend incident query the same way", async () => {
+    const { service, prisma } = makeService();
+    await service.getResponseTrend(["site-a"], 7, scope);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ AND: scope }) }),
+    );
+  });
+
+  it("leaves the incident query site-wide when no scope is given", async () => {
+    const { service, prisma } = makeService();
+    await service.getCommandCenterSummary(["site-a"]);
+    expect(prisma.incident.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { siteId: { in: ["site-a"] } } }),
+    );
+  });
+});

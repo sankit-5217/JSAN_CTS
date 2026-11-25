@@ -16,7 +16,7 @@ import {
   Typography,
 } from "@mui/material";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
-import { apiDelete, apiGet, apiPost } from "../api/client";
+import { apiDelete, apiGet, apiPost, apiPut } from "../api/client";
 import { getCurrentUserRole } from "../api/jwt";
 
 // Mirrors SupportGroupsController's SUPPORT_GROUP_WRITE_ROLES — UI-only gate
@@ -27,6 +27,9 @@ interface SupportGroup {
   id: string;
   name: string;
   createdAt: string;
+  /** true on the one group new client reports land in by default. */
+  isDefaultAssignee: boolean | null;
+  isClientSelectable: boolean;
 }
 
 interface Member {
@@ -159,6 +162,32 @@ export function SupportGroupsPage() {
 
   const selectedGroup = groups.find((g) => g.id === selectedGroupId) ?? null;
 
+  // --- Default assignee group ("Assignee Group: Service Desk is default") --
+  const makeDefault = async () => {
+    if (!selectedGroup) return;
+    setActionError(null);
+    try {
+      await apiPost(`/support-groups/${selectedGroup.id}/default`);
+      refetchGroups();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  // --- Offered to clients as an Assignee Group --------------------------
+  const toggleClientSelectable = async () => {
+    if (!selectedGroup) return;
+    setActionError(null);
+    try {
+      await apiPut(`/support-groups/${selectedGroup.id}/client-selectable`, {
+        isClientSelectable: !selectedGroup.isClientSelectable,
+      });
+      refetchGroups();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <Box>
       <Typography variant="h4" sx={{ mb: 2 }}>
@@ -195,6 +224,12 @@ export function SupportGroupsPage() {
                   sx={{ borderRadius: 1, mb: 0.5 }}
                 >
                   <ListItemText primary={g.name} />
+                  {g.isDefaultAssignee && (
+                    <Chip size="small" color="primary" variant="outlined" label="Default" />
+                  )}
+                  {g.isClientSelectable && (
+                    <Chip size="small" variant="outlined" label="Clients" sx={{ ml: 0.5 }} />
+                  )}
                 </ListItemButton>
               ))}
               {groups.length === 0 && (
@@ -236,16 +271,47 @@ export function SupportGroupsPage() {
                 {selectedGroup ? `${selectedGroup.name} — members` : "Select a group"}
               </Typography>
               {selectedGroup && canWrite && (
-                <Button
-                  size="small"
-                  color="error"
-                  startIcon={<DeleteOutlineIcon fontSize="small" />}
-                  onClick={deleteGroup}
-                >
-                  Delete group
-                </Button>
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    size="small"
+                    variant={selectedGroup.isDefaultAssignee ? "contained" : "outlined"}
+                    disabled={Boolean(selectedGroup.isDefaultAssignee)}
+                    onClick={makeDefault}
+                  >
+                    {selectedGroup.isDefaultAssignee
+                      ? "Default for new reports"
+                      : "Make default for new reports"}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant={selectedGroup.isClientSelectable ? "contained" : "outlined"}
+                    onClick={toggleClientSelectable}
+                  >
+                    {selectedGroup.isClientSelectable
+                      ? "Clients can pick (turn off)"
+                      : "Let clients pick it"}
+                  </Button>
+                  <Button
+                    size="small"
+                    color="error"
+                    startIcon={<DeleteOutlineIcon fontSize="small" />}
+                    onClick={deleteGroup}
+                  >
+                    Delete group
+                  </Button>
+                </Stack>
               )}
             </Stack>
+            {selectedGroup?.isDefaultAssignee && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                New client reports are assigned to this group unless the reporter picks another.
+              </Typography>
+            )}
+            {selectedGroup?.isClientSelectable && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                Offered as an Assignee Group on the client portal's issue template.
+              </Typography>
+            )}
             {selectedGroup && (
               <>
                 <Stack spacing={1} sx={{ mb: 2 }}>

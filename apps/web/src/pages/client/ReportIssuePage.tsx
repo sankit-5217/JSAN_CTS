@@ -6,12 +6,25 @@ import {
   Button,
   Card,
   CardContent,
+  Chip,
   MenuItem,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
-import { apiGet, apiPost } from "../../api/client";
+import AttachFileOutlinedIcon from "@mui/icons-material/AttachFileOutlined";
+import { apiGet, apiPost, apiUpload, getStoredToken } from "../../api/client";
+import { decodeJwtPayload } from "../../api/jwt";
+import {
+  clientGroups,
+  draftProblems,
+  EMPTY_DRAFT,
+  toRequestBody,
+  type IssueCatalog,
+  type ReportDraft,
+} from "./issueReporting";
+import { IssueTemplateForm, type TemplateGroup } from "./IssueTemplateForm";
+import { describeFailedUpload } from "./conversation";
 
 interface Site {
   id: string;
@@ -19,153 +32,222 @@ interface Site {
   name: string;
 }
 
+type SupportGroup = TemplateGroup & { isClientSelectable: boolean };
+
 interface CreatedIncident {
   id: string;
 }
 
-// Mirrors CUSTOMER_ISSUE_CATEGORIES in
-// apps/api/src/modules/incidents/dto/create-incident-as-customer.dto.ts —
-// a deliberately small, plain-language set. The full free-text `category`
-// field on the internal create form is a triage concept, not something a
-// site POC should have to guess at.
-const ISSUE_CATEGORIES = [
-  { value: "HARDWARE_FAILURE", label: "Hardware fault (server, disk, PSU...)" },
-  { value: "NETWORK", label: "Network / connectivity" },
-  { value: "POWER", label: "Power" },
-  { value: "COOLING", label: "Cooling / temperature" },
-  { value: "ACCESS_REQUEST", label: "Access request" },
-  { value: "OTHER", label: "Something else" },
-];
-
 /**
- * The client portal's one write: a site POC describing a problem in their
- * own words. No priority/impact/urgency picker on purpose — that's a
- * triage call Service Desk makes after intake (see
- * IncidentsService.createFromCustomer), not something a customer should
- * have to guess correctly.
+ * The client portal's "Report an issue" page: the issue reporting
+ * template (IssueTemplateForm) in create mode, plus the site and the files
+ * to attach. Status is shown, not picked: a new report is always "New"
+ * (the backend state machine owns status). Reporter is the signed-in
+ * account.
  */
 export function ReportIssuePage() {
   const navigate = useNavigate();
+  const token = getStoredToken();
+  const reporterEmail = token ? (decodeJwtPayload(token)?.email ?? "") : "";
+
+  const [catalog, setCatalog] = useState<IssueCatalog | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
+  const [groups, setGroups] = useState<SupportGroup[]>([]);
   const [siteId, setSiteId] = useState("");
-  const [category, setCategory] = useState(ISSUE_CATEGORIES[0].value);
-  const [shortDescription, setShortDescription] = useState("");
-  const [details, setDetails] = useState("");
+  const [draft, setDraft] = useState<ReportDraft>(EMPTY_DRAFT);
+  const [files, setFiles] = useState<File[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    apiGet<{ items: Site[] } | Site[]>("/sites")
-      .then((res) => {
-        const items = Array.isArray(res) ? res : res.items;
+    Promise.all([
+      apiGet<IssueCatalog>("/issue-reporting/catalog"),
+      apiGet<{ items: Site[] } | Site[]>("/sites"),
+      apiGet<SupportGroup[]>("/support-groups"),
+    ])
+      .then(([cat, siteRes, groupRes]) => {
+        const items = Array.isArray(siteRes) ? siteRes : siteRes.items;
+        setCatalog(cat);
         setSites(items);
-        if (items.length === 1) {
-          setSiteId(items[0].id);
-        }
+        setGroups(clientGroups(groupRes));
+        // No site is pre-selected, even when only one is offered: the
+        // reporter always picks it. It can't be changed once raised.
+        // "Service Desk is default": pre-select the flagged group.
+        setDraft((d) => ({ ...d, ownerGroupId: cat.defaultAssigneeGroupId ?? "" }));
       })
-      .catch((err: Error) => setError(err.message));
+      .catch((err: Error) => setLoadError(err.message));
   }, []);
 
-  const canSubmit = siteId && category && shortDescription.trim().length >= 2 && !submitting;
+  const problems = draftProblems(draft, siteId);
+  const canSubmit = problems.length === 0 && !submitting && catalog !== null;
 
   const handleSubmit = async () => {
     setError(null);
     setSubmitting(true);
+    let incident: CreatedIncident;
     try {
-      const incident = await apiPost<CreatedIncident>("/incidents/customer-report", {
-        siteId,
-        category,
-        shortDescription: shortDescription.trim(),
-        details: details.trim() || undefined,
-      });
-      navigate(`/client/tickets/${incident.id}`, { state: { justCreated: true } });
+      incident = await apiPost<CreatedIncident>(
+        "/incidents/customer-report",
+        toRequestBody(draft, siteId),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
+      return;
     }
+    // The ticket exists now; a failed upload shouldn't lose it. The ticket
+    // page lets them attach again.
+    const failedUploads: string[] = [];
+    for (const file of files) {
+      try {
+        await apiUpload(`/incidents/${incident.id}/attachments`, file);
+      } catch (err) {
+        failedUploads.push(describeFailedUpload(file, err));
+      }
+    }
+    navigate(`/client/tickets/${incident.id}`, { state: { justCreated: true, failedUploads } });
   };
 
-  return (
-    <Box>
-      <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
-        Report an issue
-      </Typography>
-      <Typography color="text.secondary" sx={{ mb: 3 }}>
-        Tell us what's happening — our Service Desk will pick it up, classify it, and keep you
-        updated here.
-      </Typography>
+  if (loadError) {
+    return <Alert severity="error">Could not load the report form: {loadError}</Alert>;
+  }
+  if (!catalog) {
+    return <Typography color="text.secondary">Loading the report form...</Typography>;
+  }
 
-      <Card elevation={0} sx={{ borderRadius: 3, border: "1px solid", borderColor: "divider" }}>
-        <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+  const sitePicker = (
+    <TextField
+      select
+      size="small"
+      fullWidth
+      value={siteId}
+      onChange={(e) => setSiteId(e.target.value)}
+      disabled={sites.length === 0}
+      helperText={
+        sites.length === 0
+          ? "Your account isn't linked to a site yet. Ask your JSAN contact."
+          : undefined
+      }
+      SelectProps={{
+        displayEmpty: true,
+        renderValue: (v) =>
+          v ? (
+            (sites.find((s) => s.id === v)?.name ?? "")
+          ) : (
+            <Typography component="span" color="text.secondary">
+              Select a site
+            </Typography>
+          ),
+      }}
+      sx={{ "& .MuiInputBase-root": { bgcolor: "background.paper" } }}
+    >
+      {sites.map((s) => (
+        <MenuItem key={s.id} value={s.id}>
+          {s.name}
+        </MenuItem>
+      ))}
+    </TextField>
+  );
+
+  const attachmentPicker = (
+    <Box>
+      <Button
+        component="label"
+        variant="outlined"
+        size="small"
+        startIcon={<AttachFileOutlinedIcon />}
+        sx={{ textTransform: "none" }}
+      >
+        log file / screenshots / videos
+        <input
+          type="file"
+          hidden
+          multiple
+          onChange={(e) => {
+            const picked = Array.from(e.target.files ?? []);
+            setFiles((prev) => [...prev, ...picked]);
+            e.target.value = "";
+          }}
+        />
+      </Button>
+      {files.length > 0 && (
+        <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
+          {files.map((f, i) => (
+            <Chip
+              key={`${f.name}-${i}`}
+              size="small"
+              label={`${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`}
+              onDelete={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+            />
+          ))}
+        </Stack>
+      )}
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+        Up to 100 MB each. Stored securely with the ticket; only people on the ticket can open them.
+      </Typography>
+    </Box>
+  );
+
+  return (
+    <Box sx={{ display: "flex", flex: 1, flexDirection: "column", width: "100%", minWidth: 0 }}>
+      <Card
+        elevation={0}
+        sx={{
+          display: "flex",
+          flex: 1,
+          flexDirection: "column",
+          borderRadius: 3,
+          border: "1px solid",
+          borderColor: "divider",
+        }}
+      >
+        <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
             </Alert>
           )}
 
-          <Stack spacing={2.5}>
-            {sites.length > 1 && (
-              <TextField
-                select
-                label="Site"
-                value={siteId}
-                onChange={(e) => setSiteId(e.target.value)}
-                fullWidth
-              >
-                {sites.map((s) => (
-                  <MenuItem key={s.id} value={s.id}>
-                    {s.code} — {s.name}
-                  </MenuItem>
-                ))}
-              </TextField>
-            )}
-            {sites.length === 1 && (
-              <Typography variant="body2" color="text.secondary">
-                Site: {sites[0].code} — {sites[0].name}
-              </Typography>
-            )}
+          <IssueTemplateForm
+            compact
+            mode="create"
+            catalog={catalog}
+            draft={draft}
+            update={setDraft}
+            groups={groups}
+            reporter={reporterEmail}
+            site={sitePicker}
+            attachments={attachmentPicker}
+            status={
+              <TextField size="small" fullWidth value="New" InputProps={{ readOnly: true }} />
+            }
+          />
 
-            <TextField
-              select
-              label="What kind of issue is it?"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              fullWidth
-            >
-              {ISSUE_CATEGORIES.map((c) => (
-                <MenuItem key={c.value} value={c.value}>
-                  {c.label}
-                </MenuItem>
-              ))}
-            </TextField>
-
-            <TextField
-              label="Short summary"
-              placeholder="e.g. Server in Rack 3 is showing a red fault light"
-              value={shortDescription}
-              onChange={(e) => setShortDescription(e.target.value)}
-              fullWidth
-            />
-
-            <TextField
-              label="More detail (optional)"
-              placeholder="Anything else that might help — when it started, what you've already tried, etc."
-              value={details}
-              onChange={(e) => setDetails(e.target.value)}
-              multiline
-              minRows={4}
-              fullWidth
-            />
-
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={2}
+            alignItems={{ sm: "center" }}
+            sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: "divider" }}
+          >
             <Button
               variant="contained"
-              size="large"
+              size="medium"
               disabled={!canSubmit}
               onClick={handleSubmit}
-              sx={{ alignSelf: "flex-start", textTransform: "none", fontWeight: 600, px: 4 }}
+              sx={{ textTransform: "none", fontWeight: 600, px: 4 }}
             >
-              {submitting ? "Submitting..." : "Submit"}
+              {submitting
+                ? files.length > 0
+                  ? "Submitting and uploading..."
+                  : "Submitting..."
+                : "Submit"}
             </Button>
+            {problems.length > 0 && !submitting && (
+              <Typography variant="body2" color="text.secondary">
+                {problems[0]}
+              </Typography>
+            )}
           </Stack>
         </CardContent>
       </Card>

@@ -19,7 +19,6 @@ import { Roles } from "../auth/decorators/roles.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { AuthenticatedUser } from "../auth/types/jwt-payload.type";
-import { INCIDENT_ROUTING_ROLES } from "../incidents/incident-transitions";
 import { CategoryTeamsService } from "./category-teams.service";
 import { CreateCategoryTeamDto } from "./dto/create-category-team.dto";
 import { DeclineRoutingOfferDto } from "./dto/decline-routing-offer.dto";
@@ -67,22 +66,7 @@ const OFFER_RESPONDER_ROLES = [
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller("incidents")
 export class RoutingController {
-  constructor(
-    private readonly routingService: RoutingService,
-    private readonly offersService: RoutingOffersService,
-  ) {}
-
-  // Same roles as reassigning ownership — suggestions are only useful to
-  // whoever is allowed to act on them.
-  @Get(":id/routing-suggestions")
-  @Roles(...INCIDENT_ROUTING_ROLES)
-  @ApiOperation({
-    summary:
-      "Engineers on shift at the incident's site who hold every skill its category requires, least-loaded first",
-  })
-  suggest(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.routingService.suggestForIncident(id, user);
-  }
+  constructor(private readonly offersService: RoutingOffersService) {}
 
   @Get(":id/routing-offers")
   @Roles(...ROUTING_POLICY_READ_ROLES)

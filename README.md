@@ -15,7 +15,8 @@ Two developers, working from separate machines? Read **[CONTRIBUTING.md](CONTRIB
 - **Frontend**: React + TypeScript + Vite + MUI (`apps/web`).
 - **Database**: PostgreSQL via Prisma (`apps/api/prisma/schema.prisma`). Telemetry/logs stay in monitoring/log platforms, not Postgres.
 - **Queue/Cache**: Redis + BullMQ.
-- **Object storage**: S3-compatible (MinIO in dev) for attachments/evidence.
+- **Object storage**: S3-compatible (Railway Bucket) for attachments/evidence.
+- **Hosting**: Railway (Railpack builds, no Docker) — see `docs/runbooks/railway-deploy.md`.
 - **Integrations**: isolated adapters under `integrations/` (Redfish, Dell OME, Zabbix, Prometheus, SNMP, email) — never called directly from core ticket logic.
 
 See `docs/adr/` for the numbered architecture decisions and `docs/PROJECT_OVERVIEW.md` for the two-developer task split.
@@ -38,7 +39,7 @@ cts-dc-opsdesk/
 │   ├── snmp/
 │   └── email/
 ├── infra/
-│   ├── docker/      # Dockerfiles for api/web/worker
+│   ├── docker/      # collector.Dockerfile (on-site collector image only)
 │   └── migrations/  # notes on Prisma migration workflow
 ├── docs/
 │   ├── adr/         # Architecture Decision Records
@@ -55,15 +56,10 @@ cts-dc-opsdesk/
 
 ```bash
 cp .env.example .env
+# point DATABASE_URL / REDIS_URL / S3_* in .env at the Railway services
+# (see docs/runbooks/railway-deploy.md) — there is no local Docker stack
 pnpm install
-
-# start infra dependencies only
-docker compose up -d postgres redis minio
-
-# run migrations + generate client, then load demo data (incl. demo logins)
-pnpm prisma:migrate
 pnpm prisma:generate
-pnpm --filter @cts-dc-opsdesk/api prisma:seed
 
 # run api, worker, web in separate terminals
 pnpm dev:api

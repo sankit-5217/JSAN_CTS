@@ -28,13 +28,42 @@ export interface EntityRef {
   siteCode?: string;
   priority?: string;
   severity?: string;
+  /** Set on every email about an incident ticket: switches the subject to
+   *  `INC-00002[Bug][P3,S3] Uploads are slow` and adds the ticket summary
+   *  and "who did it" line to the body. */
+  ticket?: TicketDetails;
+}
+
+/** Who changed a ticket and when ("Rahul Sharma (Engineer) ... on <time>"). */
+export interface TicketActor {
+  /** Address of the person who triggered the event, shown in the template. */
+  email?: string;
+  /** Stable identity for authorized per-user delivery; never accepted from the browser. */
+  userId?: string;
+  name: string;
+  /** Plain-language role, e.g. "Client", "Service desk", "Engineer". */
+  role?: string;
+  /** ISO-8601; shown in UTC. */
+  at: string;
+}
+
+/** The ticket fields an incident email shows (labels, not codes). */
+export interface TicketDetails {
+  /** Issue type label, e.g. "Bug". */
+  issueType?: string;
+  /** Status as the ticket shows it, e.g. "In Progress". */
+  status?: string;
+  assignee?: string;
+  assigneeGroup?: string;
+  /** Absent for system mails (SLA timers, routing offers). */
+  updatedBy?: TicketActor;
 }
 
 export type SlaKind = "RESPONSE" | "RESOLUTION";
 
 /** Outbound notification events the worker can raise. Discriminated on `kind`. */
 export type NotificationEvent =
-  | { kind: "INCIDENT_CREATED"; entity: EntityRef; reporter?: Party }
+  | { kind: "INCIDENT_CREATED"; entity: EntityRef; reporter?: Party; description?: string }
   | { kind: "INCIDENT_ASSIGNED"; entity: EntityRef; assignee: Party; actor?: Party }
   | {
       kind: "INCIDENT_GROUP_ASSIGNED";
@@ -50,7 +79,24 @@ export type NotificationEvent =
       actor?: Party;
       comment?: string;
     }
-  | { kind: "INCIDENT_COMMENT_ADDED"; entity: EntityRef; author: Party; body: string }
+  | {
+      kind: "INCIDENT_COMMENT_ADDED";
+      entity: EntityRef;
+      author: Party;
+      body: string;
+      /** A staff-only note: only ever mailed to the assignee and group. */
+      internal?: boolean;
+    }
+  | { kind: "INCIDENT_ATTACHMENT_ADDED"; entity: EntityRef; fileName: string }
+  | {
+      /** Customer-facing: the service desk changed something the reporter
+       *  (and the ticket's CC list) should know about — who is handling it,
+       *  priority, subject, classification, the CC list itself. One plain
+       *  sentence per change. */
+      kind: "INCIDENT_UPDATED";
+      entity: EntityRef;
+      changes: string[];
+    }
   | {
       kind: "SLA_WARNING";
       entity: EntityRef;

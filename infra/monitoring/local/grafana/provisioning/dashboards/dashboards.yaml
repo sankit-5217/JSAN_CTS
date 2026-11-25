@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: opsdesk-local
+    folder: OpsDesk
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      # Set by start-monitoring.ps1 to infra/monitoring/local/grafana/dashboards.
+      path: ${OPSDESK_GRAFANA_DASHBOARDS}

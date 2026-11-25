@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { OnEvent } from "@nestjs/event-emitter";
 import { Cron, CronExpression } from "@nestjs/schedule";
@@ -17,6 +18,7 @@ import {
   UserRole,
 } from "@prisma/client";
 import { NotificationsPublisher } from "../../common/notifications/notifications.publisher";
+import { JobLockService } from "../../common/prisma/job-lock.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
@@ -30,6 +32,7 @@ import {
   IncidentUpdatedEvent,
 } from "../incidents/incident-events";
 import { IncidentsService } from "../incidents/incidents.service";
+import { ticketEntityRef } from "../incidents/ticket-mail";
 import { CategoryTeamsService } from "./category-teams.service";
 import { offerTimeoutFor, RoutingCandidate, RoutingService } from "./routing.service";
 
@@ -59,7 +62,8 @@ type OfferWithUser = RoutingOffer & { user: { displayName: string; email: string
 /**
  * Offer/accept routing. When a site's policy is on, a new incident is
  * offered to the top-ranked engineer (RoutingService.rank). The incident
- * stays NEW and unowned while the offer is open. The engineer accepts
+ * stays NEW with no engineer while the offer is open (a client report
+ * keeps its default Assignee Group meanwhile). The engineer accepts
  * (-> ASSIGNED to them via IncidentsService.autoAssign) or declines; if
  * they decline or the offer expires, it goes to the next-ranked engineer
  * who hasn't been offered it yet. When nobody is left, the service desk
@@ -81,6 +85,7 @@ export class RoutingOffersService {
     private readonly inbox: InboxService,
     private readonly notifications: NotificationsPublisher,
     private readonly categoryTeams: CategoryTeamsService,
+    @Optional() private readonly jobLock?: JobLockService,
   ) {}
 
   // --- Triggers ---------------------------------------------------------
@@ -104,10 +109,11 @@ export class RoutingOffersService {
     }
   }
 
-  /** The ticket was assigned or moved on another way: close any open offer. */
+  /** The ticket was assigned to an engineer or moved on another way: close
+   *  any open offer. A group-only assignment leaves the offer running. */
   @OnEvent(INCIDENT_UPDATED_EVENT, { async: true })
   async onIncidentUpdated(event: IncidentUpdatedEvent): Promise<void> {
-    if (event.status === IncidentStatus.NEW && !event.ownerUserId && !event.ownerGroupId) {
+    if (event.status === IncidentStatus.NEW && !event.ownerUserId) {
       return;
     }
     try {
@@ -129,6 +135,13 @@ export class RoutingOffersService {
 
   /** Every minute: expire overdue offers and move each ticket on. */
   @Cron(CronExpression.EVERY_MINUTE)
+  async scheduledExpireOverdue(): Promise<void> {
+    // One instance at a time (see JobLockService); the method below stays
+    // directly callable for tests and manual runs.
+    const run = () => this.expireOverdue();
+    await (this.jobLock ? this.jobLock.runExclusive("routing-offer-expiry", run) : run());
+  }
+
   async expireOverdue(now: Date = new Date()): Promise<number> {
     let expired = 0;
     try {
@@ -349,11 +362,7 @@ export class RoutingOffersService {
         {
           event: {
             kind: "INCIDENT_OFFERED",
-            entity: {
-              key: incident.incidentNo,
-              title: incident.shortDescription,
-              priority: incident.priority,
-            },
+            entity: await ticketEntityRef(this.prisma, incident),
             offeredTo: { name: next.displayName, email: next.email },
             expiresAt: expiresAt.toISOString(),
             timeoutMinutes,
@@ -419,11 +428,7 @@ export class RoutingOffersService {
         {
           event: {
             kind: "INCIDENT_OFFER_UNACCEPTED",
-            entity: {
-              key: incident.incidentNo,
-              title: incident.shortDescription,
-              priority: incident.priority,
-            },
+            entity: await ticketEntityRef(this.prisma, incident),
             offeredTo: names,
           },
           recipients: { to },
@@ -536,8 +541,10 @@ function offerColumns(offer: RoutingOffer): RoutingOffer {
   return copy as RoutingOffer;
 }
 
+/** Still NEW with no engineer. A group owner alone (the default Assignee
+ *  Group a client report lands in) keeps the ticket routable. */
 function isUnowned(incident: Incident): boolean {
-  return incident.status === IncidentStatus.NEW && !incident.ownerUserId && !incident.ownerGroupId;
+  return incident.status === IncidentStatus.NEW && !incident.ownerUserId;
 }
 
 function errorText(err: unknown): string {

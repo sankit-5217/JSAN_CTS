@@ -1,5 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import { Site, UserRole } from "@prisma/client";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
+import { Prisma, Site, UserRole } from "@prisma/client";
 import { ActorContext } from "../../common/types/actor-context.type";
 import { Paginated } from "../../common/types/paginated.type";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -10,6 +16,13 @@ import { CreateSiteDto } from "./dto/create-site.dto";
 import { CreateSupportCalendarDto } from "./dto/create-support-calendar.dto";
 import { CreateSupportGroupDto } from "./dto/create-support-group.dto";
 import { ListSitesQueryDto } from "./dto/list-sites-query.dto";
+import {
+  SITE_ACTIVE,
+  SITE_ARCHIVE_CHECK_EVENT,
+  SITE_ARCHIVED,
+  SiteArchiveBlocker,
+  SiteArchiveCheck,
+} from "./site-status";
 
 /**
  * Owns: sites, timezone, contacts, support calendars (spec §12).
@@ -20,10 +33,12 @@ export class SitesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
-   * `accessibleSiteIds`: `null` (or omitted) = unrestricted (caller has an
+   * Archived sites are left out unless `includeArchived` (Super Admin's
+   * Sites page). `accessibleSiteIds`: `null` (or omitted) = unrestricted (caller has an
    * "all sites" role, see AuthzService); an array = filter to exactly
    * those sites. List endpoints filter rather than 403 — a scoped user
    * asking for "all sites" should just see their sites, not get rejected.
@@ -34,7 +49,10 @@ export class SitesService {
   ): Promise<Paginated<Site>> {
     const limit = query.limit ?? 50;
     const offset = query.offset ?? 0;
-    const where = accessibleSiteIds ? { id: { in: accessibleSiteIds } } : undefined;
+    const where: Prisma.SiteWhereInput = {
+      ...(accessibleSiteIds ? { id: { in: accessibleSiteIds } } : {}),
+      ...(query.includeArchived ? {} : { status: { not: SITE_ARCHIVED } }),
+    };
 
     const [items, total] = await Promise.all([
       this.prisma.site.findMany({ where, orderBy: { code: "asc" }, take: limit, skip: offset }),
@@ -74,6 +92,56 @@ export class SitesService {
         tx,
       );
       return site;
+    });
+  }
+
+  /**
+   * "Delete site": archives it (no hard delete — tickets, CIs, alerts and
+   * audit history point at it). Other modules may veto (e.g. open tickets);
+   * their reasons come back as `blockers` in a 409.
+   */
+  async archive(id: string, actor: ActorContext): Promise<Site> {
+    const before = await this.findOne(id);
+    if (before.status === SITE_ARCHIVED) return before;
+    const answers = await this.events.emitAsync(SITE_ARCHIVE_CHECK_EVENT, {
+      siteId: id,
+    } satisfies SiteArchiveCheck);
+    const blockers = (answers as (SiteArchiveBlocker | null)[]).filter(
+      (b): b is SiteArchiveBlocker => !!b,
+    );
+    if (blockers.length > 0) {
+      throw new ConflictException({
+        statusCode: 409,
+        message: `Site ${before.code} can't be deleted yet: ${blockers.map((b) => b.message).join("; ")}`,
+        blockers,
+      });
+    }
+    return this.setStatus(before, SITE_ARCHIVED, "SITE_ARCHIVED", actor);
+  }
+
+  /** Undo "Delete site": the site is back in lists and takes new work again. */
+  async restore(id: string, actor: ActorContext): Promise<Site> {
+    const before = await this.findOne(id);
+    if (before.status !== SITE_ARCHIVED) return before;
+    return this.setStatus(before, SITE_ACTIVE, "SITE_RESTORED", actor);
+  }
+
+  private setStatus(before: Site, status: string, action: string, actor: ActorContext) {
+    return this.prisma.$transaction(async (tx) => {
+      const after = await tx.site.update({ where: { id: before.id }, data: { status } });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "Site",
+          entityId: before.id,
+          action,
+          before: { status: before.status },
+          after: { status: after.status },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return after;
     });
   }
 
@@ -169,6 +237,73 @@ export class SitesService {
         tx,
       );
       return group;
+    });
+  }
+
+  /**
+   * Flag one group as the "Assignee Group" every new client report lands in
+   * unless the reporter picks another (the form's default, "Service Desk").
+   * Exactly one group can carry the flag: the partial unique index on
+   * is_default_assignee only ever admits a single TRUE row, so the old
+   * default is cleared in the same transaction.
+   */
+  async setDefaultSupportGroup(id: string, actor: ActorContext) {
+    const group = await this.getSupportGroup(id);
+    if (group.isDefaultAssignee) {
+      return group;
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const previous = await tx.supportGroup.findFirst({ where: { isDefaultAssignee: true } });
+      if (previous) {
+        await tx.supportGroup.update({
+          where: { id: previous.id },
+          data: { isDefaultAssignee: null },
+        });
+      }
+      const after = await tx.supportGroup.update({
+        where: { id },
+        data: { isDefaultAssignee: true },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportGroup",
+          entityId: id,
+          action: "SET_DEFAULT_ASSIGNEE",
+          before: { previousDefaultGroupId: previous?.id ?? null },
+          after,
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return after;
+    });
+  }
+
+  /** Whether clients may pick this group as Assignee Group on their tickets. */
+  async setSupportGroupClientSelectable(id: string, value: boolean, actor: ActorContext) {
+    const before = await this.getSupportGroup(id);
+    if (before.isClientSelectable === value) {
+      return before;
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const after = await tx.supportGroup.update({
+        where: { id },
+        data: { isClientSelectable: value },
+      });
+      await this.auditService.record(
+        {
+          actorId: actor.actorId,
+          entityType: "SupportGroup",
+          entityId: id,
+          action: "SET_CLIENT_SELECTABLE",
+          before: { isClientSelectable: before.isClientSelectable },
+          after: { isClientSelectable: after.isClientSelectable },
+          correlationId: actor.correlationId,
+        },
+        tx,
+      );
+      return after;
     });
   }
 

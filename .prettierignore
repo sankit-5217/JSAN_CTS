@@ -6,3 +6,8 @@ pnpm-lock.yaml
 *.tsbuildinfo
 apps/api/prisma/migrations
 docs/*.pdf
+.claude/
+.qoder/
+.tmp-pdf/
+Microsoft/
+tools/onboarding-kit/out/

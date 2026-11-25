@@ -30,7 +30,7 @@ packages/
 integrations/
   redfish/, dell-ome/, zabbix/, prometheus/, snmp/, email/
 infra/
-  docker/   Dockerfiles per app
+  docker/   collector.Dockerfile (on-site collector image; api/web/worker deploy via Railway)
   migrations/
 docs/
   adr/      8 architecture decision records (spec Appendix B)

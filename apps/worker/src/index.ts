@@ -1,5 +1,6 @@
+import { ConnectedMailTransport } from "./mail/connected-transport";
 // Load apps/worker/.env for local runs. Variables already set in the real
-// environment (docker-compose env_file, production) take precedence.
+// environment (Railway, production) take precedence.
 import "dotenv/config";
 import { WorkerApiClient } from "./api-client";
 import { createMailTransportFromEnv } from "./mail/transport";
@@ -18,7 +19,7 @@ import {
  * collector-polling workers alongside these as those modules land.
  */
 async function main() {
-  const mail = createMailTransportFromEnv();
+  const mail = new ConnectedMailTransport(createMailTransportFromEnv());
   const slaWorker = createSlaTimersWorker();
   const notificationsWorker = createNotificationsWorker(mail);
   const accountMailWorker = createAccountMailWorker(mail);

@@ -87,7 +87,7 @@ export function SoundControl() {
       >
         <Stack sx={{ px: 2, py: 1.5 }} spacing={1.5}>
           <Stack direction="row" alignItems="center" justifyContent="space-between">
-            <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Sound alerts</Typography>
+            <Typography sx={{ fontWeight: 700, fontSize: 14 }}>Sound alerts</Typography>
             <Switch
               checked={!prefs.muted}
               onChange={(e) => writeSoundPrefs({ muted: !e.target.checked })}

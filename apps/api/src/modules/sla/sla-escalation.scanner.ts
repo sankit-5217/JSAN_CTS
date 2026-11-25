@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import {
   InAppNotificationKind,
@@ -13,11 +13,14 @@ import {
   SupportGroupMember,
 } from "@prisma/client";
 import type { EntityRef, NotificationEvent, Party } from "@cts-dc-opsdesk/email-adapter";
+import { JobLockService } from "../../common/prisma/job-lock.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { InboxService } from "../inbox/inbox.service";
 import { levelForPriority } from "../inbox/notification-sound-rules.service";
 import { SlaTimersPublisher } from "./sla-timers.publisher";
+// A pure helper, not the incidents module: that module depends on this one.
+import { ticketEntityRef } from "../incidents/ticket-mail";
 
 type SlaKindInternal = "ACK" | "RESOLVE";
 
@@ -60,9 +63,17 @@ export class SlaEscalationScanner {
     private readonly auditService: AuditService,
     private readonly publisher: SlaTimersPublisher,
     private readonly inbox: InboxService,
+    @Optional() private readonly jobLock?: JobLockService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
+  async scheduledScan(): Promise<void> {
+    // One instance at a time (see JobLockService); the method below stays
+    // directly callable for tests and manual runs.
+    const run = () => this.scan();
+    await (this.jobLock ? this.jobLock.runExclusive("sla-escalation-scan", run) : run());
+  }
+
   async scan(): Promise<void> {
     const now = new Date();
     const openInstances = (await this.prisma.slaInstance.findMany({
@@ -296,10 +307,8 @@ export class SlaEscalationScanner {
     }
 
     const entity: EntityRef = {
-      key: instance.incident.incidentNo,
-      title: instance.incident.shortDescription,
+      ...(await ticketEntityRef(this.prisma, instance.incident)),
       siteCode: instance.incident.site.code,
-      priority: instance.incident.priority,
     };
     const slaKind = crossed.slaKind === "ACK" ? "RESPONSE" : "RESOLUTION";
 

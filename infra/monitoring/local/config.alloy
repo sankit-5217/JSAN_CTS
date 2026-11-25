@@ -1,0 +1,24 @@
+// Grafana Alloy: tails the local dev services' log files and ships them to Loki.
+// OPSDESK_DEVTOOLS_DIR is set by start-monitoring.ps1.
+
+local.file_match "dev_logs" {
+  path_targets = [
+    {__path__ = sys.env("OPSDESK_DEVTOOLS_DIR") + "/*.log", job = "devtools"},
+    {__path__ = sys.env("OPSDESK_DEVTOOLS_DIR") + "/monitoring/logs/*.log", job = "monitoring"},
+  ]
+  sync_period = "10s"
+}
+
+loki.source.file "dev_logs" {
+  targets       = local.file_match.dev_logs.targets
+  forward_to    = [loki.write.local.receiver]
+  // Lines carry no parsed timestamp, so replaying old files would stamp
+  // history as "now".
+  tail_from_end = true
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://127.0.0.1:3100/loki/api/v1/push"
+  }
+}

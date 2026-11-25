@@ -11,6 +11,7 @@ import { ActorContext } from "../../common/types/actor-context.type";
 import { AuditService } from "../audit/audit.service";
 import { isAllSitesRole } from "./authz.service";
 import { PasswordAuthService, SignInLinkResult } from "./password-auth.service";
+import { passwordPolicyProblem } from "./password-hasher";
 import {
   CreateAdminUserDto,
   ListAdminUsersQueryDto,
@@ -32,10 +33,10 @@ export interface AdminUserView {
   displayName: string;
   role: UserRole;
   isActive: boolean;
-  /** Has chosen a password (via an invite/reset link). */
+  /** Has a password (chosen via an invite/reset link, or set by an admin). */
   hasPassword: boolean;
-  /** Linked social sign-ins, e.g. ["google", "github"]. */
-  socialProviders: string[];
+  /** An admin set the password; the user must change it at next sign-in. */
+  mustChangePassword: boolean;
   /** Set while the account is locked after too many wrong passwords. */
   lockedUntil: Date | null;
   /** Role sees every site regardless of `siteIds`. */
@@ -52,11 +53,11 @@ const USER_SELECT = {
   role: true,
   isActive: true,
   passwordSetAt: true,
+  mustChangePassword: true,
   lockedUntil: true,
   createdAt: true,
   updatedAt: true,
   siteAccess: { select: { siteId: true } },
-  identities: { select: { provider: true }, orderBy: { provider: "asc" } },
 } satisfies Prisma.UserSelect;
 
 type UserRow = Prisma.UserGetPayload<{ select: typeof USER_SELECT }>;
@@ -108,11 +109,20 @@ export class UserAdminService {
     return toView(await this.findRow(id));
   }
 
-  /** Creates the user and emails them an invite to choose a password. */
+  /**
+   * Creates the user. With `password`: that becomes their starting password
+   * (no email; they must change it at first sign-in). Without: they're
+   * emailed an invite link to choose one. `invite` is null in the first case.
+   */
   async create(
     dto: CreateAdminUserDto,
     actor: ActorContext,
-  ): Promise<AdminUserView & { invite: SignInLinkResult }> {
+  ): Promise<AdminUserView & { invite: SignInLinkResult | null }> {
+    // Check the password first so a weak one never leaves a half-created user.
+    if (dto.password !== undefined) {
+      const problem = passwordPolicyProblem(dto.password, dto.email);
+      if (problem) throw new BadRequestException(problem);
+    }
     await this.assertEmailFree(dto.email);
     const siteIds = dto.siteIds ?? [];
     const created = await this.writeOrTranslate(() =>
@@ -140,8 +150,28 @@ export class UserAdminService {
         return user;
       }),
     );
+    if (dto.password !== undefined) {
+      await this.passwords.setPasswordByAdmin(created.id, dto.password, actor);
+      return { ...toView(await this.findRow(created.id)), invite: null };
+    }
     const invite = await this.passwords.sendSignInLink(created.id, actor);
     return { ...toView(created), invite };
+  }
+
+  /**
+   * Sets another user's password (no email) — e.g. for someone without
+   * email access. They're signed out and must change it at next sign-in.
+   * Admins change their own password from their account menu instead.
+   */
+  async setPassword(id: string, password: string, actor: ActorContext): Promise<AdminUserView> {
+    if (id === actor.actorId) {
+      throw new BadRequestException(
+        "Use Change password in your account menu for your own password",
+      );
+    }
+    await this.findRow(id);
+    await this.passwords.setPasswordByAdmin(id, password, actor);
+    return toView(await this.findRow(id));
   }
 
   /** (Re)sends a set-password link: an invite, or a reset if they already have a password. */
@@ -349,7 +379,7 @@ function toView(row: UserRow): AdminUserView {
     role: row.role,
     isActive: row.isActive,
     hasPassword: row.passwordSetAt !== null,
-    socialProviders: row.identities.map((i) => i.provider),
+    mustChangePassword: row.mustChangePassword,
     lockedUntil: row.lockedUntil && row.lockedUntil > new Date() ? row.lockedUntil : null,
     allSites: isAllSitesRole(row.role),
     siteIds: row.siteAccess.map((a) => a.siteId).sort(),

@@ -74,6 +74,10 @@ enum IncidentStatus {
   CLOSED
   REOPENED
   CANCELLED
+  // "Blocked by" / "Duplicate of" on the issue template's Status list; both
+  // need the Ref Bug ID of the other ticket (incident-transitions.ts).
+  BLOCKED
+  DUPLICATE
 }
 
 enum Priority {
@@ -81,6 +85,20 @@ enum Priority {
   P2
   P3
   P4
+}
+
+// The dropdown lists on the "Report an issue" form (client portal) — every
+// value a reporter can pick lives in issue_catalog_options, never in code
+// (CLAUDE.md: configuration over hard-code). PRIORITY options only re-label
+// the fixed Priority enum above (their `value` must be P1..P4); status is
+// not here at all — it is the incident state machine's, not a pick-list.
+enum IssueCatalogKind {
+  ISSUE_TYPE
+  PRIORITY
+  SEVERITY
+  COMPONENT
+  SUB_COMPONENT
+  TOOL
 }
 
 // Problem/RCA lifecycle (spec §10.5, owner: Dev B). Distinct from incident
@@ -147,23 +165,29 @@ enum ChangeType {
 // ---------------------------------------------------------------------------
 
 model User {
-  id               String    @id @default(uuid())
-  email            String    @unique
-  displayName      String    @map("display_name")
-  role             UserRole
-  isActive         Boolean   @default(true) @map("is_active")
-  // Password sign-in. NULL until the user sets one through an invite/reset
-  // link (never set by an admin). scrypt, see auth/password-hasher.ts.
-  passwordHash     String?   @map("password_hash")
-  passwordSetAt    DateTime? @map("password_set_at")
-  failedLoginCount Int       @default(0) @map("failed_login_count")
-  lockedUntil      DateTime? @map("locked_until")
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  displayName        String    @map("display_name")
+  role               UserRole
+  isActive           Boolean   @default(true) @map("is_active")
+  // Password sign-in (the only way in). NULL until set — by the user from
+  // an invite/reset link, or by a Super Admin as a starting password.
+  // scrypt, see auth/password-hasher.ts.
+  passwordHash       String?   @map("password_hash")
+  passwordSetAt      DateTime? @map("password_set_at")
+  // True after a Super Admin set the password: until the user picks their
+  // own, every API call except changing it is refused (JwtAuthGuard).
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  failedLoginCount   Int       @default(0) @map("failed_login_count")
+  lockedUntil        DateTime? @map("locked_until")
   // Carried in every app JWT ("sv"); bumping it (password set/reset)
   // invalidates all of the user's existing sessions at once.
-  sessionVersion   Int       @default(0) @map("session_version")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  sessionVersion     Int       @default(0) @map("session_version")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
+  sendingAccount      SendingAccount?
+  mailAuthorizations  MailAuthorization[]
   incidentsOwned      Incident[]           @relation("IncidentOwner")
   incidentsReported   Incident[]           @relation("IncidentReportedBy")
   worklogs            Worklog[]
@@ -176,32 +200,10 @@ model User {
   userSkills          UserSkill[]
   inAppNotifications  InAppNotification[]
   routingOffers       RoutingOffer[]
-  loginHandoffCodes   LoginHandoffCode[]
-  identities          UserIdentity[]
   passwordTokens      PasswordToken[]      @relation("PasswordTokenUser")
   apiTokens           ApiToken[]           @relation("ApiTokenUser")
 
   @@map("users")
-}
-
-/// A social sign-in (Google / Microsoft / GitHub) linked to a user. Linked
-/// on the first sign-in whose verified email matches an existing user;
-/// afterwards only (issuer, subject) is trusted, never the email alone.
-model UserIdentity {
-  id          String    @id @default(uuid())
-  userId      String    @map("user_id")
-  provider    String // "google" | "microsoft" | "github"
-  issuer      String
-  subject     String
-  email       String?
-  createdAt   DateTime  @default(now()) @map("created_at")
-  lastLoginAt DateTime? @map("last_login_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([issuer, subject])
-  @@unique([userId, provider])
-  @@map("user_identities")
 }
 
 /// Single-use invite / password-reset link token. Only its SHA-256 is stored.
@@ -240,24 +242,6 @@ model ApiToken {
 
   @@index([userId])
   @@map("api_tokens")
-}
-
-/// Single-use handoff between a social sign-in callback (API origin) and the
-/// web app: the callback redirects the browser with a random code, the web
-/// app trades it for the app JWT via POST /auth/social/exchange. Only the
-/// SHA-256 of the code is stored; rows expire after ~60s and are consumed once.
-model LoginHandoffCode {
-  id         String    @id @default(uuid())
-  codeHash   String    @unique @map("code_hash")
-  userId     String    @map("user_id")
-  expiresAt  DateTime  @map("expires_at")
-  consumedAt DateTime? @map("consumed_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([expiresAt])
-  @@map("login_handoff_codes")
 }
 
 /// Explicit site-scope grants (spec §4: most roles are "assigned sites"
@@ -299,6 +283,7 @@ model Site {
   racks              Rack[]
   engineerShifts     EngineerShift[]
   routingPolicy      RoutingPolicy?
+  agentEnrollments   AgentEnrollment[]
 
   @@map("sites")
 }
@@ -336,14 +321,23 @@ model SupportCalendar {
 }
 
 model SupportGroup {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  createdAt DateTime @default(now()) @map("created_at")
+  id                 String   @id @default(uuid())
+  name               String   @unique
+  // The "Assignee Group" a new client report lands in when the reporter
+  // doesn't pick one (at most one group carries this, enforced by
+  // SitesService.setDefaultSupportGroup). Nullable-unique so the partial
+  // index only ever holds a single TRUE row.
+  isDefaultAssignee  Boolean? @map("is_default_assignee")
+  // Offered as an "Assignee Group" on the client portal's issue template.
+  // Staff pick from every group; a client only from these (and the default).
+  isClientSelectable Boolean  @default(false) @map("is_client_selectable")
+  createdAt          DateTime @default(now()) @map("created_at")
 
   incidents     Incident[]
   members       SupportGroupMember[]
   categoryTeams CategoryTeam[]
 
+  @@unique([isDefaultAssignee])
   @@map("support_groups")
 }
 
@@ -362,6 +356,54 @@ model CategoryTeam {
 
   @@index([groupId])
   @@map("category_teams")
+}
+
+/// One pick-list entry on the "Report an issue" form (see IssueCatalogKind).
+/// SUB_COMPONENT rows hang off a COMPONENT row via `parentId`; every other
+/// kind is flat. Retire with `isActive = false` rather than deleting —
+/// incidents reference the `value`, not the row.
+model IssueCatalogOption {
+  id        String           @id @default(uuid())
+  kind      IssueCatalogKind
+  value     String           @db.VarChar(64)
+  label     String           @db.VarChar(120)
+  parentId  String?          @map("parent_id")
+  sortOrder Int              @default(0) @map("sort_order")
+  isActive  Boolean          @default(true) @map("is_active")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  parent    IssueCatalogOption?  @relation("IssueCatalogParent", fields: [parentId], references: [id])
+  children  IssueCatalogOption[] @relation("IssueCatalogParent")
+  templates IssueTemplate[]
+
+  @@unique([kind, value])
+  @@index([kind, isActive, sortOrder])
+  @@map("issue_catalog_options")
+}
+
+/// The auto-draft behind the form's "Template" picker: one per issue type.
+/// Picking it fills the subject/description drafts and the default
+/// priority/severity/component/tool, all of which the reporter can still
+/// change before submitting.
+model IssueTemplate {
+  id                  String    @id @default(uuid())
+  issueTypeId         String    @unique @map("issue_type_id")
+  name                String    @db.VarChar(120)
+  subjectDraft        String?   @map("subject_draft") @db.VarChar(256)
+  descriptionDraft    String    @map("description_draft")
+  defaultPriority     Priority? @map("default_priority")
+  defaultSeverity     String?   @map("default_severity") @db.VarChar(64)
+  defaultComponent    String?   @map("default_component") @db.VarChar(64)
+  defaultSubComponent String?   @map("default_sub_component") @db.VarChar(64)
+  defaultTool         String?   @map("default_tool") @db.VarChar(64)
+  isActive            Boolean   @default(true) @map("is_active")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  issueType IssueCatalogOption @relation(fields: [issueTypeId], references: [id])
+
+  @@map("issue_templates")
 }
 
 /// Who's actually on a support group's roster — SupportGroup itself has no
@@ -544,6 +586,7 @@ enum InAppNotificationKind {
   INCIDENT_OFFER_UNACCEPTED
   ALERT_RECOVERED
   ALERT_RAISED
+  CUSTOMER_RESPONDED
 }
 
 /// How loudly the ops console announces a notification when it arrives.
@@ -670,6 +713,18 @@ model CiRelation {
   @@map("ci_relations")
 }
 
+/// The last liveness ping from each site's collector (spec §26) — current
+/// state only, one row per site, overwritten on every ping. Heartbeats used
+/// to be audit events (~55M rows a year at 5 sites); a ping is telemetry,
+/// not a business change, so it doesn't belong in the audit trail.
+model CollectorHeartbeat {
+  siteCode     String   @id @map("site_code")
+  lastSeenAt   DateTime @map("last_seen_at")
+  reportedById String?  @map("reported_by_id")
+
+  @@map("collector_heartbeats")
+}
+
 model HealthSnapshot {
   id               String    @id @default(uuid())
   ciId             String    @unique @map("ci_id")
@@ -683,10 +738,70 @@ model HealthSnapshot {
   // bad polls update the same alert row and the eventual HEALTHY poll close it,
   // instead of a fresh alert per poll.
   openAlertEventId String?   @map("open_alert_event_id")
+  // Per-component hardware alerts currently open for this CI, keyed by the
+  // alert's componentKey: { [componentKey]: { eventId, alertType } }. Each
+  // degraded drive / PSU / fan gets its own alert that opens and recovers
+  // independently (MonitoringService.syncComponentAlerts). Supersedes the
+  // single rollup `openAlertEventId`, which is only read to close a legacy
+  // rollup alert left open from before this column existed.
+  openAlerts       Json?     @map("open_alerts")
 
   ci ConfigurationItem @relation(fields: [ciId], references: [id])
 
   @@map("health_snapshots")
+}
+
+/// Connection to a Zabbix server's JSON-RPC API (monitoring module). OpsDesk
+/// reads hosts, problems, latest values and history from it live — nothing it
+/// returns is persisted here (spec §3.2). One row per named connection; v1 uses
+/// the seeded "default" row, editable by admins on the Zabbix settings page.
+model ZabbixConnection {
+  id                 String    @id @default(uuid())
+  name               String    @unique @db.VarChar(64)
+  // e.g. http://127.0.0.1/zabbix/api_jsonrpc.php
+  apiUrl             String    @map("api_url") @db.VarChar(500)
+  enabled            Boolean   @default(true)
+  requestTimeoutMs   Int       @default(10000) @map("request_timeout_ms")
+  // Zabbix API token, AES-256-GCM encrypted with INTEGRATION_SECRETS_KEY
+  // (common/crypto/secret-cipher.ts). Never returned by any endpoint; only the
+  // last 4 characters are kept in clear so admins can tell which token is set.
+  tokenCiphertext    String?   @map("token_ciphertext")
+  tokenLast4         String?   @map("token_last4") @db.VarChar(4)
+  tokenUpdatedAt     DateTime? @map("token_updated_at")
+  // host:port the client-site agents connect OUT to (the Zabbix server's
+  // public trapper address, e.g. a Railway TCP proxy). Admin-editable, so the
+  // one-line installer never hard-codes it.
+  agentServerAddress String?   @map("agent_server_address") @db.VarChar(255)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@map("zabbix_connections")
+}
+
+/// A per-site enrollment link for the one-line monitoring agent installer
+/// (`curl .../enroll/<code>/install.sh | sudo bash`). Any number of the
+/// site's machines may use it until it expires or is revoked. Only a SHA-256
+/// of the code is stored; the code itself is shown once, when created.
+model AgentEnrollment {
+  id              String    @id @default(uuid())
+  siteId          String    @map("site_id")
+  label           String?   @db.VarChar(120)
+  codeHash        String    @unique @map("code_hash") @db.VarChar(64)
+  expiresAt       DateTime  @map("expires_at")
+  revokedAt       DateTime? @map("revoked_at")
+  /// Machines this link may enroll; re-running on an enrolled machine doesn't count.
+  maxMachines     Int       @map("max_machines")
+  enrolledCount   Int       @default(0) @map("enrolled_count")
+  /// The client's change / CAB reference, if they gave one.
+  changeReference String?   @map("change_reference") @db.VarChar(60)
+  lastUsedAt      DateTime? @map("last_used_at")
+  createdById     String    @map("created_by_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@index([siteId])
+  @@map("agent_enrollments")
 }
 
 model Warranty {
@@ -719,6 +834,21 @@ model Incident {
   impact             String
   urgency            String
   shortDescription   String         @map("short_description")
+  // The "Report an issue" template fields (client portal). `issueType`,
+  // `severity`, `component`, `subComponent` and `tool` hold the `value` of
+  // an IssueCatalogOption of that kind — stored as the code, like
+  // `category`, so a later catalog edit doesn't rewrite ticket history.
+  description        String?
+  issueType          String?        @map("issue_type")
+  severity           String?
+  component          String?
+  subComponent       String?        @map("sub_component")
+  tool               String?
+  // "Ref Bug ID": another ticket this one duplicates or is blocked by.
+  refIncidentNo      String?        @map("ref_incident_no")
+  // "CC List": extra addresses copied on customer-facing notifications,
+  // maintained by the reporter or the assignee.
+  ccEmails           String[]       @default([]) @map("cc_emails")
   ownerGroupId       String?        @map("owner_group_id")
   ownerUserId        String?        @map("owner_user_id")
   // Set only when this incident came in via POST /incidents/customer-report —
@@ -755,7 +885,7 @@ model Incident {
 model IncidentEvent {
   id         String   @id @default(uuid())
   incidentId String   @map("incident_id")
-  eventType  String   @map("event_type") // STATUS_CHANGE / OWNER_CHANGE / SLA_EVENT / COMMENT / WORKLOG / VENDOR_UPDATE / ATTACHMENT / ATTACHMENT_REMOVED
+  eventType  String   @map("event_type") // CREATED / STATUS_CHANGE / OWNER_CHANGE / SLA_EVENT / COMMENT / WORKLOG / VENDOR_UPDATE / ATTACHMENT / ATTACHMENT_REMOVED / ROUTING / CUSTOMER_FEEDBACK / CC_LIST_CHANGED / ALERT_LINKED / ALERT_RECOVERED
   actorId    String?  @map("actor_id")
   payload    Json
   createdAt  DateTime @default(now()) @map("created_at")
@@ -774,7 +904,8 @@ model IncidentComment {
   isInternal Boolean  @default(true) @map("is_internal") // internal engineer note vs customer-visible
   createdAt  DateTime @default(now()) @map("created_at")
 
-  incident Incident @relation(fields: [incidentId], references: [id])
+  incident    Incident     @relation(fields: [incidentId], references: [id])
+  attachments Attachment[]
 
   @@index([incidentId])
   @@map("incident_comments")
@@ -870,6 +1001,14 @@ model Alert {
   lastSeenAt           DateTime      @map("last_seen_at")
   state                AlertState    @default(OPEN)
   rawReference         String?       @map("raw_reference") // pointer, not unlimited raw payload storage
+  // What the engineer needs to diagnose without leaving the portal: the
+  // adapter's one-line summary, the failing sub-component (e.g. a drive bay or
+  // interface — also part of the fingerprint) and a size-capped copy of the
+  // normalized source metadata (labels, trap varbinds, degraded list). Never
+  // time-series or log bodies — those stay in Zabbix/Prometheus/Loki.
+  summary              String?       @db.VarChar(500)
+  componentKey         String?       @map("component_key") @db.VarChar(128)
+  details              Json?
   // Set once when the alert is attached to a still-open incident on the same CI
   // (spec §10.10). Scalar, no FK relation: the incidents module owns that table,
   // correlation only reads it. Link-only — correlation never opens or mutates a
@@ -1169,10 +1308,42 @@ model Attachment {
   // append-only records (worklogs correct, they don't get edited in place).
   deletedAt    DateTime? @map("deleted_at")
   deletedById  String?   @map("deleted_by_id")
+  // Set when the file was sent with a message on an incident's
+  // conversation; it then shows inside that message and inherits the
+  // message's visibility (an internal note's files stay staff-only).
+  commentId    String?   @map("comment_id")
 
-  uploadedBy User? @relation(fields: [uploadedById], references: [id])
-  deletedBy  User? @relation("AttachmentDeletedBy", fields: [deletedById], references: [id])
+  uploadedBy User?            @relation(fields: [uploadedById], references: [id])
+  deletedBy  User?            @relation("AttachmentDeletedBy", fields: [deletedById], references: [id])
+  comment    IncidentComment? @relation(fields: [commentId], references: [id])
 
   @@index([entityType, entityId])
+  @@index([commentId])
   @@map("attachments")
+}
+
+/// Credentials never appear in notification jobs or public API responses.
+model SendingAccount {
+  userId      String   @id @map("user_id")
+  provider    String
+  email       String
+  credentials String
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sending_accounts")
+}
+
+model MailAuthorization {
+  usedAt         DateTime? @map("used_at")
+  stateHash      String    @id @map("state_hash")
+  userId         String    @map("user_id")
+  sessionVersion Int       @map("session_version")
+  provider       String
+  verifier       String
+  expiresAt      DateTime  @map("expires_at")
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("mail_authorizations")
 }

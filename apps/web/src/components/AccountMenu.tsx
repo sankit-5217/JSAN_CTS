@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Avatar, Box, Divider, Menu, MenuItem, Stack, Tooltip, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import ExpandMoreOutlinedIcon from "@mui/icons-material/ExpandMoreOutlined";
+import KeyOutlinedIcon from "@mui/icons-material/KeyOutlined";
 import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
+import { useNavigate } from "react-router-dom";
 
 // Role identity colors — deliberately outside the severity palette
 // (severityColors in theme/theme.ts: green/orange/red/blue-maintenance) so a
@@ -45,6 +47,7 @@ interface AccountMenuProps {
  * both shells stay visually in sync instead of drifting into two
  * hand-styled headers. */
 export function AccountMenu({ email, roleLabel, roleColor, onLogout }: AccountMenuProps) {
+  const navigate = useNavigate();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const menuOpen = Boolean(anchorEl);
 
@@ -119,6 +122,16 @@ export function AccountMenu({ email, roleLabel, roleColor, onLogout }: AccountMe
           </Typography>
         </Box>
         <Divider sx={{ display: { xs: "block", sm: "none" } }} />
+        <MenuItem
+          onClick={() => {
+            setAnchorEl(null);
+            navigate("/auth/change-password");
+          }}
+          sx={{ gap: 1 }}
+        >
+          <KeyOutlinedIcon fontSize="small" />
+          Change password
+        </MenuItem>
         <MenuItem onClick={onLogout} sx={{ color: "error.main", gap: 1 }}>
           <LogoutOutlinedIcon fontSize="small" />
           Log out

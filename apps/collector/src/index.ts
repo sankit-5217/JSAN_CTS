@@ -101,7 +101,8 @@ function main(): void {
       if (r.failed.length > 0) {
         // eslint-disable-next-line no-console
         console.warn(
-          `[collector] health poll: ${r.enqueued}/${r.polled} enqueued, ${r.failed.length} failed`,
+          `[collector] health poll: ${r.enqueued}/${r.polled} enqueued, ${r.failed.length} failed: ` +
+            r.failed.map((f) => `${f.ciCode} (${f.reason})`).join("; "),
         );
       }
     });
@@ -111,6 +112,14 @@ function main(): void {
 
   const flush = setInterval(() => {
     void buffer.flush(send).then((r) => {
+      for (const { item, error } of r.rejected) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[collector] OpsDesk refused ${item.channel} ${item.key} for good, dropped: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
       if (r.remaining > 0) {
         // eslint-disable-next-line no-console
         console.warn(`[collector] ${r.delivered} delivered, ${r.remaining} still buffered`);

@@ -1,0 +1,3 @@
+# Secrets (Zabbix/OpsDesk tokens) and generated client bundles (contain proxy keys).
+secrets/
+out/

@@ -6,7 +6,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { hashPassword, verifyPassword } from "./password-hasher";
 import { LOCKOUT_MS, MAX_FAILED_LOGINS, PasswordAuthService } from "./password-auth.service";
-import { sha256 } from "./social/social-identity.service";
+import { sha256 } from "./token-hash";
 
 // scrypt is deliberately slow (~32 MiB, tens of ms per hash); under a fully
 // parallel `pnpm test` on a busy machine the 5s default can be too tight.
@@ -238,5 +238,87 @@ describe("PasswordAuthService.setPassword", () => {
       /expired or was already used/,
     );
     expect(tx.user.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("PasswordAuthService.setPasswordByAdmin", () => {
+  const ADMIN = { actorId: "admin-1", correlationId: "corr-1" };
+
+  it("sets a starting password the user must change, cancels links, signs them out, never audits the password", async () => {
+    const { service, prisma, tx, audit } = makeService();
+    (prisma.user.findUnique as jest.Mock).mockResolvedValueOnce(user({ failedLoginCount: 3 }));
+    await service.setPasswordByAdmin("user-1", "rack four cable blue", ADMIN);
+
+    const data = tx.user.update.mock.calls[0][0].data;
+    expect(data).toMatchObject({
+      mustChangePassword: true,
+      failedLoginCount: 0,
+      lockedUntil: null,
+    });
+    expect(data.sessionVersion).toEqual({ increment: 1 });
+    await expect(verifyPassword("rack four cable blue", data.passwordHash)).resolves.toBe(true);
+    expect(tx.passwordToken.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "user-1", usedAt: null } }),
+    );
+    const event = (audit.record as jest.Mock).mock.calls[0][0];
+    expect(event).toMatchObject({ action: "USER_PASSWORD_SET_BY_ADMIN", actorId: "admin-1" });
+    expect(JSON.stringify(event)).not.toContain("rack four cable blue");
+  });
+
+  it("enforces the password policy", async () => {
+    const { service, prisma, tx } = makeService();
+    (prisma.user.findUnique as jest.Mock).mockResolvedValueOnce(user());
+    await expect(service.setPasswordByAdmin("user-1", "short", ADMIN)).rejects.toThrow(
+      /at least 12/,
+    );
+    expect(tx.user.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses an inactive user", async () => {
+    const { service, prisma } = makeService();
+    (prisma.user.findUnique as jest.Mock).mockResolvedValueOnce(user({ isActive: false }));
+    await expect(
+      service.setPasswordByAdmin("user-1", "rack four cable blue", ADMIN),
+    ).rejects.toThrow(/inactive/);
+  });
+});
+
+describe("PasswordAuthService.changePassword", () => {
+  it("replaces the password, clears the must-change flag and signs out other sessions", async () => {
+    const { service, prisma, tx, audit } = makeService();
+    (prisma.user.findUnique as jest.Mock).mockResolvedValueOnce(user({ mustChangePassword: true }));
+    const updated = await service.changePassword("user-1", PASSWORD, "a brand new passphrase");
+
+    const data = tx.user.update.mock.calls[0][0].data;
+    expect(data.mustChangePassword).toBe(false);
+    expect(data.sessionVersion).toEqual({ increment: 1 });
+    await expect(verifyPassword("a brand new passphrase", data.passwordHash)).resolves.toBe(true);
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "USER_PASSWORD_CHANGED", after: { wasRequired: true } }),
+      tx,
+    );
+    expect(updated.mustChangePassword).toBe(false);
+  });
+
+  it("needs the right current password (and audits the failure)", async () => {
+    const { service, prisma, tx, audit } = makeService();
+    (prisma.user.findUnique as jest.Mock).mockResolvedValueOnce(user());
+    await expect(
+      service.changePassword("user-1", "wrong", "a brand new passphrase"),
+    ).rejects.toThrow(/current password is not correct/);
+    expect(tx.user.update).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "USER_PASSWORD_CHANGE_FAILED" }),
+    );
+  });
+
+  it("refuses a weak or unchanged new password", async () => {
+    const { service, prisma } = makeService();
+    (prisma.user.findUnique as jest.Mock).mockResolvedValueOnce(user());
+    await expect(service.changePassword("user-1", PASSWORD, "short")).rejects.toThrow(
+      /at least 12/,
+    );
+    (prisma.user.findUnique as jest.Mock).mockResolvedValueOnce(user());
+    await expect(service.changePassword("user-1", PASSWORD, PASSWORD)).rejects.toThrow(/different/);
   });
 });

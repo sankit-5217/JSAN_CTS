@@ -1,4 +1,5 @@
-import { DeliveryBuffer } from "./delivery-buffer";
+import { DeliveryBuffer, isPermanentRejection } from "./delivery-buffer";
+import { OpsDeskApiError } from "./opsdesk-client";
 import type { BufferedItem } from "./delivery-buffer";
 
 function item(key: string): Omit<BufferedItem, "queuedAt"> {
@@ -31,7 +32,7 @@ describe("DeliveryBuffer", () => {
     });
 
     expect(seen).toEqual(["a", "b", "c"]);
-    expect(result).toEqual({ delivered: 3, remaining: 0 });
+    expect(result).toEqual({ delivered: 3, remaining: 0, rejected: [] });
     expect(b.size).toBe(0);
   });
 
@@ -45,7 +46,7 @@ describe("DeliveryBuffer", () => {
       }
     });
 
-    expect(result).toEqual({ delivered: 1, remaining: 2 });
+    expect(result).toEqual({ delivered: 1, remaining: 2, rejected: [] });
     expect(b.size).toBe(2);
 
     // a later flush that succeeds drains the rest, still in order
@@ -54,5 +55,31 @@ describe("DeliveryBuffer", () => {
       seen.push(i.key);
     });
     expect(seen).toEqual(["b", "c"]);
+  });
+
+  it("drops an item the API refuses for good instead of blocking the rest", async () => {
+    const b = new DeliveryBuffer(100);
+    b.enqueue(item("bad"));
+    b.enqueue(item("good"));
+    const seen: string[] = [];
+    const result = await b.flush(async (i) => {
+      if (i.key === "bad") throw new OpsDeskApiError("POST /alerts/ingest -> 400", 400, "{}");
+      seen.push(i.key);
+    });
+    expect(seen).toEqual(["good"]);
+    expect(result).toMatchObject({ delivered: 1, remaining: 0 });
+    expect(result.rejected.map((r) => r.item.key)).toEqual(["bad"]);
+  });
+
+  it("keeps everything while the token is refused or the API is down", async () => {
+    for (const status of [401, 403, 429, 500, 503]) {
+      const b = new DeliveryBuffer(100);
+      b.enqueue(item("a"));
+      const result = await b.flush(async () => {
+        throw new OpsDeskApiError("nope", status, "");
+      });
+      expect(result).toMatchObject({ delivered: 0, remaining: 1, rejected: [] });
+    }
+    expect(isPermanentRejection(new Error("ECONNREFUSED"))).toBe(false);
   });
 });

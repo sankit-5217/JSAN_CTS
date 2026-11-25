@@ -70,7 +70,7 @@ describe("User admin API (e2e)", () => {
       displayName: "New Person",
       isActive: true,
       hasPassword: false,
-      socialProviders: [],
+      mustChangePassword: false,
       allSites: false,
       siteIds: [fx.site.id],
     });
@@ -106,7 +106,7 @@ describe("User admin API (e2e)", () => {
       .post("/api/v1/admin/users", {
         email: "scoped@example.com",
         displayName: "Scoped",
-        role: "SERVICE_DESK_NOC",
+        role: "INFRASTRUCTURE_LEAD",
         siteIds: [fx.site.id],
       })
       .expect(201);

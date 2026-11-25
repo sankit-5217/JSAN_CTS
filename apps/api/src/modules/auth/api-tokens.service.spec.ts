@@ -4,7 +4,7 @@ import { Request } from "express";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { ApiTokensService } from "./api-tokens.service";
-import { sha256 } from "./social/social-identity.service";
+import { sha256 } from "./token-hash";
 import { ApiTokenPassportStrategy } from "./strategies/api-token.strategy";
 
 const ACTOR = { actorId: "admin-1", correlationId: "c1" };
